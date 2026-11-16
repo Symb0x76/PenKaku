@@ -226,8 +226,13 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let connected = cx.update(|cx| device.read(cx).connected.clone());
         cx.update(|cx| {
             let profile = cx.global::<AppState>().settings.device.profile.clone();
-            let pages = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_core::gcode::emit(p, &profile)).collect();
-            device.update(cx, |d, cx| d.run(chixie_rs_device::device::Job { pages, first_page: 0 }, cx));
+            let codes: Vec<_> = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_core::gcode::emit_mapped(p, &profile)).collect();
+            let job = chixie_rs_device::device::Job {
+                pages: codes.iter().map(|c| c.text.clone()).collect(),
+                maps: codes.into_iter().map(|c| c.stroke_lines).collect(),
+                ..Default::default()
+            };
+            device.update(cx, |d, cx| d.run(job, cx));
         });
         let (mut sheet_prompts, mut recoveries) = (0, 0);
         for _ in 0..300 {

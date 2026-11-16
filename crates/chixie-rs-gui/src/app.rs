@@ -651,7 +651,7 @@ impl ChixieRsApp {
             }
         };
         self.show_pane = true;
-        let job = Job { pages: vec![gcode], first_page: here };
+        let job = Job { pages: vec![gcode], first_page: here, ..Default::default() };
         let Some(title) = title else {
             self.device.update(cx, |d, cx| d.run(job, cx));
             return;
@@ -687,7 +687,8 @@ impl ChixieRsApp {
             return;
         }
         let profile = cx.global::<AppState>().settings.device.profile.clone();
-        let pages: Vec<String> = chosen.iter().map(|p| gcode::emit(p, &profile)).collect();
+        let codes: Vec<gcode::PageCode> = chosen.iter().map(|p| gcode::emit_mapped(p, &profile)).collect();
+        let job = Job { pages: codes.iter().map(|c| c.text.clone()).collect(), first_page: first, maps: codes.into_iter().map(|c| c.stroke_lines).collect() };
         let pts = || chosen.iter().flat_map(|p| p.strokes.iter().flatten());
         let (w, h) = match pts().next() {
             Some(&(x, y)) => {
@@ -725,9 +726,9 @@ impl ChixieRsApp {
         let device = self.device.clone();
         window.open_alert_dialog(cx, move |a, _w, _cx| {
             let device = device.clone();
-            let pages = pages.clone();
+            let job = job.clone();
             a.title(title.clone()).description(desc.clone()).confirm().ok_text("开始").on_ok(move |_, _w, cx| {
-                device.update(cx, |d, cx| d.run(Job { pages: pages.clone(), first_page: first }, cx));
+                device.update(cx, |d, cx| d.run(job.clone(), cx));
                 true
             })
         });

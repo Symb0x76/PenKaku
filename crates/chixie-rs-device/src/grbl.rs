@@ -121,6 +121,8 @@ pub struct GrblStatus {
     pub state: String,
     pub mpos: Option<[f32; 3]>,
     pub wpos: Option<[f32; 3]>,
+    /// Work coordinate offset (`WCO:`), sent every few reports: work = machine − offset.
+    pub wco: Option<[f32; 3]>,
     /// Current feed (mm/min) from `FS:` or `F:`.
     pub feed: Option<f32>,
     /// `Bf:` (free planner blocks, free RX bytes); only when the board's `$10` mask enables it.
@@ -141,6 +143,7 @@ impl GrblStatus {
             match k {
                 "MPos" => st.mpos = xyz(v),
                 "WPos" => st.wpos = xyz(v),
+                "WCO" => st.wco = xyz(v),
                 "FS" | "F" => st.feed = v.split(',').next().and_then(|n| n.parse().ok()),
                 "Bf" => st.buf = v.split_once(',').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))),
                 _ => {}
@@ -441,6 +444,8 @@ pub(crate) mod fake {
         /// `?` replies: served after queued `replies` and pending `ok`s, like a real Grbl that
         /// answers status between acks but never starves them.
         pub status_q: VecDeque<String>,
+        /// The previous reply was a status: next comes an ack if one is due (they interleave).
+        pub status_turn_done: bool,
         /// Replies queued when a given line is received (before its `ok`), like `$$`.
         pub respond: Vec<(String, Vec<String>)>,
         /// 1-based received-line numbers whose `ok` is swallowed (lost on the wire).
@@ -460,6 +465,7 @@ pub(crate) mod fake {
                 status: "<Idle|MPos:0.000,0.000,0.000|FS:0,0>".into(),
                 drop_after: None,
                 status_q: VecDeque::new(),
+                status_turn_done: false,
                 respond: vec![("$G".into(), vec!["[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]".into()])],
                 drop_ok: Vec::new(),
             }
@@ -491,6 +497,15 @@ pub(crate) mod fake {
             if let Some(r) = self.replies.pop_front() {
                 return Ok(Some(r));
             }
+            // Like the real thing: a `?` is answered promptly, interleaved with queued acks
+            // (never starving them, never starved by them).
+            if !(self.status_turn_done && !self.pending.is_empty())
+                && let Some(s) = self.status_q.pop_front()
+            {
+                self.status_turn_done = true;
+                return Ok(Some(s));
+            }
+            self.status_turn_done = false;
             while self.pending.pop_front().is_some() {
                 self.received += 1;
                 if self.drop_ok.contains(&self.received) {
@@ -499,7 +514,7 @@ pub(crate) mod fake {
                 let r = if Some(self.received) == self.fail_on { "error:20" } else { "ok" };
                 return Ok(Some(r.into()));
             }
-            Ok(self.status_q.pop_front())
+            Ok(None)
         }
     }
 }
@@ -575,7 +590,7 @@ mod tests {
     #[test]
     fn polls_status_and_emits_it() {
         let mut f = Fake { status: "<Run|MPos:1.000,2.000,0.000>".into(), ..Default::default() };
-        // Short job: acks would drain before any queued `?` reply, so deliver one report first.
+        // Short job: deliver one report up front so at least one is seen.
         f.replies.push_back(f.status.clone());
         let ctl = Control { status_interval: Some(Duration::ZERO), ..Default::default() };
         let mut statuses = 0;
