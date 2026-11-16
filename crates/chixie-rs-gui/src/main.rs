@@ -281,6 +281,36 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             }
         }
         cx.update(|cx| println!("AUTOTEST_PATROL outcome={:?}", device.read(cx).last_end));
+        // 断点续写: select the 4th character, continue from it.
+        let mut keys: Vec<Box<dyn Action>> = vec![Box::new(doc_view::DocStart)];
+        keys.extend((0..3).map(|_| Box::new(doc_view::MoveRight) as Box<dyn Action>));
+        keys.push(Box::new(doc_view::SelectRight));
+        dispatch(cx, keys);
+        cx.background_executor().timer(pause(300)).await;
+        let _ = cx.update_window(handle, |_, window, cx| {
+            app.update(cx, |a, cx| {
+                a.open_resume(cx);
+                a.start_resume(window, cx);
+            })
+        });
+        for _ in 0..300 {
+            cx.background_executor().timer(pause(100)).await;
+            let awaiting = cx.update(|cx| device.read(cx).job.and_then(|j| j.awaiting));
+            if awaiting.is_some() {
+                let _ = cx.update_window(handle, |_, window, cx| {
+                    window.close_dialog(cx);
+                    device.update(cx, |d, cx| d.next_sheet(cx));
+                });
+            }
+            if cx.update(|cx| device.read(cx).job.is_none()) {
+                break;
+            }
+        }
+        cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx);
+            let sel = d.doc().selection();
+            println!("AUTOTEST_RESUME from={:?} outcome={:?}", d.doc().chars().get(sel.start), device.read(cx).last_end)
+        });
         // `SHOT_*` lines tell an outside script when to take a screenshot (state held 2.5 s).
         let shot = |name: &str| {
             use std::io::Write as _;

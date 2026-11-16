@@ -219,21 +219,23 @@ pub struct PageCode {
 
 impl PageCode {
     /// The body restarted at stroke `k`: the leading pen-up, then everything from that stroke's
-    /// travel on, byte-identical to the uninterrupted tail. `k >= strokes` gives just the pen-up.
-    pub fn from_stroke(&self, k: usize) -> String {
-        let mut lines = self.text.lines();
-        let mut out = String::new();
-        if let Some(first) = lines.next() {
-            out.push_str(first);
-            out.push('\n');
+    /// travel on, byte-identical to the uninterrupted tail, with its own resume map (strokes
+    /// renumbered from 0). `k >= strokes` gives just the pen-up.
+    pub fn from_stroke(&self, k: usize) -> PageCode {
+        let mut text = String::new();
+        if let Some(first) = self.text.lines().next() {
+            text.push_str(first);
+            text.push('\n');
         }
+        let mut stroke_lines = Vec::new();
         if let Some(&start) = self.stroke_lines.get(k) {
             for l in self.text.lines().skip(start) {
-                out.push_str(l);
-                out.push('\n');
+                text.push_str(l);
+                text.push('\n');
             }
+            stroke_lines = self.stroke_lines[k..].iter().map(|&s| s - start + 1).collect();
         }
-        out
+        PageCode { text, stroke_lines }
     }
 
     /// Stroke that line `line` belongs to (`None` for the leading pen-up).
@@ -325,10 +327,11 @@ mod tests {
         // pen-up, [G0, down, dwell, G1, G1, up], [up], [G0, down, dwell, G1, up]
         assert_eq!(pc.stroke_lines, vec![1, 7, 8]);
         assert!(lines[pc.stroke_lines[2]].starts_with("G0 X3.000"));
-        assert_eq!(pc.from_stroke(0), pc.text);
-        let tail = pc.from_stroke(2);
-        assert_eq!(tail, format!("{}\n{}\n", lines[0], lines[8..].join("\n")));
-        assert_eq!(pc.from_stroke(3), "G1G90 Z0 F8000\n");
+        assert_eq!(pc.from_stroke(0), pc);
+        let tail = pc.from_stroke(1);
+        assert_eq!(tail.text, format!("{}\n{}\n", lines[0], lines[7..].join("\n")));
+        assert_eq!(tail.stroke_lines, vec![1, 2]);
+        assert_eq!(pc.from_stroke(3).text, "G1G90 Z0 F8000\n");
         assert_eq!((pc.stroke_at(0), pc.stroke_at(1), pc.stroke_at(6), pc.stroke_at(7), pc.stroke_at(12)), (None, Some(0), Some(0), Some(1), Some(2)));
     }
 

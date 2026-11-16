@@ -4,13 +4,14 @@
 //! Session and device events are pumped here and fanned out to views + toasts.
 
 mod backstage;
+mod resume;
 mod ribbon_tabs;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use chixie_rs_core::config::import_chixie3;
-use chixie_rs_device::device::{Command as DevCommand, DeviceHandle, Event as DevEvent, Job};
+use chixie_rs_device::device::{Command as DevCommand, DeviceHandle, Event as DevEvent, Job, JobOutcome};
 use chixie_rs_device::job::{self, PatrolMode};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use chixie_rs_core::editor::EditDoc;
@@ -88,6 +89,8 @@ pub struct ChixieRsApp {
     zoom_slider: Entity<SliderState>,
     /// Last title pushed to the OS window (taskbar).
     win_title: String,
+    /// 断点续写 card and the break point of the last interrupted job.
+    pub(crate) resume: resume::Resume,
     _tasks: Vec<Task<()>>,
     _subs: Vec<Subscription>,
 }
@@ -148,6 +151,12 @@ impl ChixieRsApp {
                 }
             }),
             cx.observe(&device, |_, _, cx| cx.notify()),
+            // The 断点续写 card shows the selected character.
+            cx.observe(&doc, |t, _, cx| {
+                if t.resume.open {
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(&font_size, window, |this, s, ev: &InputEvent, _w, cx| {
                 if let (InputEvent::Change, Some(v)) = (ev, parse_in(s, cx, 5.0, 1000.0)) {
                     this.edit_settings(cx, |st| st.settings.page.font_size = v);
@@ -206,6 +215,7 @@ impl ChixieRsApp {
             file: None,
             zoom_slider,
             win_title: String::new(),
+            resume: Default::default(),
             _tasks: vec![pump, dev_pump, autosave],
             _subs: subs,
         }
@@ -651,6 +661,7 @@ impl ChixieRsApp {
             }
         };
         self.show_pane = true;
+        self.resume.job_started(None);
         let job = Job { pages: vec![gcode], first_page: here, ..Default::default() };
         let Some(title) = title else {
             self.device.update(cx, |d, cx| d.run(job, cx));
@@ -688,6 +699,8 @@ impl ChixieRsApp {
         }
         let profile = cx.global::<AppState>().settings.device.profile.clone();
         let codes: Vec<gcode::PageCode> = chosen.iter().map(|p| gcode::emit_mapped(p, &profile)).collect();
+        let ids = self.doc.read(cx).doc().ids().to_vec();
+        self.resume.job_started(Some(resume::JobMeta::new(first, &codes, chosen, &ids)));
         let job = Job { pages: codes.iter().map(|c| c.text.clone()).collect(), first_page: first, maps: codes.into_iter().map(|c| c.stroke_lines).collect() };
         let pts = || chosen.iter().flat_map(|p| p.strokes.iter().flatten());
         let (w, h) = match pts().next() {
@@ -735,12 +748,30 @@ impl ChixieRsApp {
     }
 
     fn on_device_event(&mut self, ev: DevEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let at = {
+            let doc = self.doc.read(cx).doc();
+            self.resume.observe(&ev, doc.chars(), doc.ids())
+        };
+        let interrupted = matches!(&ev, DevEvent::JobEnded { outcome: JobOutcome::Stopped | JobOutcome::Failed(_), .. });
         let notice = self.device.update(cx, |d, cx| d.on_event(ev, cx));
         match notice {
             Notice::None => {}
             Notice::Info(m) => window.push_notification(Notification::info(m), cx),
-            Notice::Warn(m) => window.push_notification(Notification::warning(m), cx),
-            Notice::Error(m) => window.push_notification(Notification::error(m), cx),
+            Notice::Warn(m) => {
+                let m = match at {
+                    Some(c) if interrupted => format!("{m}。如需续写，可用「断点续写」（已记住「{c}」）"),
+                    Some(c) => format!("{m}（将从「{c}」所在笔画继续）"),
+                    None => m,
+                };
+                window.push_notification(Notification::warning(m), cx)
+            }
+            Notice::Error(m) => {
+                let m = match at {
+                    Some(c) if interrupted => format!("{m}。如需续写，可用「断点续写」（已记住「{c}」）"),
+                    _ => m,
+                };
+                window.push_notification(Notification::error(m), cx)
+            }
             Notice::Alarm(m) => {
                 let device = self.device.clone();
                 let n = Notification::warning(m).action(move |_, _, _| {
@@ -1035,6 +1066,7 @@ impl ChixieRsApp {
                         cx.notify();
                     }))),
             )
+            .when(self.resume.open, |el| el.child(self.resume_card(cx)))
             .child(div().flex_1().min_h_0().child(self.device.clone()))
             .into_any_element()
     }
