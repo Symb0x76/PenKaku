@@ -151,5 +151,27 @@
     `AUTOTEST_DEVICE … recoveries=` and `AUTOTEST_PATROL`.
 - Open: hardware checklist #1–#15 (BOSS), especially Telnet (#12, #15), the 20-page job (#14),
   and whether a real USB drop reboots the board (decides how often #11 needs a re-zero).
-- Next: BOSS hardware run (fixes go straight on master) → M2 (document model v2 + resume).
+- Dependabot (2026-11-16): rustls 0.23.46, quinn-proto 0.11.19 (`7378993`), all 5 alerts fixed.
+- **M2 code done (2026-11-16), branch `m2-doc-resume`** (plan in `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
+  - Resume map: `layout::Page.stroke_chars` (char per stroke), `gcode::emit_mapped` → `PageCode
+    { text, stroke_lines }`, `PageCode::from_stroke(k)` (pen-up + identical tail, remapped).
+  - Line-exact resume: `Job.maps`; actor tracks work XY (WPos or MPos−WCO), and after a drop
+    `device::resume_at` picks the stroke under the head among those the acks allow (earliest on
+    crossing strokes, next one if at a stroke's end; 2 mm tolerance, else M1 `resume_point`).
+    Board kept power → position read after reconnecting.
+  - Fake Grbl now interleaves `?` replies with acks (it used to starve them).
+  - GUI 断点续写 (`app/resume.rs`): card in the task pane, ChiXie3 validation texts, remembers the
+    break character (by id) from stop/error/reconnect; autotest `AUTOTEST_RESUME`.
+  - New crate `chixie-rs-doc`: `Document` (chars + ids + interned `Attrs` + `Para`), `Command`
+    (Splice/SetAttrs/SetParas, apply returns inverse), `EditDoc` moved from core (undo = inverse
+    commands; same API + `set_attrs`/`set_align`); proptest undo/redo property.
+  - DOCX (`docx.rs`, zip 9 + quick-xml 0.41): runs/paragraphs for Word, custom XML part
+    `urn:chixie-rs:doc:1` with seed/ids/exact attrs; prefix/suffix id recovery after outside edits;
+    `.chx` v1 + old `draft.chx` migrate; draft is `draft.docx`; golden: G-code identical after a
+    round trip; `AUTOTEST_DOCX`.
+  - Attribute UI (font/size/colour per run) is NOT in M2: model + file only; layout still uses the
+    document font/size (M3/M4/M6).
+- Open (BOSS): checklist #10/#11/#11b/#11c on hardware; open a saved .docx in Word, WPS and
+  LibreOffice, save from Word, reopen in chixie-rs (ids/seed must survive).
+- Next: merge M2 after review → M3 (typesetting parity).
 

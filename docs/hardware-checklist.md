@@ -23,8 +23,10 @@ Keep a hand near the power switch for the first run after any device-code change
 | 8 | Stop | 停止 mid-job | head stops, pen lifts, parks at X0 Y0; no alarm left | |
 | 9 | Alarm and unlock | trigger an alarm (e.g. soft-limit jog) | toast "设备报警：ALARM:n …" in Chinese with 解锁; 解锁 clears it | |
 | 10 | USB drop | pull the USB cable mid-job, plug it back in within 60 s | toast with page and line; task pane shows 正在自动重连; reconnects by itself (COM number may change) | |
-| 11 | Resume after drop | after #10: if the pane says the board rebooted, jog to the paper origin, 设为原点; then 继续书写 | continues a few strokes before the interruption (those are traced again); nothing missing | |
+| 11 | Resume after drop | after #10: if the pane says the board rebooted, jog to the paper origin, 设为原点; then 继续书写 | toast names the character (将从「X」所在笔画继续); writing restarts at the stroke the pen was on: no stroke before it is drawn again, nothing missing (at most that one stroke is retraced) | |
 | 11a | Drop during sheet change | pull USB while the 换纸 prompt is open, replug, 继续书写 | the 换纸 prompt comes back before the next page starts | |
+| 11b | 断点续写 by character | 停止 mid-page; 书写 › 断点续写; the card pre-selects the remembered character; or select another single character; 开始续写 | continues that page from the character's first stroke, then the following pages with sheet prompts; selecting two characters or a space shows the ChiXie3 message and keeps 开始续写 disabled | |
+| 11c | Resume, board kept power | pull only the USB data line (board powered separately) mid-page, replug, 继续书写 | no re-zero needed; resumes at the stroke the head stopped on (position read after reconnecting) | |
 | 12 | Wireless | same board over Wi-Fi/Telnet (M1) | connects; a short job writes as over USB | |
 | 13 | Templates | one 信纸 and one 作文格 page | text sits on the printed lines / in the cells (± 0.5 mm) | |
 | 14 | Long job | 20 pages, sheets changed promptly (M1 done-when) | completes with only sheet changes; no stalls, no drift between pages | |
