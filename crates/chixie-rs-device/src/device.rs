@@ -745,9 +745,9 @@ mod tests {
         (h, ev, shared)
     }
 
-    /// Next event matching `f`, skipping status/log noise. Panics after 5 s.
+    /// Next event matching `f`, skipping status/log noise. Panics after 30 s (slow CI runners: macOS sleeps overshoot).
     fn wait_for(ev: &async_channel::Receiver<Event>, f: impl Fn(&Event) -> bool) -> Event {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             match ev.try_recv() {
                 Ok(e) if f(&e) => return e,
