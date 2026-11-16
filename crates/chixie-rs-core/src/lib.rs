@@ -8,7 +8,6 @@ pub mod chixie3_templates;
 pub mod config;
 pub mod credentials;
 pub mod deformation;
-pub mod editor;
 pub mod font;
 pub mod font_store;
 pub mod gcode;

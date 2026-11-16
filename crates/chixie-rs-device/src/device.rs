@@ -54,6 +54,9 @@ pub struct Job {
     pub pages: Vec<String>,
     /// Document page number of `pages[0]` (书写此页 / 从第 N 页), so events name real pages.
     pub first_page: usize,
+    /// Resume map per page: line index of each stroke's travel `G0` (`gcode::PageCode::
+    /// stroke_lines`). Missing or empty → resume falls back to [`resume_point`].
+    pub maps: Vec<Vec<usize>>,
 }
 
 #[derive(Debug)]
@@ -141,6 +144,94 @@ pub fn resume_point(lines: &[String], acked: usize, pen_up: &str) -> usize {
     lines[..surely_drawn].iter().rposition(|l| l.starts_with(pen_up)).unwrap_or(0)
 }
 
+/// How far (mm) the reported head position may lie from every candidate stroke before the
+/// position is distrusted and resume falls back to [`resume_point`].
+const RESUME_TOLERANCE_MM: f32 = 2.0;
+/// Lines that may sit in the controller's RX buffer beyond the last ack (128 bytes).
+const RX_DEPTH: usize = 8;
+
+/// Line-exact resume (断点续写): restart at the stroke the head was on when the link dropped.
+/// `strokes` is the page's resume map (line of each stroke's `G0`), `at` the head's work XY (last
+/// report before the drop, or after reconnecting if the board kept power). Candidates are the
+/// strokes the head could be on given the acks; the nearest one wins (the later on a tie: being
+/// at a stroke's end means it is done). Returns the pen-up line before that stroke, so the
+/// stream is pen up + travel + the identical tail. Without a usable map or position, or when the
+/// position fits no candidate, falls back to the conservative [`resume_point`].
+pub fn resume_at(lines: &[String], strokes: &[usize], acked: usize, at: Option<(f32, f32)>, pen_up: &str) -> usize {
+    let fallback = resume_point(lines, acked, pen_up);
+    let (Some(at), Some(&last)) = (at, strokes.last()) else { return fallback };
+    if acked == 0 || last >= lines.len() || strokes.iter().any(|&s| s == 0 || !lines[s - 1].starts_with(pen_up)) {
+        return fallback;
+    }
+    let stroke_of = |line: usize| strokes.partition_point(|&s| s <= line).checked_sub(1);
+    let lo = stroke_of(acked.saturating_sub(PLANNER_DEPTH + 1)).unwrap_or(0);
+    let Some(hi) = stroke_of((acked - 1 + RX_DEPTH).min(lines.len() - 1)) else { return fallback };
+    // (distance to travel-in + stroke, distance to the stroke's last point) per candidate.
+    let mut cand = Vec::new();
+    let mut prev_end = lo.checked_sub(1).and_then(|p| stroke_points(lines, strokes, p).last().copied());
+    for k in lo..=hi {
+        let pts = stroke_points(lines, strokes, k);
+        // The travel into the stroke counts as part of it (the pen is up there).
+        let path: Vec<(f32, f32)> = prev_end.into_iter().chain(pts.iter().copied()).collect();
+        // A dot (start = end) can't tell drawn from not yet drawn: never counts as finished.
+        let end = match (pts.first(), pts.last()) {
+            (Some(&s), Some(&e)) if s != e => dist_to_path(at, &[e]),
+            _ => f32::MAX,
+        };
+        cand.push((k, dist_to_path(at, &path), end));
+        prev_end = pts.last().copied().or(prev_end);
+    }
+    const EPS: f32 = 0.05;
+    let best = cand.iter().map(|c| c.1).fold(f32::MAX, f32::min);
+    if best > RESUME_TOLERANCE_MM {
+        return fallback;
+    }
+    // Earliest match: strokes cross, and a later stroke through the same point is not drawn yet.
+    let &(k, _, end) = cand.iter().find(|c| c.1 <= best + EPS).expect("best comes from cand");
+    if end <= best + EPS {
+        // At the stroke's last point: it is finished; go on with the next one.
+        return strokes.get(k + 1).map_or(lines.len() - 1, |&s| s - 1);
+    }
+    strokes[k] - 1
+}
+
+/// Work XY from a status report: `WPos`, or `MPos` minus the work offset.
+fn work_xy(st: &GrblStatus, wco: [f32; 3]) -> Option<(f32, f32)> {
+    st.wpos.map(|w| (w[0], w[1])).or_else(|| st.mpos.map(|m| (m[0] - wco[0], m[1] - wco[1])))
+}
+
+/// XY of every `G0`/`G1` move in stroke `k`.
+fn stroke_points(lines: &[String], strokes: &[usize], k: usize) -> Vec<(f32, f32)> {
+    let end = strokes.get(k + 1).copied().unwrap_or(lines.len());
+    lines[strokes[k]..end].iter().filter_map(|l| move_xy(l)).collect()
+}
+
+fn move_xy(line: &str) -> Option<(f32, f32)> {
+    if !(line.starts_with("G0 ") || line.starts_with("G1 ")) {
+        return None;
+    }
+    let word = |a: char| -> Option<f32> {
+        let rest = &line[line.find(a)? + 1..];
+        let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).unwrap_or(rest.len());
+        rest[..end].parse().ok()
+    };
+    Some((word('X')?, word('Y')?))
+}
+
+fn dist_to_path(p: (f32, f32), path: &[(f32, f32)]) -> f32 {
+    let seg = |a: (f32, f32), b: (f32, f32)| {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > 0.0 { (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        ((p.0 - a.0 - t * dx).powi(2) + (p.1 - a.1 - t * dy).powi(2)).sqrt()
+    };
+    match path {
+        [] => f32::MAX,
+        [a] => seg(*a, *a),
+        _ => path.windows(2).map(|w| seg(w[0], w[1])).fold(f32::MAX, f32::min),
+    }
+}
+
 /// `0.0` → "0", `-20.0` → "-20", `12.5` → "12.5" (keeps the historical `X0Y0` literal).
 fn fmt_mm(v: f32) -> String {
     let s = format!("{:.3}", v + 0.0); // + 0.0 turns -0.0 into 0.0
@@ -198,7 +289,7 @@ pub fn spawn(opener: Opener) -> (DeviceHandle, async_channel::Receiver<Event>, J
     let (tx, rx) = mpsc::channel();
     let (ev_tx, ev_rx) = async_channel::unbounded();
     let ctl = Arc::new(Control::default());
-    let actor = Actor { opener, rx, ev: ev_tx, ctl: ctl.clone(), link: None, profile: DeviceProfile::default(), target: None, last_mpos: None, quit: false };
+    let actor = Actor { opener, rx, ev: ev_tx, ctl: ctl.clone(), link: None, profile: DeviceProfile::default(), target: None, last_mpos: None, last_wco: [0.0; 3], last_at: None, quit: false };
     let join = std::thread::Builder::new()
         .name("chixie-device".into())
         .spawn(move || actor.run())
@@ -217,6 +308,10 @@ struct Actor {
     target: Option<Target>,
     /// Last machine position reported during a job (reboot detection).
     last_mpos: Option<[f32; 3]>,
+    /// Latest work coordinate offset (`WCO:`); zero until the board reports one.
+    last_wco: [f32; 3],
+    /// Last work XY seen during a job (resume: where the head was).
+    last_at: Option<(f32, f32)>,
     /// Shutdown arrived while a job was recovering.
     quit: bool,
 }
@@ -355,6 +450,7 @@ impl Actor {
         // Drop sheet-change wakeups queued before this job started.
         while let Ok(Command::Stop | Command::NextSheet | Command::ResumeJob) = self.rx.try_recv() {}
         self.last_mpos = None;
+        self.last_at = None;
         self.run_pages(&job, 0, None);
     }
 
@@ -381,6 +477,7 @@ impl Actor {
             };
             let mut acked = skip;
             let mut mpos = None;
+            let (mut wco, mut at) = (self.last_wco, self.last_at);
             let ev = self.ev.clone();
             let feed = prelude.iter().copied().chain(lines[skip..].iter().map(String::as_str));
             let link = self.link.as_mut().expect("checked by require_link").as_mut();
@@ -392,6 +489,8 @@ impl Actor {
                     }
                     StreamEvent::Status(st) => {
                         mpos = st.mpos.or(mpos);
+                        wco = st.wco.unwrap_or(wco);
+                        at = work_xy(&st, wco).or(at);
                         Event::Status(st)
                     }
                     StreamEvent::Message(line) => Event::Log { dir: Dir::Rx, line },
@@ -400,6 +499,7 @@ impl Actor {
                 let _ = ev.send_blocking(out);
             });
             self.last_mpos = mpos.or(self.last_mpos);
+            (self.last_wco, self.last_at) = (wco, at);
             match r {
                 Ok(()) => {}
                 Err(Error::Cancelled) => return self.end_stopped(page, acked),
@@ -459,7 +559,12 @@ impl Actor {
         };
 
         let lines: Vec<String> = job.pages[i].lines().filter_map(grbl::clean_line).collect();
-        let start = resume_point(&lines, acked, &self.profile.pen_up_cmd());
+        // The map indexes raw lines; it only holds if cleaning dropped none (true for `emit`).
+        let map = match job.maps.get(i) {
+            Some(m) if job.pages[i].lines().count() == lines.len() => m.as_slice(),
+            _ => &[],
+        };
+        let start = resume_at(&lines, map, acked, self.last_at, &self.profile.pen_up_cmd());
         self.emit(Event::Recovered { page, line: start, rebooted });
         self.ctl.reset();
         loop {
@@ -523,6 +628,10 @@ impl Actor {
         let near0 = |p: [f32; 3]| p[0].abs() < 0.01 && p[1].abs() < 0.01;
         if let (Some(now), Some(before)) = (now_at, self.last_mpos) {
             rebooted |= near0(now) && !near0(before);
+        }
+        // Kept power: the board finished what it had buffered, so where it stands now is exact.
+        if !rebooted && let Some(now) = now_at {
+            self.last_at = Some((now[0] - self.last_wco[0], now[1] - self.last_wco[1]));
         }
         self.emit(Event::Connected { port, info });
         Ok(rebooted)
@@ -636,9 +745,9 @@ mod tests {
         (h, ev, shared)
     }
 
-    /// Next event matching `f`, skipping status/log noise. Panics after 5 s.
+    /// Next event matching `f`, skipping status/log noise. Panics after 30 s (slow CI runners: macOS sleeps overshoot).
     fn wait_for(ev: &async_channel::Receiver<Event>, f: impl Fn(&Event) -> bool) -> Event {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             match ev.try_recv() {
                 Ok(e) if f(&e) => return e,
@@ -783,6 +892,68 @@ mod tests {
         assert_eq!(resume_point(&custom, 4 + PLANNER_DEPTH + 1, "M3 S0"), 4);
     }
 
+    /// Map of `stroke_page`: stroke `k`'s `G0` is line `1 + 5k`.
+    fn stroke_map(n: usize) -> Vec<usize> {
+        (0..n).map(|k| 1 + 5 * k).collect()
+    }
+
+    #[test]
+    fn resume_at_picks_the_stroke_under_the_head() {
+        let l = lines_of(&stroke_page(20));
+        let (m, up) = (stroke_map(20), "G1G90 Z0");
+        // acked 60: the head is somewhere on lines 43..68 → strokes 8..13.
+        assert_eq!(resume_at(&l, &m, 60, Some((10.0, 1.5)), up), 50, "mid stroke 10 → its pen-up");
+        assert!(l[50].starts_with(up) && l[51].starts_with("G0 X10.000"));
+        assert_eq!(resume_at(&l, &m, 60, Some((10.0, 2.0)), up), 55, "at stroke 10's end → stroke 11");
+        assert_eq!(resume_at(&l, &m, 60, Some((10.5, 1.0)), up), 55, "travelling into stroke 11");
+        // Far from every candidate (wrong offset, other page …) → conservative fallback.
+        assert_eq!(resume_at(&l, &m, 60, Some((100.0, 100.0)), up), resume_point(&l, 60, up));
+        assert_eq!(resume_at(&l, &m, 60, None, up), resume_point(&l, 60, up));
+        assert_eq!(resume_at(&l, &[], 60, Some((10.0, 1.5)), up), resume_point(&l, 60, up));
+        // A position outside the acked window never skips ahead to it.
+        assert_eq!(resume_at(&l, &m, 60, Some((19.0, 1.5)), up), resume_point(&l, 60, up));
+    }
+
+    #[test]
+    fn resume_at_prefers_the_earlier_of_crossing_strokes() {
+        // Stroke 0 runs (0,0)→(4,0); stroke 1 crosses it at (2,0) going (2,-2)→(2,2).
+        let body = "G1G90 Z0 F8000\nG0 X0.000 Y0.000\nG1G90 Z2 F8000\nG1 X4.000 Y0.000 F3000\nG1G90 Z0 F8000\n\
+                    G0 X2.000 Y-2.000\nG1G90 Z2 F8000\nG1 X2.000 Y2.000 F3000\nG1G90 Z0 F8000\n";
+        let l = lines_of(body);
+        assert_eq!(resume_at(&l, &[1, 5], 8, Some((2.0, 0.0)), "G1G90 Z0"), 0, "stroke 0 may be unfinished");
+    }
+
+    #[test]
+    fn usb_drop_resumes_at_the_interrupted_stroke() {
+        for reboot in [true, false] {
+            let body = stroke_page(40); // 201 lines
+            // The head reports mid stroke 15 (lines 76..81); the link dies after 1 + 80 lines.
+            let status = "<Run|MPos:15.000,1.500,0.000>";
+            let (h, ev, fake) = start_slow(Fake { drop_after: Some(81), status: status.into(), ..Default::default() }, Duration::from_millis(15));
+            wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
+            h.send(Command::Run(Job { pages: vec![body.clone()], maps: vec![stroke_map(40)], ..Default::default() }));
+            wait_for(&ev, |e| matches!(e, Event::Disconnected { .. }));
+            {
+                let mut f = fake.lock().unwrap();
+                f.drop_after = None;
+                if reboot {
+                    f.replies.push_back("Grbl 1.3a ['$' for help]".into());
+                }
+            }
+            let Event::Recovered { line, rebooted, .. } = wait_for(&ev, |e| matches!(e, Event::Recovered { .. })) else { unreachable!() };
+            assert_eq!((line, rebooted), (75, reboot));
+            let sent_before = fake.lock().unwrap().lines.len();
+            h.send(Command::ResumeJob);
+            wait_for(&ev, |e| matches!(e, Event::JobEnded { outcome: JobOutcome::Done, .. }));
+            h.send(Command::Shutdown);
+            let f = fake.lock().unwrap();
+            // Pen up, travel to stroke 15, then the identical tail; nothing before it again.
+            let want: Vec<String> = std::iter::once("G90".to_string()).chain(lines_of(&body)[75..].iter().cloned()).collect();
+            assert_eq!(&f.lines[sent_before..sent_before + want.len()], &want[..]);
+            assert_eq!(f.lines[sent_before + 2], "G0 X15.000 Y0.000");
+        }
+    }
+
     #[test]
     fn usb_drop_reconnects_and_resumes() {
         let body = stroke_page(40); // 201 lines
@@ -846,7 +1017,7 @@ mod tests {
     fn first_page_offsets_events() {
         let (h, ev, _fake) = start(Fake::default());
         wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
-        h.send(Command::Run(Job { pages: vec![page(2), page(2)], first_page: 3 }));
+        h.send(Command::Run(Job { pages: vec![page(2), page(2)], first_page: 3, ..Default::default() }));
         assert!(matches!(wait_for(&ev, |e| matches!(e, Event::Progress { .. })), Event::Progress { page: 3, pages: 5, .. }));
         assert_eq!(wait_for(&ev, |e| matches!(e, Event::AwaitingSheet { .. })), Event::AwaitingSheet { next: 4 });
         h.send(Command::NextSheet);

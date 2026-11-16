@@ -1,16 +1,22 @@
-//! Editable text model behind the WYSIWYG page editor.
+//! Editable document behind the WYSIWYG page editor: a [`Document`] plus caret, selection, IME
+//! composition and undo history.
 //!
-//! Text is a `Vec<char>` with a parallel `Vec<u64>` of stable ids: each character keeps the id it
-//! was inserted with, and `layout::layout_ids` keys its handwriting randomness by that id, so
-//! editing never reshuffles the rest of the page. Positions are char indices (`0..=len`); the
-//! IME bridge converts to/from UTF-16 with [`EditDoc::to_utf16`] / [`EditDoc::from_utf16`].
+//! Each character keeps the id it was inserted with, and `layout::layout_ids` keys its
+//! handwriting randomness by that id, so editing never reshuffles the rest of the page.
+//! Positions are char indices (`0..=len`); the IME bridge converts to/from UTF-16 with
+//! [`EditDoc::to_utf16`] / [`EditDoc::from_utf16`]. Undo stores the inverse [`Command`]s of each
+//! step, grouped like Word: a typing (or deleting) burst and an IME composition are one step.
 
 use std::ops::Range;
 
-#[derive(Debug, Clone, PartialEq)]
-struct Snapshot {
-    chars: Vec<char>,
-    ids: Vec<u64>,
+use chixie_rs_core::handwriting::is_cjk;
+
+use crate::model::{Align, Attrs, Command, Document, Para};
+
+/// One undo (or redo) step: commands to apply in reverse order, and the selection to restore.
+#[derive(Debug, Clone)]
+struct Step {
+    cmds: Vec<Command>,
     caret: usize,
     anchor: Option<usize>,
 }
@@ -25,16 +31,14 @@ enum LastEdit {
 
 #[derive(Debug, Clone)]
 pub struct EditDoc {
-    chars: Vec<char>,
-    ids: Vec<u64>,
-    next_id: u64,
+    doc: Document,
     caret: usize,
     /// Selection anchor; the selection is between anchor and caret.
     anchor: Option<usize>,
-    /// IME composition range (char indices), part of `chars` while composing.
+    /// IME composition range (char indices), part of the text while composing.
     marked: Option<Range<usize>>,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
     last: LastEdit,
 }
 
@@ -42,39 +46,42 @@ const UNDO_LIMIT: usize = 500;
 
 impl Default for EditDoc {
     fn default() -> Self {
-        Self::from_parts(Vec::new(), Vec::new())
+        Self::from_document(Document::default())
     }
 }
 
 impl EditDoc {
     pub fn from_text(text: &str) -> Self {
-        let chars: Vec<char> = text.chars().collect();
-        let ids = (0..chars.len() as u64).collect();
-        Self::from_parts(chars, ids)
+        Self::from_document(Document::from_text(text))
     }
 
     /// Restore a saved document (ids must match chars one to one; otherwise they are renumbered).
     pub fn from_parts(chars: Vec<char>, ids: Vec<u64>) -> Self {
-        let ids = if ids.len() == chars.len() { ids } else { (0..chars.len() as u64).collect() };
-        let next_id = ids.iter().max().map_or(0, |m| m + 1);
-        let caret = chars.len();
-        Self { chars, ids, next_id, caret, anchor: None, marked: None, undo: Vec::new(), redo: Vec::new(), last: LastEdit::None }
+        Self::from_document(Document::from_parts(chars, ids))
     }
 
+    pub fn from_document(doc: Document) -> Self {
+        let caret = doc.len();
+        Self { doc, caret, anchor: None, marked: None, undo: Vec::new(), redo: Vec::new(), last: LastEdit::None }
+    }
+
+    pub fn document(&self) -> &Document {
+        &self.doc
+    }
     pub fn chars(&self) -> &[char] {
-        &self.chars
+        self.doc.chars()
     }
     pub fn ids(&self) -> &[u64] {
-        &self.ids
+        self.doc.ids()
     }
     pub fn text(&self) -> String {
-        self.chars.iter().collect()
+        self.doc.text()
     }
     pub fn len(&self) -> usize {
-        self.chars.len()
+        self.doc.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.chars.is_empty()
+        self.doc.is_empty()
     }
     pub fn caret(&self) -> usize {
         self.caret
@@ -98,7 +105,7 @@ impl EditDoc {
         self.anchor.is_some_and(|a| a > self.caret)
     }
     pub fn selected_text(&self) -> String {
-        self.chars[self.selection()].iter().collect()
+        self.chars()[self.selection()].iter().collect()
     }
 
     /// Move the caret; `extend` keeps/starts a selection from the current anchor.
@@ -138,76 +145,86 @@ impl EditDoc {
 
     /// Word boundaries: CJK characters are one word each; runs of other non-space chars are words.
     pub fn word_left(&self, i: usize) -> usize {
+        let c = self.chars();
         let mut j = i;
-        while j > 0 && self.chars[j - 1].is_whitespace() {
+        while j > 0 && c[j - 1].is_whitespace() {
             j -= 1;
         }
-        if j > 0 && crate::handwriting::is_cjk(self.chars[j - 1]) {
+        if j > 0 && is_cjk(c[j - 1]) {
             return j - 1;
         }
-        while j > 0 && !self.chars[j - 1].is_whitespace() && !crate::handwriting::is_cjk(self.chars[j - 1]) {
+        while j > 0 && !c[j - 1].is_whitespace() && !is_cjk(c[j - 1]) {
             j -= 1;
         }
         j
     }
     pub fn word_right(&self, i: usize) -> usize {
-        let n = self.len();
+        let c = self.chars();
+        let n = c.len();
         let mut j = i;
-        if j < n && crate::handwriting::is_cjk(self.chars[j]) {
+        if j < n && is_cjk(c[j]) {
             return j + 1;
         }
-        while j < n && !self.chars[j].is_whitespace() && !crate::handwriting::is_cjk(self.chars[j]) {
+        while j < n && !c[j].is_whitespace() && !is_cjk(c[j]) {
             j += 1;
         }
-        while j < n && self.chars[j].is_whitespace() && self.chars[j] != '\n' {
+        while j < n && c[j].is_whitespace() && c[j] != '\n' {
             j += 1;
         }
         j
     }
     /// The word around `i` (for double-click).
     pub fn word_at(&self, i: usize) -> Range<usize> {
-        let i = i.min(self.len());
-        if i < self.len() && crate::handwriting::is_cjk(self.chars[i]) {
+        let c = self.chars();
+        let i = i.min(c.len());
+        if i < c.len() && is_cjk(c[i]) {
             return i..i + 1;
         }
         let (mut a, mut b) = (i, i);
-        while a > 0 && !self.chars[a - 1].is_whitespace() && !crate::handwriting::is_cjk(self.chars[a - 1]) {
+        while a > 0 && !c[a - 1].is_whitespace() && !is_cjk(c[a - 1]) {
             a -= 1;
         }
-        while b < self.len() && !self.chars[b].is_whitespace() && !crate::handwriting::is_cjk(self.chars[b]) {
+        while b < c.len() && !c[b].is_whitespace() && !is_cjk(c[b]) {
             b += 1;
         }
         a..b
     }
 
-    fn snapshot(&self) -> Snapshot {
-        Snapshot { chars: self.chars.clone(), ids: self.ids.clone(), caret: self.caret, anchor: self.anchor }
-    }
-
+    /// Open a new undo step unless this edit continues the current typing / deleting burst.
     fn checkpoint(&mut self, kind: LastEdit) {
-        // Consecutive typing (or deleting) without moving the caret is one undo step.
-        if kind != LastEdit::None && kind == self.last {
-            return;
-        }
-        self.undo.push(self.snapshot());
-        if self.undo.len() > UNDO_LIMIT {
-            self.undo.remove(0);
+        let coalesce = kind != LastEdit::None && kind == self.last && !self.undo.is_empty();
+        if !coalesce {
+            self.undo.push(Step { cmds: Vec::new(), caret: self.caret, anchor: self.anchor });
+            if self.undo.len() > UNDO_LIMIT {
+                self.undo.remove(0);
+            }
         }
         self.redo.clear();
         self.last = kind;
     }
 
-    /// Replace `range` with `text` (new ids), leaving the caret after the insertion.
+    /// Apply `cmd` and record its inverse in the current undo step.
+    fn exec(&mut self, cmd: Command) {
+        let inv = self.doc.apply(cmd);
+        if let Some(step) = self.undo.last_mut() {
+            step.cmds.push(inv);
+        }
+    }
+
+    /// Replace `range` with `text` (new ids, formatting of the text before), leaving the caret
+    /// after the insertion.
     fn splice(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
-        let new: Vec<char> = text.chars().collect();
-        let ids: Vec<u64> = (0..new.len() as u64).map(|k| self.next_id + k).collect();
-        self.next_id += new.len() as u64;
+        let attrs = self.doc.attrs_at(range.start);
+        let new = self.doc.new_chars(text, &attrs);
+        let n = new.len();
         let start = range.start;
-        self.chars.splice(range.clone(), new.iter().copied());
-        self.ids.splice(range, ids);
-        self.caret = start + new.len();
+        if !(range.is_empty() && n == 0) {
+            let cmd = self.doc.splice_cmd(range, new);
+            self.exec(cmd);
+        }
+        self.caret = start + n;
         self.anchor = None;
-        start..start + new.len()
+        start..start + n
     }
 
     /// Type or paste `text` over the selection (or at the caret).
@@ -241,27 +258,67 @@ impl EditDoc {
         self.delete_or(self.caret..to)
     }
 
+    /// Change the formatting of the selection (one undo step). No-op without a selection.
+    pub fn set_attrs(&mut self, f: impl Fn(&mut Attrs)) {
+        let sel = self.selection();
+        if sel.is_empty() {
+            return;
+        }
+        self.checkpoint(LastEdit::None);
+        let attrs = sel
+            .clone()
+            .map(|i| {
+                let mut a = self.doc.attrs(i).clone();
+                f(&mut a);
+                a
+            })
+            .collect();
+        self.exec(Command::SetAttrs { at: sel.start, attrs });
+    }
+
+    /// Align the paragraphs touched by the selection (or holding the caret).
+    pub fn set_align(&mut self, align: Align) {
+        self.set_paras(|p| p.align = align);
+    }
+
+    fn set_paras(&mut self, f: impl Fn(&mut Para)) {
+        let sel = self.selection();
+        let (a, b) = (self.doc.para_of(sel.start), self.doc.para_of(sel.end));
+        self.checkpoint(LastEdit::None);
+        let paras = self.doc.paras()[a..=b]
+            .iter()
+            .map(|p| {
+                let mut p = p.clone();
+                f(&mut p);
+                p
+            })
+            .collect();
+        self.exec(Command::SetParas { first: a, paras });
+    }
+
+    /// Apply a step's commands in reverse; returns the step that undoes this one.
+    fn replay(&mut self, step: Step) -> Step {
+        let back = Step { cmds: Vec::new(), caret: self.caret, anchor: self.anchor };
+        let cmds = step.cmds.into_iter().rev().map(|c| self.doc.apply(c)).collect();
+        self.caret = step.caret.min(self.len());
+        self.anchor = step.anchor.map(|a| a.min(self.len()));
+        self.marked = None;
+        self.last = LastEdit::None;
+        Step { cmds, ..back }
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(s) = self.undo.pop() else { return false };
-        self.redo.push(self.snapshot());
-        self.restore(s);
+        let r = self.replay(s);
+        self.redo.push(r);
         true
     }
 
     pub fn redo(&mut self) -> bool {
         let Some(s) = self.redo.pop() else { return false };
-        self.undo.push(self.snapshot());
-        self.restore(s);
+        let u = self.replay(s);
+        self.undo.push(u);
         true
-    }
-
-    fn restore(&mut self, s: Snapshot) {
-        self.chars = s.chars;
-        self.ids = s.ids;
-        self.caret = s.caret.min(self.chars.len());
-        self.anchor = s.anchor;
-        self.marked = None;
-        self.last = LastEdit::None;
     }
 
     // ---- IME composition (platform ranges are UTF-16; see to_utf16/from_utf16) ----
@@ -284,7 +341,7 @@ impl EditDoc {
 
     /// Commit: replace `range` (or the marked text, or the selection) with final `text`.
     pub fn commit_text(&mut self, range: Option<Range<usize>>, text: &str) {
-        // A composition already pushed its undo checkpoint when it started.
+        // A composition already opened its undo step when it started.
         let composing = self.marked.is_some();
         let r = range.or_else(|| self.marked.take()).unwrap_or_else(|| self.selection());
         if !composing {
@@ -300,13 +357,13 @@ impl EditDoc {
 
     /// Char index → UTF-16 offset.
     pub fn to_utf16(&self, i: usize) -> usize {
-        self.chars[..i.min(self.len())].iter().map(|c| c.len_utf16()).sum()
+        self.chars()[..i.min(self.len())].iter().map(|c| c.len_utf16()).sum()
     }
 
     /// UTF-16 offset → char index (offsets inside a surrogate pair round down).
     pub fn from_utf16(&self, u: usize) -> usize {
         let mut acc = 0;
-        for (i, c) in self.chars.iter().enumerate() {
+        for (i, c) in self.chars().iter().enumerate() {
             if acc + c.len_utf16() > u {
                 return i;
             }
@@ -382,6 +439,16 @@ mod tests {
     }
 
     #[test]
+    fn undo_restores_ids_and_redo_reuses_them() {
+        let mut d = EditDoc::from_text("ab");
+        d.insert("c");
+        let ids = d.ids().to_vec();
+        d.undo();
+        d.redo();
+        assert_eq!(d.ids(), &ids[..], "redo brings back the same characters, not new ones");
+    }
+
+    #[test]
     fn moving_breaks_the_typing_run() {
         let mut d = EditDoc::default();
         d.insert("a");
@@ -419,6 +486,23 @@ mod tests {
         assert_eq!(d.caret(), 2);
         assert!(d.undo());
         assert_eq!(d.text(), "你", "a composition is one undo step");
+    }
+
+    #[test]
+    fn formatting_is_undoable_and_inherited_by_typing() {
+        let mut d = EditDoc::from_text("abc");
+        d.select_range(0..3);
+        d.set_attrs(|a| a.colour = Some([0, 0, 255]));
+        d.move_to(3, false);
+        d.insert("d");
+        assert_eq!(d.document().attrs(3).colour, Some([0, 0, 255]), "typing continues the run");
+        d.set_align(Align::Center);
+        assert_eq!(d.document().paras()[0].align, Align::Center);
+        d.undo();
+        d.undo();
+        d.undo();
+        assert_eq!(d.document().attrs(0).colour, None);
+        assert_eq!(d.document().paras()[0].align, Align::Left);
     }
 
     #[test]

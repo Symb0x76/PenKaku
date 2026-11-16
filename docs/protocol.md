@@ -67,6 +67,13 @@ unlock with `$X` (reply contains `UNLOCKED`). Task = `initial_gcode` + per-page
 `body_gcode` + `end_gcode`; `change_pen_signal` between colours (multi-colour mode).
 Pause/resume/stop are Python-side (QWaitCondition), plus realtime `!` `~` `?` `0x18`.
 
+chixie-rs resume (M2): every page body comes with a map of the line where each stroke's `G0`
+starts, and each stroke knows its character. After a drop the actor takes the head's last work
+position (`WPos`, or `MPos` − `WCO`; Grbl_ESP32 reports `MPos` and sends `WCO` every few
+reports), or the position read after reconnecting when the board kept power, and restarts at the
+stroke under it among those the acks allow (up to 16 planner blocks + ~8 RX lines past the last
+`ok`). The stream is `G90`, the pen-up before that stroke, then the original lines unchanged.
+
 ## ESP32 config commands (serial, `wireless_esp32_setting_dialog`)
 
 | Cmd | Use |

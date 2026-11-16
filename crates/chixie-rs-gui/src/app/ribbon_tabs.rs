@@ -348,6 +348,11 @@ impl ChixieRsApp {
                             .disabled(!connected || running)
                             .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.start_job(JobScope::FromHere, w, cx)))
                             .into_any_element(),
+                        small("write-resume", "断点续写", IconName::Redo)
+                            .disabled(running)
+                            .tooltip("从选中的字符继续书写被中断的页面")
+                            .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.open_resume(cx)))
+                            .into_any_element(),
                     ]))
                     .child(
                         big(if paused { "resume" } else { "pause" }, if paused { "继续" } else { "暂停" }, if paused { IconName::Play } else { IconName::Pause })

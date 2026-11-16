@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn areas() {
-        let page = Page { strokes: vec![vec![(1.0, -2.0), (5.0, -1.0)]], guides: vec![seg((0.0, 0.0), (100.0, -80.0))] };
+        let page = Page { strokes: vec![vec![(1.0, -2.0), (5.0, -1.0)]], guides: vec![seg((0.0, 0.0), (100.0, -80.0))], ..Default::default() };
         assert_eq!(written_area(&page), Some((1.0, -2.0, 5.0, -1.0)));
         assert_eq!(template_area(&page), Some((0.0, -80.0, 100.0, 0.0)));
         assert_eq!(written_area(&Page::default()), None);

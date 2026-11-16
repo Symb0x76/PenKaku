@@ -21,6 +21,16 @@ pub struct Page {
     /// Template ruling (row lines, cell boxes, column dividers) in machine mm. Shown in the
     /// editor only; never written: templates describe pre-printed paper.
     pub guides: Vec<Guide>,
+    /// Character index (into the laid-out text) of each stroke; same length as `strokes` when
+    /// produced by `layout_ids`, empty for hand-built pages. The resume map (断点续写) uses it.
+    pub stroke_chars: Vec<usize>,
+}
+
+impl Page {
+    /// First stroke drawn for character `i` or any later one; `strokes.len()` if none.
+    pub fn first_stroke_from(&self, i: usize) -> usize {
+        self.stroke_chars.iter().position(|&c| c >= i).unwrap_or(self.strokes.len())
+    }
 }
 
 /// One ruling segment (machine mm).
@@ -399,6 +409,12 @@ impl Pen<'_> {
         self.line_start = next;
     }
 
+    /// Attribute every untagged stroke on the current page to character `i`.
+    fn tag_strokes(&mut self, i: usize) {
+        let n = self.page.strokes.len();
+        self.page.stroke_chars.resize(n, i);
+    }
+
     fn push_box(&mut self, x0: f32) {
         let ox = self.p.origin.0 + self.line_x;
         let line = self.doc.lines.len();
@@ -459,6 +475,10 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
     let (mut fresh_line, mut fresh_paragraph) = (true, true);
 
     for (i, (&ch, &id)) in chars.iter().zip(ids).enumerate() {
+        // Strokes so far belong to the previous character (before any page break below).
+        if i > 0 {
+            pen.tag_strokes(i - 1);
+        }
         if jitter_on && fresh_line && ch != '\n' {
             pen.cx = jit.line_start(id);
             if fresh_paragraph && let Some(indent) = jit.indent(id) {
@@ -570,6 +590,7 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
         prev = Some(ch);
     }
     pen.close_line(chars.len());
+    pen.tag_strokes(chars.len().saturating_sub(1));
     let mut doc = pen.doc;
     doc.pages.push(pen.page);
     doc
@@ -765,7 +786,24 @@ mod tests {
         let g = Glyph { advance: 3.0, strokes: vec![vec![(0.0, 0.0), (0.0, 2.0)]] };
         let p = PageParams { origin: (10.0, 50.0), ..Default::default() };
         let doc = layout("I", &font_with('I', g), &p);
-        assert_eq!(doc.pages, vec![Page { strokes: vec![vec![(10.0, 50.0), (10.0, 48.0)]], ..Default::default() }]);
+        assert_eq!(doc.pages, vec![Page { strokes: vec![vec![(10.0, 50.0), (10.0, 48.0)]], stroke_chars: vec![0], ..Default::default() }]);
+    }
+
+    #[test]
+    fn strokes_map_to_their_characters_across_pages() {
+        let g = Glyph { advance: 1.0, strokes: vec![vec![(0.0, 0.0)], vec![(0.5, 0.0)]] };
+        // Two lines per page: "..\n.\n." → page 0 holds chars 0,1,3; page 1 holds char 5.
+        let p = PageParams { line_height: 10.0, page: Some(PageBox { width: 100.0, height: 25.0 }), ..Default::default() };
+        let doc = layout("..\n.\n.", &font_with('.', g), &p);
+        assert_eq!(doc.pages.len(), 2);
+        assert_eq!(doc.pages[0].stroke_chars, vec![0, 0, 1, 1, 3, 3]);
+        assert_eq!(doc.pages[1].stroke_chars, vec![5, 5]);
+        for page in &doc.pages {
+            assert_eq!(page.stroke_chars.len(), page.strokes.len());
+        }
+        assert_eq!(doc.pages[0].first_stroke_from(1), 2);
+        assert_eq!(doc.pages[0].first_stroke_from(2), 4); // newline: next drawn char
+        assert_eq!(doc.pages[0].first_stroke_from(4), 6); // none left on this page
     }
 
     #[test]

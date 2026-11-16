@@ -33,7 +33,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use chixie_rs_core::config::Settings;
-use chixie_rs_core::editor::EditDoc;
+use chixie_rs_doc::EditDoc;
 use chixie_rs_core::session::{self, HEARTBEAT_EVERY};
 use chixie_rs_core::template::TemplateStore;
 use gpui_kit::component::WindowExt as _;
@@ -213,6 +213,14 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 files,
             );
         });
+        // DOCX: save the edited document and open it again; text, ids and seed must survive.
+        cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx).doc().clone();
+            let p = std::env::temp_dir().join("chixie-autotest.docx");
+            let back = file_ops::save(&p, &d, 4242).and_then(|()| file_ops::open(&p));
+            let same = back.as_ref().is_ok_and(|l| l.doc.text() == d.text() && l.doc.ids() == d.ids() && l.seed == Some(4242));
+            println!("AUTOTEST_DOCX round_trip={same}");
+        });
         // Device: connect to the simulator, write both pages with a sheet change in between.
         let device = cx.update(|cx| app.read(cx).device.clone());
         cx.update(|cx| {
@@ -226,8 +234,13 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let connected = cx.update(|cx| device.read(cx).connected.clone());
         cx.update(|cx| {
             let profile = cx.global::<AppState>().settings.device.profile.clone();
-            let pages = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_core::gcode::emit(p, &profile)).collect();
-            device.update(cx, |d, cx| d.run(chixie_rs_device::device::Job { pages, first_page: 0 }, cx));
+            let codes: Vec<_> = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_core::gcode::emit_mapped(p, &profile)).collect();
+            let job = chixie_rs_device::device::Job {
+                pages: codes.iter().map(|c| c.text.clone()).collect(),
+                maps: codes.into_iter().map(|c| c.stroke_lines).collect(),
+                ..Default::default()
+            };
+            device.update(cx, |d, cx| d.run(job, cx));
         });
         let (mut sheet_prompts, mut recoveries) = (0, 0);
         for _ in 0..300 {
@@ -276,6 +289,36 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             }
         }
         cx.update(|cx| println!("AUTOTEST_PATROL outcome={:?}", device.read(cx).last_end));
+        // 断点续写: select the 4th character, continue from it.
+        let mut keys: Vec<Box<dyn Action>> = vec![Box::new(doc_view::DocStart)];
+        keys.extend((0..3).map(|_| Box::new(doc_view::MoveRight) as Box<dyn Action>));
+        keys.push(Box::new(doc_view::SelectRight));
+        dispatch(cx, keys);
+        cx.background_executor().timer(pause(300)).await;
+        let _ = cx.update_window(handle, |_, window, cx| {
+            app.update(cx, |a, cx| {
+                a.open_resume(cx);
+                a.start_resume(window, cx);
+            })
+        });
+        for _ in 0..300 {
+            cx.background_executor().timer(pause(100)).await;
+            let awaiting = cx.update(|cx| device.read(cx).job.and_then(|j| j.awaiting));
+            if awaiting.is_some() {
+                let _ = cx.update_window(handle, |_, window, cx| {
+                    window.close_dialog(cx);
+                    device.update(cx, |d, cx| d.next_sheet(cx));
+                });
+            }
+            if cx.update(|cx| device.read(cx).job.is_none()) {
+                break;
+            }
+        }
+        cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx);
+            let sel = d.doc().selection();
+            println!("AUTOTEST_RESUME from={:?} outcome={:?}", d.doc().chars().get(sel.start), device.read(cx).last_end)
+        });
         // `SHOT_*` lines tell an outside script when to take a screenshot (state held 2.5 s).
         let shot = |name: &str| {
             use std::io::Write as _;

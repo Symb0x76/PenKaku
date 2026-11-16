@@ -4,16 +4,17 @@
 //! Session and device events are pumped here and fanned out to views + toasts.
 
 mod backstage;
+mod resume;
 mod ribbon_tabs;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use chixie_rs_core::config::import_chixie3;
-use chixie_rs_device::device::{Command as DevCommand, DeviceHandle, Event as DevEvent, Job};
+use chixie_rs_device::device::{Command as DevCommand, DeviceHandle, Event as DevEvent, Job, JobOutcome};
 use chixie_rs_device::job::{self, PatrolMode};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use chixie_rs_core::editor::EditDoc;
+use chixie_rs_doc::EditDoc;
 use chixie_rs_core::gcode;
 use chixie_rs_core::session::{Command, Event, FontListKind};
 use gpui_kit::assets::IconName;
@@ -83,11 +84,13 @@ pub struct ChixieRsApp {
     previews_pending: std::collections::HashSet<i64>,
     style_dialog: Entity<StyleDialog>,
     backstage_focus: FocusHandle,
-    /// Where 保存 writes; `None` until 另存为 / 打开 of a `.chx`.
+    /// Where 保存 writes; `None` until 另存为, or 打开 of one of our documents (`.chx` saves as `.docx`).
     file: Option<PathBuf>,
     zoom_slider: Entity<SliderState>,
     /// Last title pushed to the OS window (taskbar).
     win_title: String,
+    /// 断点续写 card and the break point of the last interrupted job.
+    pub(crate) resume: resume::Resume,
     _tasks: Vec<Task<()>>,
     _subs: Vec<Subscription>,
 }
@@ -102,8 +105,7 @@ impl ChixieRsApp {
     ) -> Self {
         let login = cx.new(|cx| LoginView::new(window, cx));
         let fonts = cx.new(|cx| FontsView::new(window, cx));
-        let draft = file_ops::draft_path(&cx.global::<AppState>().settings_path);
-        let initial = file_ops::open(&draft).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
+        let initial = file_ops::open_draft(&cx.global::<AppState>().settings_path).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
         let doc = cx.new(|cx| DocView::new(initial, window, cx));
         let page = cx.global::<AppState>().settings.page.clone();
         let font_size = cx.new(|cx| InputState::new(window, cx).step(5.0).min(5.0).max(1000.0).default_value(fmt_num(page.font_size)));
@@ -148,6 +150,12 @@ impl ChixieRsApp {
                 }
             }),
             cx.observe(&device, |_, _, cx| cx.notify()),
+            // The 断点续写 card shows the selected character.
+            cx.observe(&doc, |t, _, cx| {
+                if t.resume.open {
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(&font_size, window, |this, s, ev: &InputEvent, _w, cx| {
                 if let (InputEvent::Change, Some(v)) = (ev, parse_in(s, cx, 5.0, 1000.0)) {
                     this.edit_settings(cx, |st| st.settings.page.font_size = v);
@@ -206,6 +214,7 @@ impl ChixieRsApp {
             file: None,
             zoom_slider,
             win_title: String::new(),
+            resume: Default::default(),
             _tasks: vec![pump, dev_pump, autosave],
             _subs: subs,
         }
@@ -465,7 +474,7 @@ impl ChixieRsApp {
         }
         let st = cx.global::<AppState>();
         let path = file_ops::draft_path(&st.settings_path);
-        if let Err(e) = file_ops::save_chx(&path, self.doc.read(cx).doc(), st.settings.style.handwriting.seed) {
+        if let Err(e) = file_ops::save(&path, self.doc.read(cx).doc(), st.settings.style.handwriting.seed) {
             log::warn!("draft {}: {e}", path.display());
         }
     }
@@ -491,8 +500,14 @@ impl ChixieRsApp {
                     if let Some(seed) = l.seed {
                         app.edit_settings(cx, |st| st.settings.style.handwriting.seed = seed);
                     }
-                    let is_chx = l.seed.is_some();
-                    app.file = is_chx.then(|| path.clone());
+                    // Our own documents save back in place; a `.chx` becomes a `.docx` beside it.
+                    // Foreign files (Word, text) go through 另存为 so they are never overwritten.
+                    let ours = l.seed.is_some();
+                    app.file = ours.then(|| path.with_extension("docx"));
+                    if ours && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("chx")) {
+                        let to = path.with_extension("docx");
+                        window.push_notification(Notification::info(format!("旧格式 .chx 已打开，保存时将写入 {}", to.display())), cx);
+                    }
                     app.doc.update(cx, |d, cx| d.replace_doc(l.doc, cx));
                     app.close_backstage(window, cx);
                 }
@@ -506,7 +521,7 @@ impl ChixieRsApp {
         let doc = self.doc.read(cx).doc().clone();
         let seed = cx.global::<AppState>().settings.style.handwriting.seed;
         if let (false, Some(path)) = (save_as, self.file.clone()) {
-            let msg = match file_ops::save_chx(&path, &doc, seed) {
+            let msg = match file_ops::save(&path, &doc, seed) {
                 Ok(()) => Notification::success(format!("已保存 {}", path.display())),
                 Err(e) => Notification::error(format!("保存失败：{e}")),
             };
@@ -514,13 +529,13 @@ impl ChixieRsApp {
             self.close_backstage(window, cx);
             return;
         }
-        let rx = cx.prompt_for_new_path(&file_ops::documents_dir(), Some("文档.chx"));
+        let rx = cx.prompt_for_new_path(&file_ops::documents_dir(), Some("文档.docx"));
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(mut path))) = rx.await else { return };
             if path.extension().is_none() {
-                path.set_extension("chx");
+                path.set_extension("docx");
             }
-            let res = file_ops::save_chx(&path, &doc, seed);
+            let res = file_ops::save(&path, &doc, seed);
             let _ = this.update_in(cx, |app, window, cx| {
                 let msg = match res {
                     Ok(()) => {
@@ -651,7 +666,8 @@ impl ChixieRsApp {
             }
         };
         self.show_pane = true;
-        let job = Job { pages: vec![gcode], first_page: here };
+        self.resume.job_started(None);
+        let job = Job { pages: vec![gcode], first_page: here, ..Default::default() };
         let Some(title) = title else {
             self.device.update(cx, |d, cx| d.run(job, cx));
             return;
@@ -687,7 +703,10 @@ impl ChixieRsApp {
             return;
         }
         let profile = cx.global::<AppState>().settings.device.profile.clone();
-        let pages: Vec<String> = chosen.iter().map(|p| gcode::emit(p, &profile)).collect();
+        let codes: Vec<gcode::PageCode> = chosen.iter().map(|p| gcode::emit_mapped(p, &profile)).collect();
+        let ids = self.doc.read(cx).doc().ids().to_vec();
+        self.resume.job_started(Some(resume::JobMeta::new(first, &codes, chosen, &ids)));
+        let job = Job { pages: codes.iter().map(|c| c.text.clone()).collect(), first_page: first, maps: codes.into_iter().map(|c| c.stroke_lines).collect() };
         let pts = || chosen.iter().flat_map(|p| p.strokes.iter().flatten());
         let (w, h) = match pts().next() {
             Some(&(x, y)) => {
@@ -725,21 +744,39 @@ impl ChixieRsApp {
         let device = self.device.clone();
         window.open_alert_dialog(cx, move |a, _w, _cx| {
             let device = device.clone();
-            let pages = pages.clone();
+            let job = job.clone();
             a.title(title.clone()).description(desc.clone()).confirm().ok_text("开始").on_ok(move |_, _w, cx| {
-                device.update(cx, |d, cx| d.run(Job { pages: pages.clone(), first_page: first }, cx));
+                device.update(cx, |d, cx| d.run(job.clone(), cx));
                 true
             })
         });
     }
 
     fn on_device_event(&mut self, ev: DevEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let at = {
+            let doc = self.doc.read(cx).doc();
+            self.resume.observe(&ev, doc.chars(), doc.ids())
+        };
+        let interrupted = matches!(&ev, DevEvent::JobEnded { outcome: JobOutcome::Stopped | JobOutcome::Failed(_), .. });
         let notice = self.device.update(cx, |d, cx| d.on_event(ev, cx));
         match notice {
             Notice::None => {}
             Notice::Info(m) => window.push_notification(Notification::info(m), cx),
-            Notice::Warn(m) => window.push_notification(Notification::warning(m), cx),
-            Notice::Error(m) => window.push_notification(Notification::error(m), cx),
+            Notice::Warn(m) => {
+                let m = match at {
+                    Some(c) if interrupted => format!("{m}。如需续写，可用「断点续写」（已记住「{c}」）"),
+                    Some(c) => format!("{m}（将从「{c}」所在笔画继续）"),
+                    None => m,
+                };
+                window.push_notification(Notification::warning(m), cx)
+            }
+            Notice::Error(m) => {
+                let m = match at {
+                    Some(c) if interrupted => format!("{m}。如需续写，可用「断点续写」（已记住「{c}」）"),
+                    _ => m,
+                };
+                window.push_notification(Notification::error(m), cx)
+            }
             Notice::Alarm(m) => {
                 let device = self.device.clone();
                 let n = Notification::warning(m).action(move |_, _, _| {
@@ -1034,6 +1071,7 @@ impl ChixieRsApp {
                         cx.notify();
                     }))),
             )
+            .when(self.resume.open, |el| el.child(self.resume_card(cx)))
             .child(div().flex_1().min_h_0().child(self.device.clone()))
             .into_any_element()
     }
