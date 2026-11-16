@@ -84,7 +84,7 @@ pub struct ChixieRsApp {
     previews_pending: std::collections::HashSet<i64>,
     style_dialog: Entity<StyleDialog>,
     backstage_focus: FocusHandle,
-    /// Where 保存 writes; `None` until 另存为 / 打开 of a `.chx`.
+    /// Where 保存 writes; `None` until 另存为, or 打开 of one of our documents (`.chx` saves as `.docx`).
     file: Option<PathBuf>,
     zoom_slider: Entity<SliderState>,
     /// Last title pushed to the OS window (taskbar).
@@ -105,8 +105,7 @@ impl ChixieRsApp {
     ) -> Self {
         let login = cx.new(|cx| LoginView::new(window, cx));
         let fonts = cx.new(|cx| FontsView::new(window, cx));
-        let draft = file_ops::draft_path(&cx.global::<AppState>().settings_path);
-        let initial = file_ops::open(&draft).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
+        let initial = file_ops::open_draft(&cx.global::<AppState>().settings_path).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
         let doc = cx.new(|cx| DocView::new(initial, window, cx));
         let page = cx.global::<AppState>().settings.page.clone();
         let font_size = cx.new(|cx| InputState::new(window, cx).step(5.0).min(5.0).max(1000.0).default_value(fmt_num(page.font_size)));
@@ -475,7 +474,7 @@ impl ChixieRsApp {
         }
         let st = cx.global::<AppState>();
         let path = file_ops::draft_path(&st.settings_path);
-        if let Err(e) = file_ops::save_chx(&path, self.doc.read(cx).doc(), st.settings.style.handwriting.seed) {
+        if let Err(e) = file_ops::save(&path, self.doc.read(cx).doc(), st.settings.style.handwriting.seed) {
             log::warn!("draft {}: {e}", path.display());
         }
     }
@@ -501,8 +500,14 @@ impl ChixieRsApp {
                     if let Some(seed) = l.seed {
                         app.edit_settings(cx, |st| st.settings.style.handwriting.seed = seed);
                     }
-                    let is_chx = l.seed.is_some();
-                    app.file = is_chx.then(|| path.clone());
+                    // Our own documents save back in place; a `.chx` becomes a `.docx` beside it.
+                    // Foreign files (Word, text) go through 另存为 so they are never overwritten.
+                    let ours = l.seed.is_some();
+                    app.file = ours.then(|| path.with_extension("docx"));
+                    if ours && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("chx")) {
+                        let to = path.with_extension("docx");
+                        window.push_notification(Notification::info(format!("旧格式 .chx 已打开，保存时将写入 {}", to.display())), cx);
+                    }
                     app.doc.update(cx, |d, cx| d.replace_doc(l.doc, cx));
                     app.close_backstage(window, cx);
                 }
@@ -516,7 +521,7 @@ impl ChixieRsApp {
         let doc = self.doc.read(cx).doc().clone();
         let seed = cx.global::<AppState>().settings.style.handwriting.seed;
         if let (false, Some(path)) = (save_as, self.file.clone()) {
-            let msg = match file_ops::save_chx(&path, &doc, seed) {
+            let msg = match file_ops::save(&path, &doc, seed) {
                 Ok(()) => Notification::success(format!("已保存 {}", path.display())),
                 Err(e) => Notification::error(format!("保存失败：{e}")),
             };
@@ -524,13 +529,13 @@ impl ChixieRsApp {
             self.close_backstage(window, cx);
             return;
         }
-        let rx = cx.prompt_for_new_path(&file_ops::documents_dir(), Some("文档.chx"));
+        let rx = cx.prompt_for_new_path(&file_ops::documents_dir(), Some("文档.docx"));
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(mut path))) = rx.await else { return };
             if path.extension().is_none() {
-                path.set_extension("chx");
+                path.set_extension("docx");
             }
-            let res = file_ops::save_chx(&path, &doc, seed);
+            let res = file_ops::save(&path, &doc, seed);
             let _ = this.update_in(cx, |app, window, cx| {
                 let msg = match res {
                     Ok(()) => {

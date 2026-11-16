@@ -213,6 +213,14 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 files,
             );
         });
+        // DOCX: save the edited document and open it again; text, ids and seed must survive.
+        cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx).doc().clone();
+            let p = std::env::temp_dir().join("chixie-autotest.docx");
+            let back = file_ops::save(&p, &d, 4242).and_then(|()| file_ops::open(&p));
+            let same = back.as_ref().is_ok_and(|l| l.doc.text() == d.text() && l.doc.ids() == d.ids() && l.seed == Some(4242));
+            println!("AUTOTEST_DOCX round_trip={same}");
+        });
         // Device: connect to the simulator, write both pages with a sheet change in between.
         let device = cx.update(|cx| app.read(cx).device.clone());
         cx.update(|cx| {

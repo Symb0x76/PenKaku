@@ -1,53 +1,38 @@
-//! Documents on disk: `.chx` (JSON: text + per-character ids + handwriting seed, so a reopened
-//! document keeps exactly the same handwriting), plain `.txt` import, the autosaved draft, and
-//! G-code export (one file per page).
+//! Documents on disk: DOCX (text + per-character ids + handwriting seed in a custom XML part, so a
+//! reopened document keeps exactly the same handwriting), `.chx` v1 and plain `.txt` import, the
+//! autosaved draft, and G-code export (one file per page).
 
 use std::path::{Path, PathBuf};
 
-use chixie_rs_doc::EditDoc;
 use chixie_rs_core::gcode::{self, DeviceProfile};
 use chixie_rs_core::layout::Document;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize)]
-struct ChxFile {
-    version: u32,
-    text: String,
-    ids: Vec<u64>,
-    seed: u64,
-}
+use chixie_rs_doc::EditDoc;
 
 pub struct Loaded {
     pub doc: EditDoc,
-    /// Handwriting seed stored with a `.chx`; `None` for `.txt`.
+    /// Handwriting seed stored with our own documents; `None` for `.txt` and foreign `.docx`.
     pub seed: Option<u64>,
 }
 
-pub fn save_chx(path: &Path, doc: &EditDoc, seed: u64) -> std::io::Result<()> {
-    let f = ChxFile { version: 1, text: doc.text(), ids: doc.ids().to_vec(), seed };
-    let json = serde_json::to_vec_pretty(&f).map_err(std::io::Error::other)?;
-    // Write-then-rename so a crash never leaves a half-written document.
-    let tmp = path.with_extension("chx.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+/// Save as DOCX (atomic).
+pub fn save(path: &Path, doc: &EditDoc, seed: u64) -> std::io::Result<()> {
+    chixie_rs_doc::save(path, doc.document(), seed)
 }
 
-/// Open `.chx` (ids + seed kept) or anything else as UTF-8 text (fresh ids).
+/// Open `.docx`, `.chx` (migrated) or anything else as UTF-8 text.
 pub fn open(path: &Path) -> std::io::Result<Loaded> {
-    let bytes = std::fs::read(path)?;
-    let is_chx = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("chx"));
-    if is_chx {
-        let f: ChxFile = serde_json::from_slice(&bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let chars: Vec<char> = f.text.chars().collect();
-        let doc = if f.ids.len() == chars.len() { EditDoc::from_parts(chars, f.ids) } else { EditDoc::from_text(&f.text) };
-        return Ok(Loaded { doc, seed: Some(f.seed) });
-    }
-    let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
-    Ok(Loaded { doc: EditDoc::from_text(text.trim_start_matches('\u{feff}')), seed: None })
+    let l = chixie_rs_doc::open(path)?;
+    Ok(Loaded { doc: EditDoc::from_document(l.doc), seed: l.seed })
 }
 
 pub fn draft_path(settings_path: &Path) -> PathBuf {
-    settings_path.parent().unwrap_or_else(|| Path::new(".")).join("draft.chx")
+    settings_path.parent().unwrap_or_else(|| Path::new(".")).join("draft.docx")
+}
+
+/// The autosaved draft; falls back to the pre-DOCX `draft.chx`.
+pub fn open_draft(settings_path: &Path) -> std::io::Result<Loaded> {
+    let p = draft_path(settings_path);
+    open(&p).or_else(|_| open(&p.with_extension("chx")))
 }
 
 pub fn documents_dir() -> PathBuf {
@@ -72,15 +57,19 @@ pub fn export_files(doc: &Document, profile: &DeviceProfile, path: &Path) -> std
 mod tests {
     use super::*;
 
+    fn dir() -> PathBuf {
+        let d = std::env::temp_dir().join("chixie-rs-gui-test-docs");
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
     #[test]
-    fn chx_round_trip_keeps_ids_and_seed() {
-        let dir = std::env::temp_dir().join("chixie-rs-gui-test-chx");
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("a.chx");
+    fn docx_round_trip_keeps_ids_and_seed() {
+        let p = dir().join("a.docx");
         let mut d = EditDoc::from_text("你好");
         d.move_to(0, false);
         d.insert("啊"); // id 2 at the front: ids are no longer 0..n
-        save_chx(&p, &d, 42).unwrap();
+        save(&p, &d, 42).unwrap();
         let l = open(&p).unwrap();
         assert_eq!(l.doc.text(), "啊你好");
         assert_eq!(l.doc.ids(), d.ids());
@@ -88,10 +77,18 @@ mod tests {
     }
 
     #[test]
+    fn legacy_draft_is_still_found() {
+        let settings = dir().join("legacy").join("settings.toml");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let _ = std::fs::remove_file(draft_path(&settings));
+        std::fs::write(draft_path(&settings).with_extension("chx"), br#"{"version":1,"text":"ab","ids":[3,1],"seed":9}"#).unwrap();
+        let l = open_draft(&settings).unwrap();
+        assert_eq!((l.doc.ids(), l.seed), (&[3u64, 1][..], Some(9)));
+    }
+
+    #[test]
     fn txt_opens_with_fresh_ids() {
-        let dir = std::env::temp_dir().join("chixie-rs-gui-test-chx");
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("b.txt");
+        let p = dir().join("b.txt");
         std::fs::write(&p, "\u{feff}a\r\nb").unwrap();
         let l = open(&p).unwrap();
         assert_eq!(l.doc.text(), "a\nb");

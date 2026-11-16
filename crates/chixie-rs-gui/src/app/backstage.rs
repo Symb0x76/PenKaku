@@ -148,7 +148,7 @@ impl ChixieRsApp {
         let muted = cx.theme().muted_foreground;
         v_flex()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child("打开 chixie-rs 文档（.chx，保留每个字的笔迹）或纯文本（.txt）。"))
+            .child(div().text_sm().text_color(muted).child("打开 Word 文档（.docx；chixie-rs 保存的文档保留每个字的笔迹）、旧版 .chx 或纯文本（.txt）。"))
             .child(
                 Button::new("bs-browse")
                     .large()

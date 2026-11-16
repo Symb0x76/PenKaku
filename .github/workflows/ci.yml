@@ -56,6 +56,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then run="xvfb-run -a"; else run=""; fi
           $run ./target/debug/chixie-rs${{ runner.os == 'Windows' && '.exe' || '' }} | tee autotest.log
+          grep -q 'AUTOTEST_DOCX round_trip=true' autotest.log
           grep -q 'AUTOTEST_BACKSTAGE closed=Ok(true)' autotest.log
 
       - name: Upload build

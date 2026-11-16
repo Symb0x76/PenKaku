@@ -4,8 +4,11 @@
 
 use std::ops::Range;
 
+use serde::{Deserialize, Serialize};
+
 /// Character formatting. `None` = inherit the document default (today's single font and size).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Attrs {
     /// Font role or font name (`rFonts` in DOCX).
     pub font: Option<String>,
@@ -17,7 +20,8 @@ pub struct Attrs {
     pub v_offset: Option<f32>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Align {
     #[default]
     Left,
@@ -27,7 +31,8 @@ pub enum Align {
 }
 
 /// Paragraph formatting.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Para {
     pub align: Align,
     /// First-line indent, mm; `None` = the handwriting default.
@@ -91,6 +96,20 @@ impl Document {
         let next_id = ids.iter().max().map_or(0, |m| m + 1);
         let paras = vec![Para::default(); chars.iter().filter(|&&c| c == '\n').count() + 1];
         Self { attrs: vec![0; chars.len()], chars, ids, styles: vec![Attrs::default()], paras, next_id }
+    }
+
+    /// Build from loaded characters and paragraph records. `None` if the parts don't fit
+    /// together (paragraph count, repeated ids).
+    pub fn from_loaded(chars: Vec<Char>, paras: Vec<Para>) -> Option<Self> {
+        let mut d = Self { paras, ..Self::default() };
+        for c in chars {
+            let a = d.intern(&c.attrs);
+            d.chars.push(c.ch);
+            d.ids.push(c.id);
+            d.attrs.push(a);
+            d.next_id = d.next_id.max(c.id + 1);
+        }
+        d.is_consistent().then_some(d)
     }
 
     pub fn chars(&self) -> &[char] {
