@@ -152,7 +152,7 @@
 - Open: hardware checklist #1–#15 (BOSS), especially Telnet (#12, #15), the 20-page job (#14),
   and whether a real USB drop reboots the board (decides how often #11 needs a re-zero).
 - Dependabot (2026-11-16): rustls 0.23.46, quinn-proto 0.11.19 (`7378993`), all 5 alerts fixed.
-- **M2 code done (2026-11-16), branch `m2-doc-resume`** (plan in `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
+- **M2 done (2026-11-16), merged to master (`12ef047`)** (plan in `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
   - Resume map: `layout::Page.stroke_chars` (char per stroke), `gcode::emit_mapped` → `PageCode
     { text, stroke_lines }`, `PageCode::from_stroke(k)` (pen-up + identical tail, remapped).
   - Line-exact resume: `Job.maps`; actor tracks work XY (WPos or MPos−WCO), and after a drop
@@ -173,5 +173,5 @@
     document font/size (M3/M4/M6).
 - Open (BOSS): checklist #10/#11/#11b/#11c on hardware; open a saved .docx in Word, WPS and
   LibreOffice, save from Word, reopen in chixie-rs (ids/seed must survive).
-- Next: merge M2 after review → M3 (typesetting parity).
+- Next: BOSS checks (Word/WPS/LibreOffice, hardware #11–#11c) → M3 (typesetting parity).
 

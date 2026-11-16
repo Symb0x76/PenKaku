@@ -219,7 +219,7 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - pulling USB mid-job → reconnect prompt → continue;
   - a 20-page job runs on hardware with only sheet changes (BOSS).
 
-### M2 Document model v2 + resume (3–4 wk) — spec R2, R3 (model part) — code done 2026-11-16 (branch `m2-doc-resume`); Word/WPS/LibreOffice and hardware checks pending
+### M2 Document model v2 + resume (3–4 wk) — spec R2, R3 (model part) — merged 2026-11-16 (`12ef047`); Word/WPS/LibreOffice and hardware checks pending
 - Status: resume map, line-exact resume after a drop, 断点续写 by character, `chixie-rs-doc`
   (model, commands, undo with a property test), DOCX with the custom XML part and `.chx`
   migration are implemented; the G-code golden survives a DOCX round trip. Per-run font / size /
