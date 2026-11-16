@@ -33,7 +33,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use chixie_rs_core::config::Settings;
-use chixie_rs_core::editor::EditDoc;
+use chixie_rs_doc::EditDoc;
 use chixie_rs_core::session::{self, HEARTBEAT_EVERY};
 use chixie_rs_core::template::TemplateStore;
 use gpui_kit::component::WindowExt as _;

@@ -1,0 +1,12 @@
+[package]
+name = "chixie-rs-doc"
+description = "chixie-rs document model: characters with stable ids, runs, paragraphs, undoable commands, DOCX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chixie-rs-core.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

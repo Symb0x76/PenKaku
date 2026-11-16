@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chixie_rs_core::editor::EditDoc;
+use chixie_rs_doc::EditDoc;
 use chixie_rs_core::gcode::{self, DeviceProfile};
 use chixie_rs_core::layout::Document;
 use serde::{Deserialize, Serialize};

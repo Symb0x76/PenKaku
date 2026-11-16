@@ -14,7 +14,7 @@ use chixie_rs_core::config::import_chixie3;
 use chixie_rs_device::device::{Command as DevCommand, DeviceHandle, Event as DevEvent, Job, JobOutcome};
 use chixie_rs_device::job::{self, PatrolMode};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use chixie_rs_core::editor::EditDoc;
+use chixie_rs_doc::EditDoc;
 use chixie_rs_core::gcode;
 use chixie_rs_core::session::{Command, Event, FontListKind};
 use gpui_kit::assets::IconName;

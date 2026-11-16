@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chixie_rs_core::config::{PageSettings, Settings};
-use chixie_rs_core::editor::EditDoc;
+use chixie_rs_doc::EditDoc;
 use chixie_rs_core::font::Font;
 use chixie_rs_core::handwriting::StyleFile;
 use chixie_rs_core::template::Template;
