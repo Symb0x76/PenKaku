@@ -219,12 +219,13 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - pulling USB mid-job → reconnect prompt → continue;
   - a 20-page job runs on hardware with only sheet changes (BOSS).
 
-### M2 Document model v2 + resume (3–4 wk) — spec R2, R3 (model part) — merged 2026-11-16 (`12ef047`); Word/WPS/LibreOffice and hardware checks pending
+### M2 Document model v2 + resume (3–4 wk) — spec R2, R3 (model part) — merged 2026-11-16 (`12ef047`); hardware + Word passed 2026-11-17; WPS/LibreOffice pending
 - Status: resume map, line-exact resume after a drop, 断点续写 by character, `chixie-rs-doc`
   (model, commands, undo with a property test), DOCX with the custom XML part and `.chx`
   migration are implemented; the G-code golden survives a DOCX round trip. Per-run font / size /
-  colour are in the model and the file but have no UI yet (M3/M4/M6). BOSS: open, save and reopen
-  a document through Word, WPS and LibreOffice; hardware checklist #11, #11b, #11c.
+  colour are in the model and the file but have no UI yet (M3/M4/M6). BOSS passed on 2026-11-17
+  (CH340 board, Grbl_ESP32 1.3a): hardware checklist #1–#5, #10, #11, #11b, #11c and the Word
+  save/reopen round trip. Still open: WPS and LibreOffice.
 - `chixie-rs-doc` (§2.2): runs, paragraphs, flows, commands and undo; DOCX as the document format,
   with migration from today's `.chx`.
 - Resume map (§2.3) and **断点续写**:

@@ -171,7 +171,8 @@
     round trip; `AUTOTEST_DOCX`.
   - Attribute UI (font/size/colour per run) is NOT in M2: model + file only; layout still uses the
     document font/size (M3/M4/M6).
-- Open (BOSS): checklist #10/#11/#11b/#11c on hardware; open a saved .docx in Word, WPS and
-  LibreOffice, save from Word, reopen in chixie-rs (ids/seed must survive).
-- Next: BOSS checks (Word/WPS/LibreOffice, hardware #11–#11c) → M3 (typesetting parity).
+- Passed by BOSS 2026-11-17 (COM5 CH340, Grbl_ESP32 1.3a): hardware #1–#5, #10, #11, #11b,
+  #11c; Word save/reopen round trip.
+- Open (BOSS): .docx in WPS and LibreOffice; M1 checks #5a–#9, #12–#15 (Telnet, 20-page job).
+- Next: M3 (typesetting parity).
 
