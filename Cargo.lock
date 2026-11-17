@@ -989,6 +989,7 @@ dependencies = [
  "jieba-rs",
  "keyring",
  "log",
+ "notify",
  "proptest",
  "quick-xml",
  "reqwest",
@@ -998,6 +999,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "toml 1.2.0+spec-1.1.0",
+ "zip",
 ]
 
 [[package]]

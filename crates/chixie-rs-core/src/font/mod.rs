@@ -13,6 +13,7 @@ use crate::{Error, Result};
 mod crypto;
 pub use crypto::{fernet_decrypt, shape};
 
+pub mod library;
 pub mod svg;
 
 /// One point in glyph units (y downward).

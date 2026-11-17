@@ -125,6 +125,42 @@ pub fn read(bytes: &[u8]) -> Result<(Font, FontMeta)> {
     Ok((font, FontMeta { name, source }))
 }
 
+/// Name, source and character count without parsing the glyphs (for library scans): reads up to
+/// the first `<glyph>`. `None` when the bytes are not an SVG font.
+pub fn read_meta(bytes: &[u8]) -> Option<(FontMeta, usize)> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut r = Reader::from_str(text);
+    let (mut name, mut family, mut source, mut chars, mut is_font) = (None, None, FontSource::Imported, None, false);
+    loop {
+        let ev = r.read_event().ok()?;
+        let e = match &ev {
+            Event::Start(e) | Event::Empty(e) => e,
+            Event::Eof => break,
+            _ => continue,
+        };
+        match e.local_name().as_ref() {
+            b"font" if e.name().as_ref() == b"chixie:font" => {
+                name = attr(e, "name");
+                chars = attr(e, "chars").and_then(|v| v.parse().ok());
+                source = match (attr(e, "source").as_deref(), attr(e, "cloud-id").and_then(|v| v.parse().ok())) {
+                    (Some("cloud"), Some(id)) => FontSource::Cloud { id },
+                    (Some("generated"), _) => FontSource::Generated,
+                    _ => FontSource::Imported,
+                };
+            }
+            b"font" => is_font = true,
+            b"font-face" => family = attr(e, "font-family"),
+            b"glyph" => break,
+            _ => {}
+        }
+    }
+    if !is_font {
+        return None;
+    }
+    let chars = chars.unwrap_or_else(|| text.matches("<glyph ").count());
+    Some((FontMeta { name: name.or(family).unwrap_or_default(), source }, chars))
+}
+
 fn attr(e: &BytesStart, name: &str) -> Option<String> {
     let a = e.try_get_attribute(name).ok()??;
     Some(a.normalized_value(quick_xml::XmlVersion::Implicit1_0).ok()?.into_owned())

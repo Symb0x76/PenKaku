@@ -35,6 +35,7 @@ zip = { version = "9.6", default-features = false, features = ["deflate-flate2-z
 quick-xml = "0.41"
 proptest = "1.12"
 jieba-rs = "0.11"
+notify = "8.2"
 directories = "6"
 keyring = "4.2"
 # Font preview PNGs → ink masks. Same crate instance gpui already pulls in.
