@@ -493,6 +493,37 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             plain > 0 && simplified <= plain
         });
         println!("AUTOTEST_EFFECTS tuned={tuned} undo={undone} route={route_ok}");
+        // Output: the selected character in red → two pen runs with 多色绘制; 弓字型 reverses the
+        // second row; 旋转180° mirrors about the frame centre. Settings and text are put back.
+        cx.update(|cx| app.read(cx).doc.clone().update(cx, |d, cx| d.set_colour(Some([255, 0, 0]), cx)));
+        cx.background_executor().timer(pause(300)).await;
+        let saved = cx.update(|cx| cx.global::<AppState>().settings.clone());
+        let output = cx.update(|cx| {
+            let st = cx.global_mut::<AppState>();
+            st.settings.page.multicolour = true;
+            let a = app.read(cx);
+            let layout = a.doc.read(cx).document();
+            let pens = a.written_pages(cx).first().map_or(0, |w| w.pens.len());
+            let st = cx.global_mut::<AppState>();
+            (st.settings.page.multicolour, st.settings.device.profile.path_plan) = (false, chixie_rs_core::profile::PathPlan::Serpentine);
+            // Row 2 of page 0 (the second line with ink): written right to left.
+            let w = app.read(cx).written_pages(cx).remove(0).page;
+            let row = layout.lines.iter().enumerate().filter(|(_, l)| l.page == 0).map(|(i, _)| i).nth(1);
+            let inked: Vec<usize> = row.map(|r| layout.pages[0].stroke_chars.iter().copied().filter(|&c| layout.boxes[c].line == r).collect()).unwrap_or_default();
+            let mut order: Vec<usize> = w.stroke_chars.iter().copied().filter(|c| inked.contains(c)).collect();
+            order.dedup();
+            let serpentine = order.len() > 1 && order.windows(2).all(|p| p[0] > p[1]);
+            let st = cx.global_mut::<AppState>();
+            (st.settings.device.profile.path_plan, st.settings.page.rotation) = (chixie_rs_core::profile::PathPlan::Raster, chixie_rs_core::profile::PageRotation::All180);
+            let (fw, fh) = cx.global::<AppState>().settings.page.writable();
+            let turned = app.read(cx).written_pages(cx).remove(0).page;
+            let (a0, b0) = (layout.pages[0].strokes[0][0], turned.strokes[0][0]);
+            let rotated = (b0.0 - (fw - a0.0)).abs() < 1e-3 && (b0.1 - (-fh - a0.1)).abs() < 1e-3;
+            (pens, serpentine, rotated)
+        });
+        cx.update(|cx| cx.global_mut::<AppState>().settings = saved);
+        dispatch(cx, vec![Box::new(doc_view::Undo)]);
+        println!("AUTOTEST_OUTPUT pens={} serpentine={} rotated={}", output.0, output.1, output.2);
         // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
         // 英文字体 role, and survives export + import.
         use chixie_rs_core::font::svg::{self, FontMeta, FontSource};
