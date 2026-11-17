@@ -161,6 +161,8 @@ pub struct DeviceProfile {
     pub axis_map: AxisMap,
     /// 写完位置.
     pub end_position: EndPosition,
+    /// 书写优化: how each stroke is reshaped before it is written.
+    pub route: crate::path::RouteImprove,
 }
 
 impl Default for DeviceProfile {
@@ -178,6 +180,7 @@ impl Default for DeviceProfile {
             pause_after_down_s: 0.0,
             axis_map: AxisMap::default(),
             end_position: EndPosition::default(),
+            route: Default::default(),
         }
     }
 }
@@ -258,7 +261,8 @@ pub fn emit_mapped(page: &Page, d: &DeviceProfile) -> PageCode {
         counted = g.len();
         // An empty stroke is just its pen-up line; it starts there.
         stroke_lines.push(line);
-        for (i, &p) in stroke.iter().enumerate() {
+        let improved = d.route.apply(stroke);
+        for (i, &p) in improved.as_deref().unwrap_or(stroke).iter().enumerate() {
             let (mx, my) = if d.axis_map.is_identity() { p } else { d.axis_map.apply(p) };
             if i == 0 {
                 let _ = writeln!(g, "G0 X{mx:.3} Y{my:.3}");
@@ -333,6 +337,20 @@ mod tests {
         assert_eq!(tail.stroke_lines, vec![1, 2]);
         assert_eq!(pc.from_stroke(3).text, "G1G90 Z0 F8000\n");
         assert_eq!((pc.stroke_at(0), pc.stroke_at(1), pc.stroke_at(6), pc.stroke_at(7), pc.stroke_at(12)), (None, Some(0), Some(0), Some(1), Some(2)));
+    }
+
+    #[test]
+    fn route_smoothing_keeps_the_resume_map_per_stroke() {
+        use crate::path::{RouteImprove, RouteMode};
+        let wiggly: Vec<(f32, f32)> = (0..=20).map(|i| (i as f32 * 0.5, if i % 2 == 0 { 0.0 } else { 0.01 })).collect();
+        let page = Page { strokes: vec![wiggly.clone(), vec![(3.0, 3.0), (4.0, 3.0)]], ..Default::default() };
+        let d = DeviceProfile { route: RouteImprove { mode: RouteMode::Simplify, value: 0.02 }, ..Default::default() };
+        let pc = emit_mapped(&page, &d);
+        // First stroke shrinks to its two endpoints: pen-up, [G0, down, G1, G1, up], [G0, …].
+        assert_eq!(pc.stroke_lines, vec![1, 6]);
+        assert!(pc.text.lines().nth(6).unwrap().starts_with("G0 X3.000"));
+        assert!(pc.text.lines().count() < emit(&page, &DeviceProfile::default()).lines().count());
+        assert_eq!(pc.from_stroke(1).text.lines().nth(1), Some("G0 X3.000 Y3.000"));
     }
 
     #[test]

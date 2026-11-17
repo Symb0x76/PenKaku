@@ -59,6 +59,12 @@ const SHAPE_SHEAR: Span = Span::new(0.016, 0.0195);
 const SHAPE_NOISE_MM: f32 = 0.012;
 
 impl Deformation {
+    /// ChiXie3's 推荐参数 (its shipped config): 胖瘦 96–104 %, 高矮 98–102 %, rotation ±2°,
+    /// 笔画变形幅度 1, 字形变形幅度 7, 随机删除小尾巴 on. Switches off, like a fresh install.
+    pub fn recommended() -> Self {
+        Self { v_scale_pct: Span::new(98.0, 102.0), ..Self::default() }
+    }
+
     pub fn is_active(&self) -> bool {
         self.enabled && (self.base || (self.shape && self.shape_degree > 0.0))
     }
