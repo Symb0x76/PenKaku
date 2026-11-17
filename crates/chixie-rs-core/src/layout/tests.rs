@@ -372,6 +372,14 @@ fn missing_width_falls_back_to_the_counterpart() {
     assert_eq!(doc.pages[0].strokes.len(), 2);
 }
 
+#[test]
+fn missing_glyphs_are_located_free_and_grid() {
+    let free = layout("年x年\u{2009}x", &grid_font(), &PageParams::default());
+    assert_eq!((free.missing.clone(), free.missing_at.clone()), (vec!['x'], vec![1, 4]));
+    let grid = layout("1\u{2009}x", &grid_font(), &grid_params(false));
+    assert_eq!((grid.missing, grid.missing_at), (vec!['x'], vec![2]), "a half space in a pair is not missing");
+}
+
 fn paras(v: &[(Align, Option<f32>)]) -> Vec<Para> {
     v.iter().map(|&(align, first_indent)| Para { align, first_indent }).collect()
 }

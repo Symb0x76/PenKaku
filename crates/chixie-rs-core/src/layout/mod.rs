@@ -100,6 +100,8 @@ pub struct Document {
     /// Characters with no glyph in the font (each skipped with a space-width advance), deduped,
     /// in first-seen order.
     pub missing: Vec<char>,
+    /// Index of every character drawn as a 缺字 placeholder (no font has it), in text order.
+    pub missing_at: Vec<usize>,
     /// One box per input character (glyphs, spaces, newlines, missing glyphs), in text order.
     pub boxes: Vec<CharBox>,
     /// Every line, in order; caret positions on a line are `start..=end` (char indices).
@@ -505,6 +507,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
             if !pen.doc.missing.contains(&ch) {
                 pen.doc.missing.push(ch);
             }
+            pen.doc.missing_at.push(i);
             if jitter_on {
                 pen.cx += jit.space(Some(ch), id);
             } else {

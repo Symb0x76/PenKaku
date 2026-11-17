@@ -242,6 +242,7 @@ impl Pen<'_> {
     /// they can be laid again on the next line.
     pub(super) fn truncate_to(&mut self, b: usize) {
         self.doc.boxes.truncate(b);
+        self.doc.missing_at.retain(|&k| k < b);
         let keep = self.page.stroke_chars.iter().position(|&c| c >= b).unwrap_or(self.page.stroke_chars.len()).max(self.line_stroke);
         self.page.strokes.truncate(keep);
         self.page.stroke_chars.truncate(keep);
@@ -275,10 +276,16 @@ fn draw_scaled(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, sx
 /// listed as missing and draws nothing.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32) {
+    // Spaces (a half space sharing a grid cell) draw nothing and are never missing.
+    if ch.is_whitespace() {
+        return;
+    }
     let Some(glyph) = font.glyph(ch, id) else {
         if !pen.doc.missing.contains(&ch) {
             pen.doc.missing.push(ch);
         }
+        // The char's box is pushed right after drawing: its index is the box count.
+        pen.doc.missing_at.push(pen.doc.boxes.len());
         return;
     };
     let p = pen.p;

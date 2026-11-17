@@ -44,6 +44,8 @@ pub struct FontSettings {
     pub mix: Vec<crate::font::fontset::MixEntry>,
     /// 换一组: changes which character gets which mixed font.
     pub mix_salt: u64,
+    /// 字体优化 applied when fonts are loaded.
+    pub fix: crate::font::fix::FontFix,
 }
 
 impl FontSettings {
