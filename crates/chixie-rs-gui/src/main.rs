@@ -20,6 +20,7 @@ mod fake;
 mod file_ops;
 mod cloud_preview;
 mod font_preview;
+mod font_lib;
 mod fonts;
 mod icons;
 mod login;
@@ -29,10 +30,11 @@ mod state;
 mod style_dialog;
 mod templates_view;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chixie_rs_core::config::Settings;
+use chixie_rs_core::font::library::FontKey;
 use chixie_rs_doc::EditDoc;
 use chixie_rs_core::session::{self, HEARTBEAT_EVERY};
 use chixie_rs_core::template::TemplateStore;
@@ -56,10 +58,27 @@ fn main() {
     } else {
         Settings::default_path().unwrap_or_else(|_| PathBuf::from("settings.toml"))
     };
-    let settings = Settings::load(&settings_path).unwrap_or_else(|e| {
+    let mut settings = Settings::load(&settings_path).unwrap_or_else(|e| {
         log::warn!("{e}; using defaults");
         Settings::default()
     });
+    let config_dir = settings_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    if fake {
+        // The demo never touches the real font library in Documents.
+        settings.fonts.library_dir = Some(config_dir.join("Fonts"));
+    }
+    // Fonts used to live in `<config>/fonts` as JSON; move them into the library once.
+    let library = settings.fonts.library();
+    match library.migrate_store(&config_dir.join("fonts")) {
+        Ok(0) => {}
+        Ok(n) => log::info!("moved {n} fonts into {}", library.default_dir.display()),
+        Err(e) => log::warn!("moving fonts into the library: {e}"),
+    }
+    if settings.fonts.roles.main.is_none()
+        && let Some(id) = settings.page.font_id
+    {
+        settings.fonts.roles.main = Some(FontKey::cloud(id));
+    }
 
     let (session, events, _join) = if fake {
         session::spawn(fake::FakeBackend, HEARTBEAT_EVERY)
@@ -81,8 +100,21 @@ fn main() {
             log::warn!("{e}; using built-in templates");
             TemplateStore::builtins()
         });
-        let fonts = std::sync::Arc::new(chixie_rs_core::font_store::FontStore::next_to(&settings_path));
-        cx.set_global(AppState { settings, settings_path, session, user: None, active_font: None, templates, templates_path, fonts, previews: Default::default(), cloud_previews: Default::default() });
+        let fonts = std::sync::Arc::new(font_lib::LibraryStore::new(library, config_dir));
+        cx.set_global(AppState {
+            settings,
+            settings_path,
+            session,
+            user: None,
+            active_font: None,
+            font_set: Default::default(),
+            font_set_gen: 0,
+            templates,
+            templates_path,
+            fonts,
+            previews: Default::default(),
+            cloud_previews: Default::default(),
+        });
 
         // Word draws its own caption (quick access toolbar, centred title); see `ChixieRsApp::title_bar`.
         // Windows: our own bar and buttons via OS hit-test areas. macOS: system traffic lights
@@ -432,6 +464,35 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             })
         });
         println!("AUTOTEST_BACKSTAGE closed={closed:?}");
+        // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
+        // 英文字体 role, and survives export + import.
+        use chixie_rs_core::font::svg::{self, FontMeta, FontSource};
+        use chixie_rs_core::font::{Font, Glyph};
+        let glyph = Glyph { advance: 3.0, strokes: vec![vec![(0.0, 7.0), (1.5, 0.0), (3.0, 7.0)]] };
+        let dropped = Font { glyphs: [('A', glyph.clone())].into_iter().collect() };
+        let dir = cx.update(|cx| cx.global::<AppState>().fonts.dir());
+        let _ = std::fs::write(dir.join("autotest-latin.svg"), svg::write(&dropped, &FontMeta { name: "测试英文".into(), source: FontSource::Imported }));
+        cx.background_executor().timer(pause(2500)).await;
+        let id = cx.update(|cx| cx.global::<AppState>().fonts.list().into_iter().find(|f| f.name == "测试英文").map(|f| f.id));
+        if let Some(id) = id {
+            let _ = cx.update_window(handle, |_, window, cx| app.update(cx, |a, cx| a.set_role(id, app::fonts_ctl::Role::English, window, cx)));
+        }
+        cx.background_executor().timer(pause(1500)).await;
+        let routed = cx.update(|cx| {
+            use chixie_rs_core::font::fontset::Glyphs as _;
+            cx.global::<AppState>().font_set.glyph('A', 0) == Some(&glyph)
+        });
+        let round_trip = id.is_some_and(|id| {
+            let zip = std::env::temp_dir().join("chixie-autotest-fonts.zip");
+            cx.update(|cx| {
+                let store = cx.global::<AppState>().fonts.clone();
+                store.export(&[id], &zip).and_then(|()| store.import(&[zip])).is_ok_and(|ids| ids == vec![id])
+            })
+        });
+        println!("AUTOTEST_FONTS watched={} english_routed={routed} export_import={round_trip}", id.is_some());
+        // Leave the demo settings and library as they were for the next run.
+        let _ = cx.update_window(handle, |_, window, cx| app.update(cx, |a, cx| a.clear_role(app::fonts_ctl::Role::English, window, cx)));
+        let _ = std::fs::remove_file(dir.join("autotest-latin.svg"));
         cx.update(|cx| cx.quit());
     })
     .detach();

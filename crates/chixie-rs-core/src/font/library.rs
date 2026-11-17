@@ -34,6 +34,19 @@ impl FontKey {
         self.0.strip_prefix("cloud:")?.parse().ok()
     }
 
+    /// A number standing for this key in the app: the cloud id (positive), or minus the 48-bit
+    /// hash for other fonts. [`FontKey::from_local_id`] maps it back.
+    pub fn local_id(&self) -> i64 {
+        if let Some(id) = self.cloud_id() {
+            return id;
+        }
+        -self.0.strip_prefix("sha:").and_then(|h| i64::from_str_radix(h, 16).ok()).unwrap_or(0).max(1)
+    }
+
+    pub fn from_local_id(id: i64) -> Self {
+        if id >= 0 { Self::cloud(id) } else { Self(format!("sha:{:012x}", -id)) }
+    }
+
     fn of(meta: &FontMeta, bytes: &[u8]) -> Self {
         match meta.source {
             FontSource::Cloud { id } => Self::cloud(id),
@@ -92,9 +105,7 @@ impl FontLibrary {
         let mut by_key: BTreeMap<FontKey, LibEntry> = BTreeMap::new();
         for dir in self.dirs() {
             for path in svg_files(dir) {
-                let Ok(bytes) = std::fs::read(&path) else { continue };
-                let Some((meta, chars)) = svg::read_meta(&bytes) else { continue };
-                let key = FontKey::of(&meta, &bytes);
+                let Some((key, meta, chars)) = scan_file(&path) else { continue };
                 match by_key.get_mut(&key) {
                     Some(e) => e.copies.push(path),
                     None => {
@@ -262,6 +273,26 @@ impl FontLibrary {
     }
 }
 
+/// Key, metadata and char count of one file. Our files carry all three in `<metadata>` at the
+/// top, so only the first 64 KB is read; other fonts are read whole (their key is a hash).
+fn scan_file(path: &Path) -> Option<(FontKey, FontMeta, usize)> {
+    let mut head = Vec::with_capacity(64 * 1024);
+    std::fs::File::open(path).ok()?.take(64 * 1024).read_to_end(&mut head).ok()?;
+    let valid = match std::str::from_utf8(&head) {
+        Ok(_) => head.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    if let Some((meta, chars)) = svg::read_meta(&head[..valid])
+        && let FontSource::Cloud { id } = meta.source
+        && chars > 0
+    {
+        return Some((FontKey::cloud(id), meta, chars));
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let (meta, chars) = svg::read_meta(&bytes)?;
+    Some((FontKey::of(&meta, &bytes), meta, chars))
+}
+
 fn svg_files(dir: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut v: Vec<PathBuf> =
@@ -351,6 +382,14 @@ mod tests {
         let p = dir.join(file);
         std::fs::write(&p, svg::write(&font(c), &FontMeta { name: file.into(), source: FontSource::Imported })).unwrap();
         p
+    }
+
+    #[test]
+    fn local_ids_map_back_to_keys() {
+        for k in [FontKey::cloud(0), FontKey::cloud(42), FontKey("sha:00ab12ff3c4d".into()), FontKey("sha:ffffffffffff".into())] {
+            assert_eq!(FontKey::from_local_id(k.local_id()), k);
+        }
+        assert!(FontKey("sha:00ab12ff3c4d".into()).local_id() < 0);
     }
 
     #[test]

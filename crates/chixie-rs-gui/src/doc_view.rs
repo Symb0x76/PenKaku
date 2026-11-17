@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use chixie_rs_core::config::{PageSettings, Settings};
 use chixie_rs_doc::EditDoc;
-use chixie_rs_core::font::Font;
 use chixie_rs_core::handwriting::StyleFile;
 use chixie_rs_core::template::Template;
 use chixie_rs_core::layout::{self, Document};
@@ -170,7 +169,8 @@ pub struct DocView {
     caret_visible: bool,
     reveal_caret: bool,
     /// What the current layout was computed from, to skip needless relayouts.
-    layout_key: Option<(Option<i64>, PageSettings, StyleFile, Option<Template>)>,
+    /// What the layout was made from: font set generation, page and style settings, template.
+    layout_key: Option<(u64, PageSettings, StyleFile, Option<Template>)>,
     dirty_draft: bool,
     _tasks: Vec<Task<()>>,
     _subs: Vec<Subscription>,
@@ -261,7 +261,7 @@ impl DocView {
 
     fn relayout_if_changed(&mut self, cx: &mut Context<Self>) {
         let st = cx.global::<AppState>();
-        let key = (st.active_font.as_ref().map(|f| f.id), st.settings.page.clone(), st.settings.style.clone(), st.active_template());
+        let key = (st.font_set_gen, st.settings.page.clone(), st.settings.style.clone(), st.active_template());
         if self.layout_key.as_ref() != Some(&key) {
             self.layout_key = Some(key);
             self.relayout(cx);
@@ -271,15 +271,12 @@ impl DocView {
     fn relayout(&mut self, cx: &mut Context<Self>) {
         let st = cx.global::<AppState>();
         let params = st.settings.page_params_with(st.active_template().as_ref());
-        let empty = Font::default();
-        let (font, has_font) = match &st.active_font {
-            Some(f) => (f.font.clone(), true),
-            None => (Arc::new(empty), false),
-        };
-        self.has_font = has_font;
+        // Every font in use (roles, mix, fallbacks); empty until one is chosen.
+        let fonts = st.font_set.clone();
+        self.has_font = !fonts.is_empty();
         let joins = self.doc.joins();
         let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins };
-        self.layout = Arc::new(layout::layout_flow(&flow, &*font, &params));
+        self.layout = Arc::new(layout::layout_flow(&flow, &*fonts, &params));
         cx.notify();
     }
 
@@ -633,7 +630,6 @@ impl Render for DocView {
         let focus = self.focus.clone();
         let focused = focus.is_focused(window);
         let layout_doc = self.layout.clone();
-        let chars: Rc<[char]> = self.doc.chars().into();
         let sel = self.doc.selection();
         let caret = self.doc.caret();
         let marked = self.doc.marked();
@@ -735,9 +731,8 @@ impl Render for DocView {
                             window.paint_quad(fill(rect, sel_color.opacity(0.35)));
                         }
                         // Missing glyphs: dashed placeholder boxes.
-                        let missing: std::collections::HashSet<char> = layout_doc.missing.iter().copied().collect();
-                        for (bx, c) in layout_doc.boxes.iter().zip(chars.iter()) {
-                            if missing.contains(c) {
+                        for bx in layout_doc.missing_at.iter().filter_map(|&i| layout_doc.boxes.get(i)) {
+                            {
                                 let line = layout_doc.lines[bx.line];
                                 let pad = (line.top - line.bottom) * 0.2;
                                 let rect = Bounds::from_corners(
