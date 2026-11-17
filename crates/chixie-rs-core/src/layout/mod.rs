@@ -41,6 +41,34 @@ pub enum Align {
     Justify,
 }
 
+/// 字符微调: a per-character nudge, size and shape change. Identity = `Tuning::default()`.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Tuning {
+    /// Move right (mm).
+    pub dx_mm: f32,
+    /// Move down (mm); 上移 is negative.
+    pub dy_mm: f32,
+    /// Size factor (A+ / A−), about the glyph's bottom-left.
+    pub scale: f32,
+    /// Width factor (变胖 / 变瘦).
+    pub width: f32,
+    /// 变形: each bump draws a new deformation for this character.
+    pub reroll: u32,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Self { dx_mm: 0.0, dy_mm: 0.0, scale: 1.0, width: 1.0, reroll: 0 }
+    }
+}
+
+impl Tuning {
+    pub fn is_identity(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Paragraph formatting (one per `'\n'`-separated paragraph).
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -292,7 +320,7 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &(impl Glyphs + ?Sized), p:
 /// [`layout_ids`] with paragraph formatting: `paras[k]` applies to the k-th `'\n'`-separated
 /// paragraph (missing entries are left-aligned with the default indent).
 pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
-    layout_flow(&Flow { chars, ids, paras, joins: &[] }, font, p)
+    layout_flow(&Flow { chars, ids, paras, joins: &[], tuning: &[] }, font, p)
 }
 
 /// Everything layout reads from a document.
@@ -305,6 +333,8 @@ pub struct Flow<'a> {
     pub paras: &'a [Para],
     /// 合并内容: `joins[k]` puts char `k + 1` in the same grid cell as char `k`. Missing = false.
     pub joins: &'a [bool],
+    /// 字符微调 per char; missing or `None` = untouched.
+    pub tuning: &'a [Option<Tuning>],
 }
 
 /// Half-width in a grid: two in a row share one cell. Digits and the half space always;
@@ -318,10 +348,11 @@ pub const HALF_SPACE: char = '\u{2009}';
 
 /// Lay out a [`Flow`]. See [`layout_ids`].
 pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
-    let Flow { chars, ids, paras, joins } = *f;
+    let Flow { chars, ids, paras, joins, tuning } = *f;
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
     let join = |k: usize| joins.get(k).copied().unwrap_or(false);
+    let tune = |k: usize| tuning.get(k).copied().flatten().unwrap_or_default();
     let mut para_ix = 0;
     let s = p.mm_per_unit;
     let (ox, oy) = p.origin;
@@ -410,7 +441,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
                 let x = cell_x + w * slot as f32;
                 let (sx, sy) = slot_scale(font.glyph(ch, id), squeeze, n, w);
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
-                draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0);
+                draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0, tune(i));
                 pen.cx = x + w;
                 pen.push_box(x);
                 shared = (slot + 1 < n).then_some((cell_x, slot + 1, n, squeeze));
@@ -423,7 +454,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
                     // (half size; a second one beside it), as composition paper is written.
                     let x = (cols - 1) as f32 * (cw + cg) + cw * (0.5 + 0.25 * hung as f32);
                     let lower = pen.em * 0.5;
-                    draw_char(&mut pen, font, &mut jit, ch, id, x, s * 0.5, s * 0.5, lower);
+                    draw_char(&mut pen, font, &mut jit, ch, id, x, s * 0.5, s * 0.5, lower, tune(i));
                     pen.cx = x + cw * 0.25;
                     pen.push_box(x);
                     hung += 1;
@@ -457,7 +488,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
                 let w = cw / n as f32;
                 let (sx, sy) = slot_scale(font.glyph(ch, id), join(i), n, w);
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
-                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0);
+                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0, tune(i));
                 pen.cx = cell_x + w;
                 pen.col += 1;
                 pen.push_box(cell_x);
@@ -467,7 +498,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
             }
             if ch != ' ' {
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * s);
-                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (cw - adv) / 2.0, s, s, 0.0);
+                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (cw - adv) / 2.0, s, s, 0.0, tune(i));
             }
             pen.cx = cell_x + cw;
             pen.col += 1;
@@ -537,7 +568,13 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
         let x0 = pen.cx;
         // `line_x + cx` is exactly `cx` on Free ruling (line_x = 0), keeping the golden bytes.
         let (cx, line_top) = (pen.line_x + pen.cx, pen.text_top);
-        if !jitter_on && !deform_on {
+        let t = tune(i);
+        if !t.is_identity() {
+            // 字符微调: drawn like a grid cell's char (same jitter and deformation), moved,
+            // resized and re-rolled; the advance is unchanged, so neighbours stay put.
+            draw_char(&mut pen, font, &mut jit, ch, id, cx, s, s, 0.0, t);
+            pen.cx += glyph.advance * s + if jitter_on { jit.spacing(ch, id) } else { p.char_spacing };
+        } else if !jitter_on && !deform_on {
             for stroke in &glyph.strokes {
                 pen.page.strokes.push(
                     stroke
@@ -548,7 +585,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
             }
             pen.cx += glyph.advance * s + p.char_spacing;
         } else {
-            let voff = if jitter_on { jit.vertical(id) } else { 0.0 };
+            let voff = if jitter_on { jit.vertical(id, pen.cx, pen.line_w) } else { 0.0 };
             let mut drng = rng_for(p.style.seed, SALT_DEFORM, id);
             let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), s, &mut drng);
             for stroke in &strokes {

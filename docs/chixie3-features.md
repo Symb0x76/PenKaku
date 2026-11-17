@@ -147,13 +147,13 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Fonts | 本地字体 (offline) | ChiXie3 has none | Done (M4: SVG font folders, watched) | P0 | — |
 | Fonts | 录制字体 | WeChat mini-program guide only | Not planned (link only) | P3 | S |
 | Effects | 字符间隔/空格/垂直偏移/首字不对齐 | layout-time jitter | Done (`handwriting.rs`) | P0 | — |
-| Effects | 智能垂直偏移 | position-proportional drift | Partial (guess, VERIFY) | P2 | S |
+| Effects | 智能垂直偏移 | position-proportional drift | Done (M5, per-row drift; formula VERIFY) | P2 | S |
 | Effects | 首行缩进 | Tab / button inserts random indent | Done (M3) | P1 | S |
-| Effects | 基础变形 | scale, rotate, stroke jitter, tail removal | Partial (`deformation.rs`, tails missing) | P1 | S |
-| Effects | 字形变形 (TPS) | thin-plate-spline warp with similarity check | Partial (slant + noise model) | P2 | M |
-| Effects | 字符微调 | per-char font/size/offset/thin/fat/apply-to-same | Missing | P2 | M |
-| Effects | 重复轨迹/异常宽度优化 | glyph clean-ups | Missing | P2 | S |
-| Effects | 书写优化 (路径) | Douglas-Peucker / Catmull-Rom / uniform | Missing | P2 | S |
+| Effects | 基础变形 | scale, rotate, stroke jitter, tail removal | Done (M5) | P1 | S |
+| Effects | 字形变形 (TPS) | thin-plate-spline warp with similarity check | Done (M5, TPS without the similarity check) | P2 | M |
+| Effects | 字符微调 | per-char font/size/offset/thin/fat/apply-to-same | Done (M5, no per-char font) | P2 | M |
+| Effects | 重复轨迹/异常宽度优化 | glyph clean-ups | Done (M4, 字体优化) | P2 | S |
+| Effects | 书写优化 (路径) | Douglas-Peucker / Catmull-Rom / uniform | Done (M5) | P2 | S |
 | Typeset | 输入排版 / 换行 | width-based row fill, pages | Done (`layout.rs`) | P0 | — |
 | Typeset | 作文格 + 分词 | jieba word blocks kept on one row | Done (M3, option off by default) | P2 | M |
 | Typeset | 合并内容 | several chars in one grid cell | Done (M3) | P3 | S |
@@ -838,7 +838,7 @@ VERIFY by capture (stream stalled before).
 **ChiXie3:** with `intelligent_vertical_offset` the offset depends on the position along the
 row (`position_proportion = target_pos_x / cell_width`), i.e. a smooth drift instead of noise;
 TODOs mention following a whole-row trajectory (C §字符间距) [med]. UI label "(同向偏移)".
-**chixie-rs today:** `intelligent_vertical_offset` as a clamped random walk (guess, VERIFY).
+**chixie-rs today:** Done (M5): per-row drift — each row draws a sweep (keyed by its first char) and the offset runs across the range along the row, ±20 % noise; 随机纠正 halves the sweep. Formula still a best guess (VERIFY).
 **Recommended implementation:** change to a per-row linear drift: draw a slope `k ∈ [−r, r]`
 per row (r = max offset / row width) and offset = k·x + small noise, clamped to the range; this
 matches "position proportion" and "同向" (same direction). Capture to confirm.
@@ -866,8 +866,7 @@ about the glyph centre, then per-stroke scale/rotation/offset derived from the s
 (C §基础变形) [high]. Captured magnitudes in protocol.md [cap]. Note protocol.md lists 高矮 as
 96–104 while the UI and config say 98–102 (conflict: the UI/config value is authoritative for
 defaults; the capture's fits are consistent with either).
-**chixie-rs today:** `deformation.rs` (per-glyph scale, rotation, per-stroke shift); tail
-removal missing.
+**chixie-rs today:** Done (M5): `deformation.rs` (per-glyph scale, rotation, per-stroke shift) plus 随机删除小尾巴 (`remove_tails`, p = 0.3 per stroke, hook < 0.3 mm turning > 90°; VERIFY), drawn last from its own stream.
 **Recommended implementation:** add tail removal: with probability p per stroke, drop the last
 k points whose cumulative length < 0.3 mm and whose turn angle > 90° (a "hook"); VERIFY against
 a capture with many hooked glyphs. Expose the master switch in the 手写 tab. Keep separate RNG
@@ -879,7 +878,7 @@ random perturbations (corner/centre/edge waves); result accepted only when simil
 original (Haar-wavelet similarity, alternatives Euclidean and DTW); retries (`tps_times`). Very
 slow; a TODO says to rewrite in numpy/JIT/C (C §字形变形) [med-high]. Captured: italic-like
 slant on CJK, small smooth residual (protocol.md [cap]).
-**chixie-rs today:** `deformation.rs` models shape as CJK slant + smooth noise.
+**chixie-rs today:** Done (M5): CJK slant plus a thin-plate-spline warp (4×4 control grid, hand-written 19×19 solve, affine part dropped), ~8 µs per glyph in release. Calibrated on the level-7 capture and scaled linearly; captures at 3 and 10 (2026-11-17) cannot resolve the level because ChiXie3's per-paste randomness is as large (see protocol.md).
 **Recommended implementation:** implement a real TPS: 3×3 or 4×4 control grid over the glyph
 bbox, displacements drawn from the seed scaled by level, solve the (n+3)² linear system once per
 glyph (small dense solve; write it by hand or add `nalgebra` — already common, pure Rust).
@@ -898,7 +897,7 @@ the character) and 异常宽度字符处理 (static name 异常宽度字符优�
 form [ui-form]. Needs a selected character ("请选中字符后使用"). 变形 needs deformation on
 ("请先在设置窗口中启用变形配置"). 同步至服务器 only for 超级管理员 (`font/admin_tune_fonts`) (C §字符微调)
 [UI][high].
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M5): `Attrs.tuning` (`layout::Tuning`: dx/dy mm, scale, width, reroll), task-pane card 字符微调 (arrows 0.2 mm, A+/A− 5 %, 变胖/变瘦, 变形, 恢复默认, 应用至同字符); glyph clean-ups are 字体优化 (M4). No per-char font, no server sync.
 **Recommended implementation:** per-character overrides stored in the document:
 `CharTweak { dx, dy, scale_x, font: Option<FontId>, size: Option<f32>, reroll: u32 }` keyed by
 char id (`reroll` bumps the RNG salt = "变形" again). "应用至同字符" copies the tweak to all
@@ -912,7 +911,7 @@ modal dialog; live preview on the page. No server sync.
 (spin box; presumably `RouteImproveValue`, inferred), 恢复默认, 应用至选中字符; at write time `GenerateGcodeOfWritingWithImprove` applies it with progress
 "书写路径优化中". Simplify = Douglas-Peucker (`epsilon`); 方案1 = Catmull-Rom densification
 (`num_points`); 方案2 = uniform arc-length resampling (A §Writing improve; C §路径优化) [high].
-**chixie-rs today:** missing (gcode drops consecutive duplicate points only, like ChiXie3 [cap]).
+**chixie-rs today:** Done (M5): `path.rs` (Douglas-Peucker, Catmull-Rom, uniform resampling), `DeviceProfile.route` applied per stroke in `gcode::emit_mapped` (resume map unchanged), 设备 › 参数设置 › 书写优化; default 无优化.
 **Recommended implementation:** core `path.rs`: `simplify_dp(&[P], eps)`,
 `catmull_rom(&[P], per_seg)`, `resample_uniform(&[P], step_mm)`; applied in `gcode::emit` from a
 `RouteImprove` setting in `DeviceProfile` (it is a machine-smoothness choice, not a layout one).

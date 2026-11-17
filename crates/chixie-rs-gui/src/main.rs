@@ -464,6 +464,39 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             })
         });
         println!("AUTOTEST_BACKSTAGE closed={closed:?}");
+        // Effects: 字符微调 moves exactly the selected character and undo puts it back; 书写优化
+        // (简化路径) never adds G-code lines.
+        // Ink of the selected character (wherever the caret was left).
+        let ink0 = |cx: &mut App| -> Vec<(f32, f32)> {
+            let v = app.read(cx).doc.read(cx);
+            let (c, d) = (v.doc().selection().start, v.document());
+            d.pages.iter().flat_map(|p| p.strokes.iter().zip(&p.stroke_chars)).filter(|(_, k)| **k == c).flat_map(|(s, _)| s.clone()).collect()
+        };
+        // The backstage test left focus elsewhere; the keys below go to the page.
+        let _ = cx.update_window(handle, |_, window, cx| {
+            let focus = app.read(cx).doc.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+        });
+        dispatch(cx, vec![Box::new(doc_view::DocStart), Box::new(doc_view::SelectRight)]);
+        cx.background_executor().timer(pause(300)).await;
+        // (Undo restores the selection too, so the same character is measured after it.)
+        let before = cx.update(ink0);
+        cx.update(|cx| app.read(cx).doc.clone().update(cx, |d, cx| d.tune(|t| t.dx_mm += 0.2, false, cx)));
+        cx.background_executor().timer(pause(300)).await;
+        let after = cx.update(ink0);
+        let tuned = !before.is_empty() && before.iter().zip(&after).all(|(a, b)| (b.0 - a.0 - 0.2).abs() < 1e-3 && (b.1 - a.1).abs() < 1e-3);
+        dispatch(cx, vec![Box::new(doc_view::Undo)]);
+        cx.background_executor().timer(pause(300)).await;
+        let undone = cx.update(ink0) == before;
+        let route_ok = cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx).document();
+            let mut prof = cx.global::<AppState>().settings.device.profile.clone();
+            let plain = d.pages.first().map(|p| chixie_rs_core::gcode::emit(p, &prof).lines().count()).unwrap_or(0);
+            prof.route = chixie_rs_core::path::RouteImprove { mode: chixie_rs_core::path::RouteMode::Simplify, value: 0.02 };
+            let simplified = d.pages.first().map(|p| chixie_rs_core::gcode::emit(p, &prof).lines().count()).unwrap_or(0);
+            plain > 0 && simplified <= plain
+        });
+        println!("AUTOTEST_EFFECTS tuned={tuned} undo={undone} route={route_ok}");
         // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
         // 英文字体 role, and survives export + import.
         use chixie_rs_core::font::svg::{self, FontMeta, FontSource};

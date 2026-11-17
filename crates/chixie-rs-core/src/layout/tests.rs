@@ -334,7 +334,7 @@ fn combined_chars_share_one_cell_squeezed() {
     let chars: Vec<char> = "你好世界".chars().collect();
     let ids = [0, 1, 2, 3];
     let joins = [true, true, false, false];
-    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins }, &grid_font(), &grid_params(false));
+    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins, tuning: &[] }, &grid_font(), &grid_params(false));
     let w = 10.0 / 3.0;
     let want = [0.0, w, 2.0 * w, 10.0];
     assert!(box_x0s(&doc).iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4), "{:?}", box_x0s(&doc));
@@ -463,4 +463,37 @@ fn grid_aligns_by_whole_cells_and_indents_two_cells() {
     assert_eq!(grid(Align::Center, None).boxes[0].x0, 10.0);
     assert_eq!(grid(Align::Justify, None).boxes[0].x0, 0.0);
     assert_eq!(grid(Align::Left, Some(16.0)).boxes[0].x0, 10.0);
+}
+
+#[test]
+fn tuning_moves_resizes_and_rerolls_one_char() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let chars: Vec<char> = "你好你".chars().collect();
+    let ids = [1, 2, 3];
+    let p = PageParams { deformation: Deformation { enabled: true, base: true, ..Default::default() }, ..Default::default() };
+    let lay = |t: Option<Tuning>| layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &[], tuning: &[None, t, None] }, &font, &p);
+    let plain = lay(None);
+    let ink = |d: &Document, c: usize| -> Vec<(f32, f32)> {
+        d.pages[0].strokes.iter().zip(&d.pages[0].stroke_chars).filter(|(_, k)| **k == c).flat_map(|(s, _)| s.iter().copied()).collect()
+    };
+    // Nudge: exactly that char moves; the others and the boxes do not.
+    let moved = lay(Some(Tuning { dx_mm: 0.4, dy_mm: -0.2, ..Default::default() }));
+    for (a, b) in ink(&plain, 1).iter().zip(ink(&moved, 1)) {
+        assert!((b.0 - a.0 - 0.4).abs() < 1e-4 && (b.1 - a.1 - 0.2).abs() < 1e-4, "{a:?} {b:?}");
+    }
+    assert_eq!((ink(&plain, 0), ink(&plain, 2)), (ink(&moved, 0), ink(&moved, 2)));
+    assert_eq!(plain.boxes, moved.boxes);
+    // Bigger and narrower: the bottom (glyph y = 7 units) stays, the width shrinks.
+    let span = |v: &[(f32, f32)]| {
+        let (x0, x1) = v.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+        let (y0, y1) = v.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+        (x1 - x0, y1 - y0)
+    };
+    let big = lay(Some(Tuning { scale: 1.1, width: 0.9, ..Default::default() }));
+    let ((w0, h0), (w1, h1)) = (span(&ink(&plain, 1)), span(&ink(&big, 1)));
+    assert!((h1 / h0 - 1.1).abs() < 0.01 && (w1 / w0 - 0.99).abs() < 0.01, "{w0} {h0} -> {w1} {h1}");
+    // 变形: another deformation, same place.
+    let rerolled = lay(Some(Tuning { reroll: 1, ..Default::default() }));
+    assert_ne!(ink(&plain, 1), ink(&rerolled, 1));
+    assert_eq!(plain.boxes, rerolled.boxes);
 }

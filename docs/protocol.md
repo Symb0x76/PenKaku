@@ -185,6 +185,22 @@ residual after it. Single-stroke `1` is collinear, so its sx is unreliable.
 
 Captures: `captures/{a2_pasted_deform_off,d_base_deform,d_shape_deform7}.gcode` (local only).
 
+**字形变形 levels 3 and 10 (captured 2026-11-17, 作文格1, 艾玛体 100, base deformation off):**
+two deform-off controls, two captures at level 3 and two at 10, each pasted fresh (`tools/capture`,
+fit `tools/capture/shape_fit.py`, local only). Per-glyph affine fit against control 1, medians:
+
+| capture | sx | sy | rot | shear | residual mm |
+|---|---|---|---|---|---|
+| control 2 (deform off) | 1.062 | 1.003 | −0.30° | +0.019 | 0.066 |
+| level 3 (a / b) | 1.023 / 1.003 | 0.993 / 0.980 | +0.68° / +2.41° | +0.064 / +0.119 | 0.105 / 0.191 |
+| level 10 (a / b) | 1.017 / 1.022 | 1.015 / 1.010 | +1.18° / +0.16° | +0.039 / +0.016 | 0.092 / 0.059 |
+
+Two deform-off pastes differ from each other as much as level 3 or 10 differs from the control
+(per glyph: scale 0.95–1.10, shear ±0.08, residual 0.05–0.2 mm), and level 10 is not larger
+than level 3. ChiXie3's per-paste randomness (above) hides the 字形变形 level, so G-code captures
+cannot calibrate it. chixie-rs keeps the level-7 fit (slant −0.12…−0.13, residual 0.035–0.106 mm)
+and scales it linearly with the level (VERIFY with typed text if it ever matters).
+
 **Multi-line layout (captured 2026-11-07, 艾玛体 100, effects off)**
 - Text: `你好赤写`×10 + ` A1 A1` ⏎ `写赤好你 写赤 A1` ⏎ `你 好 赤 写`.
 - ChiXie3's Telnet streaming stalls on long jobs: at ~44, ~752 and ~1682 lines, even with a 3 ms ack

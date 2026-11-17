@@ -31,6 +31,7 @@ Keep a hand near the power switch for the first run after any device-code change
 | 13 | Templates | one 信纸 and one 作文格 page | text sits on the printed lines / in the cells (± 0.5 mm) | |
 | 13a | Typesetting (M3) | 作文格 page with "，" and "。”" falling at row ends and "2026年"; 信纸 page with one 居中 title, one 右对齐 line and a Tab-indented paragraph | marks sit in the last cell's lower right, never at a row start; "20" / "26" share cells; title centred, right line ends at the margin, indent ≈ 16 mm; written as on screen | |
 | 13b | Mixed fonts (M4) | 字体库: two fonts 加入混用 (weights 3 and 1), a third as 英文字体; write a page of Chinese with a few English words | Chinese characters alternate between the two fonts (about 3:1), English words use the 英文 font; 换一组 changes which character gets which | |
+| 13c | Effects (M5) | 手写 › 字符变形 on with 字形变形幅度 10 and 随机删除小尾巴; 字符微调 one character (上移 ×2, A+); 书写优化 简化路径 | characters lean and bend slightly, each differently; the tuned character sits 0.4 mm higher and 5 % larger; the job runs as before with fewer G-code lines | |
 | 14 | Long job | 20 pages, sheets changed promptly (M1 done-when) | completes with only sheet changes; no stalls, no drift between pages | |
 | 15 | Wireless long job | ≥ 2000 lines over Telnet (where ChiXie3 stalls at ~44 / 752 / 1682) | completes; a lost ack shows the "已自动同步" toast instead of hanging | |
 

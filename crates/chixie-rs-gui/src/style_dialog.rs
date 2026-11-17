@@ -1,9 +1,13 @@
 //! 手写效果 ↘ dialog: min/max ranges for spacing, offsets, indent and deformation. Every edit
 //! is applied to the settings at once (the page re-lays out live).
 
+use chixie_rs_core::deformation::Deformation;
 use chixie_rs_core::handwriting::{Span, StyleFile};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::state::AppState;
@@ -94,6 +98,57 @@ impl Render for StyleDialog {
                     .child(div().w(px(110.)).child(NumberInput::new(hi).small().suffix(*unit))),
             );
         }
-        col.child(div().pt_2().text_xs().text_color(muted).child("修改即时生效；开关在「手写」选项卡。"))
+        let style = cx.global::<AppState>().settings.style.clone();
+        let edit = |f: fn(&mut StyleFile, bool)| {
+            move |v: &bool, _w: &mut Window, cx: &mut App| {
+                let st = cx.global_mut::<AppState>();
+                f(&mut st.settings.style, *v);
+                st.save_settings();
+            }
+        };
+        let shape = style.deformation.shape_degree;
+        let shape_menu = Button::new("shape-degree").small().outline().label(format!("字形变形幅度 {}", fmt_num(shape))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            (0..=10).fold(m, |m, k| {
+                m.item(PopupMenuItem::new(k.to_string()).checked(k as f32 == shape).on_click(move |_, _w, cx| {
+                    let st = cx.global_mut::<AppState>();
+                    st.settings.style.deformation.shape_degree = k as f32;
+                    st.save_settings();
+                }))
+            })
+        });
+        col.child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("细节"))
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(Checkbox::new("tails").small().label("随机删除小尾巴").checked(style.deformation.remove_tails).on_click(edit(|s, v| s.deformation.remove_tails = v)))
+                    .child(
+                        Checkbox::new("drift")
+                            .small()
+                            .label("智能偏移（同向偏移）")
+                            .checked(style.handwriting.intelligent_vertical_offset)
+                            .on_click(edit(|s, v| s.handwriting.intelligent_vertical_offset = v)),
+                    ),
+            )
+            .child(
+                h_flex().gap_2().child(shape_menu).child(div().flex_1()).child(Button::new("recommended").small().label("使用推荐参数").on_click(|_: &ClickEvent, window, cx| {
+                    window.open_dialog(cx, |d, _w, _cx| {
+                        d.title("使用推荐参数").w(px(360.)).child("确认将字符变形参数设置为推荐参数吗？").footer(
+                            h_flex().gap_2().justify_end().child(Button::new("rec-cancel").label("取消").on_click(|_: &ClickEvent, w, cx| w.close_dialog(cx))).child(
+                                Button::new("rec-ok").primary().label("确定").on_click(|_: &ClickEvent, w, cx| {
+                                    let st = cx.global_mut::<AppState>();
+                                    let d = &mut st.settings.style.deformation;
+                                    // ChiXie3's shipped values; the on/off switches stay as they are.
+                                    let rec = Deformation::recommended();
+                                    (d.h_scale_pct, d.v_scale_pct, d.rotation_deg, d.stroke_degree, d.shape_degree, d.remove_tails) =
+                                        (rec.h_scale_pct, rec.v_scale_pct, rec.rotation_deg, rec.stroke_degree, rec.shape_degree, rec.remove_tails);
+                                    st.save_settings();
+                                    w.close_dialog(cx);
+                                }),
+                            ),
+                        )
+                    });
+                })),
+            )
+            .child(div().pt_2().text_xs().text_color(muted).child("修改即时生效；总开关在「手写」选项卡。范围数值需重新打开本窗口才会刷新。"))
     }
 }

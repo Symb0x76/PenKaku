@@ -6,6 +6,7 @@
 mod backstage;
 pub(crate) mod fonts_ctl;
 mod resume;
+mod tune;
 mod ribbon_tabs;
 
 use std::path::PathBuf;
@@ -92,6 +93,8 @@ pub struct ChixieRsApp {
     win_title: String,
     /// 断点续写 card and the break point of the last interrupted job.
     pub(crate) resume: resume::Resume,
+    /// The 字符微调 card is shown in the task pane.
+    tune_open: bool,
     /// Library folders watched for added / removed fonts.
     library_watch: Option<fonts_ctl::LibraryWatch>,
     _tasks: Vec<Task<()>>,
@@ -225,6 +228,7 @@ impl ChixieRsApp {
             zoom_slider,
             win_title: String::new(),
             resume: Default::default(),
+            tune_open: false,
             library_watch: None,
             _tasks: vec![pump, dev_pump, autosave],
             _subs: subs,
@@ -1083,6 +1087,7 @@ impl ChixieRsApp {
                     }))),
             )
             .when(self.resume.open, |el| el.child(self.resume_card(cx)))
+            .when(self.tune_open, |el| el.child(self.tune_card(cx)))
             .child(div().flex_1().min_h_0().child(self.device.clone()))
             .into_any_element()
     }

@@ -1,6 +1,6 @@
 //! Line and page bookkeeping while laying out.
 
-use super::{Align, CharBox, Document, Guide, LineInfo, Page, PageBox, PageParams, Ruling};
+use super::{Align, CharBox, Tuning, Document, Guide, LineInfo, Page, PageBox, PageParams, Ruling};
 use crate::font::fontset::Glyphs;
 use crate::font::{Font, Glyph};
 use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, is_cjk, rng_for};
@@ -275,7 +275,7 @@ fn draw_scaled(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, sx
 /// line's text top, plus its jitter and deformation as configured. A char the font lacks is
 /// listed as missing and draws nothing.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32) {
+pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32, t: Tuning) {
     // Spaces (a half space sharing a grid cell) draw nothing and are never missing.
     if ch.is_whitespace() {
         return;
@@ -289,9 +289,15 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
         return;
     };
     let p = pen.p;
-    let voff = voff + if p.style.enabled { jit.vertical(id) } else { 0.0 };
+    // 字符微调: move, then scale about the glyph's bottom-left (the top moves, the foot stays).
+    let (x, voff) = (x + t.dx_mm, voff + t.dy_mm + (1.0 - t.scale) * super::EM_UNITS * sy);
+    let (sx, sy) = (sx * t.scale * t.width, sy * t.scale);
+    // 变形 again: another deformation stream for this character.
+    let deform_id = id.wrapping_add(u64::from(t.reroll).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let row_w = pen.line_w;
+    let voff = voff + if p.style.enabled { jit.vertical(id, x, row_w) } else { 0.0 };
     if p.deformation.is_active() {
-        let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), sy, &mut rng_for(p.style.seed, SALT_DEFORM, id));
+        let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), sy, &mut rng_for(p.style.seed, SALT_DEFORM, deform_id));
         draw_scaled(pen, &strokes, x, voff, sx, sy);
     } else {
         draw_scaled(pen, &glyph.strokes, x, voff, sx, sy);

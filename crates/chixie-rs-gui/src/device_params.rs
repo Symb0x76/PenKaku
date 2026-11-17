@@ -195,6 +195,40 @@ impl DeviceParams {
     }
 
     #[inline(never)]
+    /// 书写优化: 优化规则 and its strength (简化 tolerance / 扩张数量 / point spacing).
+    fn route_menu(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> AnyElement {
+        use chixie_rs_core::path::{RouteImprove, RouteMode};
+        let route = p.route;
+        let this = cx.entity().downgrade();
+        let w1 = this.clone();
+        let mode = Button::new("route-mode").small().outline().w_full().label(route.mode.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            RouteMode::ALL.iter().fold(m, |m, &mode| {
+                let this = w1.clone();
+                m.item(PopupMenuItem::new(mode.label()).checked(mode == route.mode).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.route = RouteImprove { mode, value: mode.default_value() }));
+                }))
+            })
+        });
+        let (presets, unit): (&[f32], &str) = match route.mode {
+            RouteMode::None => (&[], ""),
+            RouteMode::Simplify => (&[0.01, 0.02, 0.05, 0.1], "mm 误差"),
+            RouteMode::CatmullRom => (&[2.0, 4.0, 8.0], "扩张数量"),
+            RouteMode::Uniform => (&[0.1, 0.2, 0.5], "mm 间距"),
+        };
+        let w2 = this.clone();
+        let strength = (!presets.is_empty()).then(|| {
+            Button::new("route-value").small().outline().label(format!("{} {unit}", fmt_num(route.value))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+                presets.iter().fold(m, |m, &value| {
+                    let this = w2.clone();
+                    m.item(PopupMenuItem::new(format!("{} {unit}", fmt_num(value))).checked(value == route.value).on_click(move |_, _w, cx| {
+                        let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.route.value = value));
+                    }))
+                })
+            })
+        });
+        h_flex().gap_2().child(div().flex_1().child(mode)).children(strength).into_any_element()
+    }
+
     fn form(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.profile(cx).clone();
         let theme = cx.theme();
@@ -265,6 +299,7 @@ impl DeviceParams {
             })
             .child(div().text_xs().text_color(muted).child(format!("抬笔：{}　落笔：{}", p.pen_up_cmd(), p.pen_down_cmd())))
             .child(row("写完位置", end.into_any_element()))
+            .child(row("书写优化", self.route_menu(&p, cx)))
             .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("坐标方向"))
             .child(
                 h_flex()

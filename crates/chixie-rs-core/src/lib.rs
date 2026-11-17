@@ -13,6 +13,7 @@ pub mod font_store;
 pub mod gcode;
 pub mod handwriting;
 pub mod layout;
+pub mod path;
 pub mod session;
 pub mod template;
 
