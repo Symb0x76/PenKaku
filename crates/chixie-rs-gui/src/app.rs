@@ -4,6 +4,7 @@
 //! Session and device events are pumped here and fanned out to views + toasts.
 
 mod backstage;
+pub(crate) mod fonts_ctl;
 mod resume;
 mod ribbon_tabs;
 
@@ -91,6 +92,8 @@ pub struct ChixieRsApp {
     win_title: String,
     /// 断点续写 card and the break point of the last interrupted job.
     pub(crate) resume: resume::Resume,
+    /// Library folders watched for added / removed fonts.
+    library_watch: Option<fonts_ctl::LibraryWatch>,
     _tasks: Vec<Task<()>>,
     _subs: Vec<Subscription>,
 }
@@ -172,8 +175,17 @@ impl ChixieRsApp {
                 }
             }),
             cx.subscribe_in(&fonts, window, |this, _v, ev: &FontsEvent, window, cx| match ev {
-                FontsEvent::UseLocal(id) => this.load_local_font(*id, window, cx),
+                FontsEvent::UseLocal(id) => this.use_main_font(*id, window, cx),
                 FontsEvent::RemoveLocal(id) => this.remove_local_font(*id, window, cx),
+                FontsEvent::SetRole(id, role) => this.set_role(*id, *role, window, cx),
+                FontsEvent::ClearRole(role) => this.clear_role(*role, window, cx),
+                FontsEvent::ToggleMix(id) => this.toggle_mix(*id, window, cx),
+                FontsEvent::MixWeight(id, w) => this.set_mix_weight(*id, *w, window, cx),
+                FontsEvent::RerollMix => this.reroll_mix(window, cx),
+                FontsEvent::Reveal(id) => this.reveal_font(*id, window, cx),
+                FontsEvent::Export(id) => this.export_font(*id, window, cx),
+                FontsEvent::Import => this.import_fonts(window, cx),
+                FontsEvent::OpenFolder => this.open_font_folder(window, cx),
                 FontsEvent::Login => {
                     window.close_dialog(cx);
                     this.open_backstage(Stage::Account, window, cx);
@@ -186,13 +198,11 @@ impl ChixieRsApp {
                 }
             }),
         ];
-        // No login needed: list downloaded fonts and reopen the last one from disk.
+        // No login needed: list the library, load the fonts in use, and watch the folders.
         cx.defer_in(window, |this, window, cx| {
             this.sync_font_select(window, cx);
-            let st = cx.global::<AppState>();
-            if let Some(id) = st.settings.page.font_id.filter(|id| st.fonts.contains(*id)) {
-                this.load_local_font(id, window, cx);
-            }
+            this.reload_fonts(window, cx);
+            this.watch_library(window, cx);
         });
         Self {
             tab: 0,
@@ -215,6 +225,7 @@ impl ChixieRsApp {
             zoom_slider,
             win_title: String::new(),
             resume: Default::default(),
+            library_watch: None,
             _tasks: vec![pump, dev_pump, autosave],
             _subs: subs,
         }
@@ -229,7 +240,7 @@ impl ChixieRsApp {
                 // The last-used font is normally already loaded from the local store; fetch it only
                 // if it was never downloaded.
                 if st.active_font.is_none()
-                    && let Some(id) = st.settings.page.font_id.filter(|id| !st.fonts.contains(*id))
+                    && let Some(id) = st.settings.fonts.roles.main.as_ref().and_then(|k| k.cloud_id()).filter(|id| !st.fonts.contains(*id))
                 {
                     st.session.send(Command::LoadFont { id });
                 }
@@ -279,19 +290,23 @@ impl ChixieRsApp {
                 self.fonts.update(cx, |f, cx| f.font_loaded(cx));
                 let glyphs = font.glyphs.len();
                 // Keep a copy on this computer so the font works without logging in next time.
+                // Saved into the library folder as an SVG font; then it becomes the main font.
                 let store = cx.global::<AppState>().fonts.clone();
                 let (to_save, save_name) = (font.clone(), name.clone());
-                cx.background_executor()
-                    .spawn(async move {
-                        if let Err(e) = store.save(id, &save_name, &to_save) {
-                            log::warn!("saving font {id} locally: {e}");
-                        }
-                    })
-                    .detach();
+                let save = cx.background_executor().spawn(async move { store.save(id, &save_name, &to_save) });
+                cx.spawn_in(window, async move |this, cx| {
+                    let res = save.await;
+                    let _ = this.update_in(cx, |app, window, cx| match res {
+                        Ok(()) => app.set_role(id, fonts_ctl::Role::Main, window, cx),
+                        Err(e) => window.push_notification(Notification::error(format!("保存字体失败：{e}")), cx),
+                    });
+                })
+                .detach();
+                // Usable right away, before the save finishes.
                 let st = cx.global_mut::<AppState>();
+                st.font_set = std::sync::Arc::new(chixie_rs_core::font::fontset::FontSet::single(font.clone()));
+                st.font_set_gen += 1;
                 st.active_font = Some(ActiveFont { id, name: name.clone(), font });
-                st.settings.page.font_id = Some(id);
-                st.save_settings();
                 if window.has_active_dialog(cx) {
                     window.close_dialog(cx);
                 }
@@ -391,7 +406,7 @@ impl ChixieRsApp {
     /// Use font `id`: from the local store if downloaded, else download it (login needed).
     pub fn use_font_id(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
         if cx.global::<AppState>().fonts.contains(id) {
-            self.load_local_font(id, window, cx);
+            self.use_main_font(id, window, cx);
         } else if cx.global::<AppState>().user.is_some() {
             self.fonts.update(cx, |f, cx| f.use_font(id, cx));
         } else {
@@ -400,44 +415,24 @@ impl ChixieRsApp {
         }
     }
 
-    /// Load a downloaded font from disk (no login, no network).
-    pub fn load_local_font(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
-        let store = cx.global::<AppState>().fonts.clone();
-        let task = cx.background_executor().spawn(async move {
-            let name = store.name_of(id).unwrap_or_else(|| placeholder_name(id));
-            store.load(id).map(|f| (name, f))
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let res = task.await;
-            let _ = this.update_in(cx, |app, window, cx| match res {
-                Ok((name, font)) => {
-                    let st = cx.global_mut::<AppState>();
-                    if !st.previews.contains_key(&id)
-                        && let Some(p) = FontPreview::new(&font, &name)
-                    {
-                        st.previews.insert(id, std::sync::Arc::new(p));
-                    }
-                    st.active_font = Some(ActiveFont { id, name, font: std::sync::Arc::new(font) });
-                    st.settings.page.font_id = Some(id);
-                    st.save_settings();
-                    if window.has_active_dialog(cx) {
-                        window.close_dialog(cx);
-                    }
-                    app.sync_font_select(window, cx);
-                    cx.notify();
-                }
-                Err(e) => window.push_notification(Notification::error(format!("读取本地字体失败：{e}")), cx),
-            });
-        })
-        .detach();
-    }
-
     fn remove_local_font(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
         if let Err(e) = cx.global::<AppState>().fonts.remove(id) {
             window.push_notification(Notification::error(format!("删除失败：{e}")), cx);
         }
+        // A deleted font no longer plays a role or takes part in the mix.
+        let key = chixie_rs_core::font::library::FontKey::from_local_id(id);
+        self.edit_settings(cx, |st| {
+            let f = &mut st.settings.fonts;
+            for r in fonts_ctl::Role::ALL {
+                if r != fonts_ctl::Role::Main && r.get(&f.roles) == Some(&key) {
+                    *r.slot(&mut f.roles) = None;
+                }
+            }
+            f.mix.retain(|m| m.key != key);
+        });
         self.sync_font_select(window, cx);
         self.fonts.update(cx, |_, cx| cx.notify());
+        self.reload_fonts(window, cx);
     }
 
     pub fn focus_doc(&self, window: &mut Window, cx: &mut App) {
@@ -993,9 +988,11 @@ impl ChixieRsApp {
                 let chars: String = layout.missing.iter().take(12).collect();
                 el.child(
                     cell("sb-missing")
+                        .cursor_pointer()
                         .text_color(danger)
                         .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
-                        .child(format!("缺字 {missing}：{chars}")),
+                        .child(format!("缺字 {missing}：{chars}"))
+                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_missing_dialog(w, cx))),
                 )
             })
             .when(punct_issues > 0, |el| {

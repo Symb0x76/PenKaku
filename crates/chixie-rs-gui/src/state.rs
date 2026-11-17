@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use chixie_rs_core::config::Settings;
 use chixie_rs_core::font::Font;
-use chixie_rs_core::font_store::FontStore;
+use chixie_rs_core::font::fontset::FontSet;
 use chixie_rs_core::session::SessionHandle;
 use chixie_rs_core::template::{Template, TemplateStore};
 use gpui_kit::Global;
@@ -33,10 +33,15 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub session: SessionHandle,
     pub user: Option<User>,
+    /// The main (主线) font, for names in the UI.
     pub active_font: Option<ActiveFont>,
+    /// Every font writing uses: roles, mix and fallbacks (see `ChixieRsApp::reload_fonts`).
+    pub font_set: Arc<FontSet>,
+    /// Bumped whenever `font_set` changes, so views know to lay out again.
+    pub font_set_gen: u64,
     pub templates: TemplateStore,
     /// Downloaded fonts kept on this computer (work without login).
-    pub fonts: std::sync::Arc<FontStore>,
+    pub fonts: std::sync::Arc<crate::font_lib::LibraryStore>,
     pub templates_path: PathBuf,
     /// Font picker previews by font id (built from local fonts in the background).
     pub previews: HashMap<i64, Arc<FontPreview>>,

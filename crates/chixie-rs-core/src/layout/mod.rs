@@ -9,7 +9,10 @@
 //! test and the `legacy` oracle below check this; don't reorder the math.
 
 use crate::deformation::Deformation;
-use crate::font::{Font, Glyph};
+use crate::font::Glyph;
+use crate::font::fontset::Glyphs;
+#[cfg(test)]
+use crate::font::Font;
 use crate::handwriting::{HandwritingStyle, Jitter, SALT_DEFORM, is_cjk, rng_for};
 
 pub mod kinsoku;
@@ -97,6 +100,8 @@ pub struct Document {
     /// Characters with no glyph in the font (each skipped with a space-width advance), deduped,
     /// in first-seen order.
     pub missing: Vec<char>,
+    /// Index of every character drawn as a 缺字 placeholder (no font has it), in text order.
+    pub missing_at: Vec<usize>,
     /// One box per input character (glyphs, spaces, newlines, missing glyphs), in text order.
     pub boxes: Vec<CharBox>,
     /// Every line, in order; caret positions on a line are `start..=end` (char indices).
@@ -268,7 +273,7 @@ impl Default for PageParams {
 
 /// Lay out `text` with `font`, using character positions as ids (`0..n`). Unknown characters
 /// advance like a space and are listed in `Document::missing`. See [`layout_ids`].
-pub fn layout(text: &str, font: &Font, p: &PageParams) -> Document {
+pub fn layout(text: &str, font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
     let chars: Vec<char> = text.chars().collect();
     let ids: Vec<u64> = (0..chars.len() as u64).collect();
     layout_ids(&chars, &ids, font, p)
@@ -280,13 +285,13 @@ pub fn layout(text: &str, font: &Font, p: &PageParams) -> Document {
 ///
 /// With jitter and deformation off, every coordinate uses the original expressions (see module
 /// docs), so the output stays byte-identical to the pre-refactor pipeline.
-pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> Document {
+pub fn layout_ids(chars: &[char], ids: &[u64], font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
     layout_doc(chars, ids, &[], font, p)
 }
 
 /// [`layout_ids`] with paragraph formatting: `paras[k]` applies to the k-th `'\n'`-separated
 /// paragraph (missing entries are left-aligned with the default indent).
-pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &PageParams) -> Document {
+pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
     layout_flow(&Flow { chars, ids, paras, joins: &[] }, font, p)
 }
 
@@ -312,7 +317,7 @@ pub fn half_width(c: char, letters: bool) -> bool {
 pub const HALF_SPACE: char = '\u{2009}';
 
 /// Lay out a [`Flow`]. See [`layout_ids`].
-pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
+pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
     let Flow { chars, ids, paras, joins } = *f;
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
@@ -403,8 +408,8 @@ pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
             if let Some((cell_x, slot, n, squeeze)) = shared {
                 let w = cw / n as f32;
                 let x = cell_x + w * slot as f32;
-                let (sx, sy) = slot_scale(glyph_for(font, ch), squeeze, n, w);
-                let adv = glyph_for(font, ch).map_or(0.0, |g| g.advance * sx);
+                let (sx, sy) = slot_scale(font.glyph(ch, id), squeeze, n, w);
+                let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
                 draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0);
                 pen.cx = x + w;
                 pen.push_box(x);
@@ -450,8 +455,8 @@ pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
             };
             if n > 1 {
                 let w = cw / n as f32;
-                let (sx, sy) = slot_scale(glyph_for(font, ch), join(i), n, w);
-                let adv = glyph_for(font, ch).map_or(0.0, |g| g.advance * sx);
+                let (sx, sy) = slot_scale(font.glyph(ch, id), join(i), n, w);
+                let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
                 draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0);
                 pen.cx = cell_x + w;
                 pen.col += 1;
@@ -461,7 +466,7 @@ pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
                 continue;
             }
             if ch != ' ' {
-                let adv = glyph_for(font, ch).map_or(0.0, |g| g.advance * s);
+                let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * s);
                 draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (cw - adv) / 2.0, s, s, 0.0);
             }
             pen.cx = cell_x + cw;
@@ -484,24 +489,25 @@ pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
                 if jitter_on {
                     pen.cx += jit.space(prev, id);
                 } else {
-                    pen.cx += font.get(' ').map(|gl| gl.advance * s).unwrap_or(p.space_width);
+                    pen.cx += font.space().map(|gl| gl.advance * s).unwrap_or(p.space_width);
                     pen.cx += p.char_spacing;
                 }
                 pen.push_box(x0);
                 continue;
             }
             HALF_SPACE => {
-                let full = if jitter_on { jit.space(prev, id) } else { font.get(' ').map(|gl| gl.advance * s).unwrap_or(p.space_width) + p.char_spacing };
+                let full = if jitter_on { jit.space(prev, id) } else { font.space().map(|gl| gl.advance * s).unwrap_or(p.space_width) + p.char_spacing };
                 pen.cx += full / 2.0;
                 pen.push_box(x0);
                 continue;
             }
             _ => {}
         }
-        let Some(glyph) = glyph_for(font, ch) else {
+        let Some(glyph) = font.glyph(ch, id) else {
             if !pen.doc.missing.contains(&ch) {
                 pen.doc.missing.push(ch);
             }
+            pen.doc.missing_at.push(i);
             if jitter_on {
                 pen.cx += jit.space(Some(ch), id);
             } else {

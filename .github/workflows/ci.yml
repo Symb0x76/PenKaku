@@ -59,6 +59,7 @@ jobs:
           grep -q 'AUTOTEST_DOCX round_trip=true' autotest.log
           grep -q 'AUTOTEST_TYPESET align=Right indent=true half_space=true right_at_margin=true punct_issues=0' autotest.log
           grep -q 'AUTOTEST_BACKSTAGE closed=Ok(true)' autotest.log
+          grep -q 'AUTOTEST_FONTS watched=true english_routed=true export_import=true' autotest.log
 
       - name: Upload build
         uses: actions/upload-artifact@v4

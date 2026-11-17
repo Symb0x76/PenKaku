@@ -27,6 +27,32 @@ pub struct Settings {
     pub page: PageSettings,
     pub style: StyleFile,
     pub ui: UiSettings,
+    pub fonts: FontSettings,
+}
+
+/// Font library folders (选项 › 字体).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FontSettings {
+    /// The default library folder; `None` = `Documents/chixie-rs/Fonts`.
+    pub library_dir: Option<PathBuf>,
+    /// Extra folders scanned for fonts (shared drives, USB sticks).
+    pub extra_dirs: Vec<PathBuf>,
+    /// 主线 / 英文 / 符号 / 数字字体.
+    pub roles: crate::font::fontset::FontRoles,
+    /// 字体混用: fonts and weights for Chinese characters; empty = off.
+    pub mix: Vec<crate::font::fontset::MixEntry>,
+    /// 换一组: changes which character gets which mixed font.
+    pub mix_salt: u64,
+    /// 字体优化 applied when fonts are loaded.
+    pub fix: crate::font::fix::FontFix,
+}
+
+impl FontSettings {
+    pub fn library(&self) -> crate::font::library::FontLibrary {
+        let dir = self.library_dir.clone().unwrap_or_else(crate::font::library::default_dir);
+        crate::font::library::FontLibrary::new(dir, self.extra_dirs.clone())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

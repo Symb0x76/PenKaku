@@ -228,6 +228,7 @@ impl ChixieRsApp {
                 let v = *v;
                 t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
             })))
+            .child(self.bs_font_options(cx))
             .child(div().pt_2().text_base().font_weight(FontWeight::SEMIBOLD).child("从炽写迁移"))
             .child(
                 h_flex()
@@ -240,6 +241,59 @@ impl ChixieRsApp {
                     ))),
             )
             .child(div().text_xs().text_color(muted).child(format!("设置文件：{path}")))
+            .into_any_element()
+    }
+
+    /// 选项 › 字体: the library folders and 字体优化.
+    #[inline(never)]
+    fn bs_font_options(&self, cx: &mut Context<Self>) -> AnyElement {
+        let st = cx.global::<AppState>();
+        let fonts = st.settings.fonts.clone();
+        let default_dir = st.fonts.dir().display().to_string();
+        let muted = cx.theme().muted_foreground;
+        let fix = fonts.fix;
+        let fix_box = |id: &'static str, label: &'static str, on: bool, set: fn(&mut chixie_rs_core::font::fix::FontFix, bool)| {
+            Checkbox::new(id).label(label).checked(on).on_click(cx.listener(move |t, v: &bool, w, cx| {
+                let mut f = cx.global::<AppState>().settings.fonts.fix;
+                set(&mut f, *v);
+                t.set_font_fix(f, w, cx);
+            }))
+        };
+        let mut extra = v_flex().gap_1();
+        for (i, d) in fonts.extra_dirs.iter().enumerate() {
+            extra = extra.child(
+                h_flex()
+                    .gap_2()
+                    .child(div().flex_1().min_w_0().truncate().text_sm().child(d.display().to_string()))
+                    .child(Button::new(("opt-rmdir", i)).ghost().xsmall().label("移除").on_click(cx.listener(move |t, _: &ClickEvent, w, cx| t.remove_library_dir(i, w, cx)))),
+            );
+        }
+        v_flex()
+            .gap_2()
+            .child(div().pt_2().text_base().font_weight(FontWeight::SEMIBOLD).child("字体"))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().text_sm().child("字体文件夹："))
+                    .child(div().flex_1().min_w_0().truncate().text_sm().child(default_dir))
+                    .child(Button::new("opt-movedir").small().label("更改…").tooltip("字体文件会一起移过去").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.change_library_dir(w, cx)))),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().text_sm().child("其他字体文件夹（共享盘、U 盘）："))
+                    .child(Button::new("opt-adddir").small().label("添加…").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.add_library_dir(w, cx)))),
+            )
+            .child(extra)
+            .child(div().text_xs().text_color(muted).child("每个字体是一个 SVG 文件；放进这些文件夹即可使用，无需重启。"))
+            .child(div().pt_1().text_sm().child("字体优化（读取字体时应用，不改动文件）："))
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(fix_box("opt-fix-size", "统一字符尺寸", fix.unify_size, |f, v| f.unify_size = v))
+                    .child(fix_box("opt-fix-dedupe", "重复轨迹优化", fix.dedupe, |f, v| f.dedupe = v))
+                    .child(fix_box("opt-fix-width", "异常宽度优化", fix.widths, |f, v| f.widths = v)),
+            )
             .into_any_element()
     }
 }
