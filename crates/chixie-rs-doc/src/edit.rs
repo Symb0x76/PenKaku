@@ -278,22 +278,80 @@ impl EditDoc {
 
     /// Align the paragraphs touched by the selection (or holding the caret).
     pub fn set_align(&mut self, align: Align) {
-        self.set_paras(|p| p.align = align);
+        self.set_paras(|_, p| p.align = align);
     }
 
-    fn set_paras(&mut self, f: impl Fn(&mut Para)) {
+    /// Alignment of the paragraph holding the caret.
+    pub fn align(&self) -> Align {
+        self.doc.paras()[self.doc.para_of(self.caret)].align
+    }
+
+    /// Tab / 首行缩进: indent the touched paragraphs, or un-indent them when all already are.
+    /// `width(id)` gives the indent (mm) for a paragraph whose first char has `id`, so the
+    /// same paragraph always gets the same random width.
+    pub fn toggle_indent(&mut self, width: impl Fn(u64) -> f32) {
+        let sel = self.selection();
+        let (a, b) = (self.doc.para_of(sel.start), self.doc.para_of(sel.end));
+        let on = self.doc.paras()[a..=b].iter().any(|p| p.first_indent.is_none());
+        let starts = self.para_starts();
+        let ids = self.doc.ids().to_vec();
+        // An empty last paragraph has no first char: key it by its index.
+        self.set_paras(|k, p| p.first_indent = on.then(|| width(ids.get(starts[k]).copied().unwrap_or(k as u64))));
+    }
+
+    /// Whether the paragraph holding the caret has a first-line indent.
+    pub fn indented(&self) -> bool {
+        self.doc.paras()[self.doc.para_of(self.caret)].first_indent.is_some()
+    }
+
+    /// Char index where each paragraph starts.
+    fn para_starts(&self) -> Vec<usize> {
+        std::iter::once(0).chain(self.doc.chars().iter().enumerate().filter(|(_, c)| **c == '\n').map(|(i, _)| i + 1)).collect()
+    }
+
+    fn set_paras(&mut self, f: impl Fn(usize, &mut Para)) {
         let sel = self.selection();
         let (a, b) = (self.doc.para_of(sel.start), self.doc.para_of(sel.end));
         self.checkpoint(LastEdit::None);
         let paras = self.doc.paras()[a..=b]
             .iter()
-            .map(|p| {
-                let mut p = p.clone();
-                f(&mut p);
+            .enumerate()
+            .map(|(k, p)| {
+                let mut p = *p;
+                f(a + k, &mut p);
                 p
             })
             .collect();
         self.exec(Command::SetParas { first: a, paras });
+    }
+
+    /// 合并内容 flags per char, for layout (`joins[k]`: char `k + 1` shares char `k`'s cell).
+    pub fn joins(&self) -> Vec<bool> {
+        (0..self.len()).map(|i| self.doc.attrs(i).combine_next).collect()
+    }
+
+    /// 合并内容: put the selected chars in one grid cell, or split them again when they already
+    /// are. Errors are ChiXie3's messages.
+    pub fn toggle_combine(&mut self) -> Result<(), &'static str> {
+        let sel = self.selection();
+        if sel.len() < 2 {
+            return Err("合并内容只能合并两个以及以上的字符");
+        }
+        if self.doc.chars()[sel.clone()].contains(&'\n') {
+            return Err("作文格模式合并内容只能选中连续文字内容");
+        }
+        let last = sel.end - 1;
+        let on = !(sel.start..last).all(|i| self.doc.attrs(i).combine_next);
+        self.checkpoint(LastEdit::None);
+        let attrs = sel
+            .map(|i| {
+                let mut a = self.doc.attrs(i).clone();
+                a.combine_next = on && i < last;
+                a
+            })
+            .collect();
+        self.exec(Command::SetAttrs { at: self.selection().start, attrs });
+        Ok(())
     }
 
     /// Apply a step's commands in reverse; returns the step that undoes this one.
@@ -386,6 +444,36 @@ impl EditDoc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_indent_toggles_with_a_width_keyed_by_the_first_id() {
+        let mut d = EditDoc::from_text("ab\ncd\nef");
+        d.select_range(1..4); // paragraphs 0 and 1
+        d.toggle_indent(|id| 10.0 + id as f32);
+        let ind: Vec<Option<f32>> = d.document().paras().iter().map(|p| p.first_indent).collect();
+        assert_eq!(ind, vec![Some(10.0), Some(13.0), None]);
+        assert!(d.indented());
+        d.toggle_indent(|_| 99.0);
+        assert!(d.document().paras().iter().all(|p| p.first_indent.is_none()));
+        d.undo();
+        assert_eq!(d.document().paras()[1].first_indent, Some(13.0));
+    }
+
+    #[test]
+    fn combine_marks_all_but_the_last_and_toggles() {
+        let mut d = EditDoc::from_text("你好世\n界");
+        d.select_range(0..1);
+        assert_eq!(d.toggle_combine(), Err("合并内容只能合并两个以及以上的字符"));
+        d.select_range(2..5);
+        assert_eq!(d.toggle_combine(), Err("作文格模式合并内容只能选中连续文字内容"));
+        d.select_range(0..3);
+        d.toggle_combine().unwrap();
+        assert_eq!(d.joins(), vec![true, true, false, false, false]);
+        d.toggle_combine().unwrap();
+        assert_eq!(d.joins(), vec![false; 5]);
+        d.undo();
+        assert_eq!(d.joins(), vec![true, true, false, false, false]);
+    }
 
     #[test]
     fn typing_selection_and_ids() {

@@ -118,6 +118,17 @@ impl Default for HandwritingStyle {
     }
 }
 
+/// ChiXie3's default 首行缩进 range, mm (`min/max_first_line_indent`).
+pub const DEFAULT_INDENT: Span = Span { min: 15.5, max: 17.0 };
+
+impl HandwritingStyle {
+    /// Width of a paragraph indent switched on by Tab or 首行缩进: drawn from the style's range
+    /// (ChiXie3's 15.5–17 mm when unset), keyed by the paragraph's first char id.
+    pub fn indent_width(&self, id: u64) -> f32 {
+        self.first_line_indent.unwrap_or(DEFAULT_INDENT).sample(&mut rng_for(self.seed, SALT_INDENT, id))
+    }
+}
+
 /// CJK ideographs, kana, hangul and full-width forms use the `_zh` ranges; everything else `_en`.
 pub fn is_cjk(c: char) -> bool {
     matches!(c as u32,

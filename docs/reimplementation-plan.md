@@ -240,7 +240,13 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - fake link killed at line k → resumed stream = pen up + travel + identical tail;
   - hardware: unplug mid-page, resume, no duplicated or missing stroke.
 
-### M3 Typesetting parity and better (2–3 wk) — spec R3, R6
+### M3 Typesetting parity and better (2–3 wk) — spec R3, R6 — code done 2026-11-17 (branch `m3-typesetting`)
+- Status: all items below are implemented and tested. Layout became the module directory
+  `core/src/layout/` (`mod`, `pen`, `kinsoku`, `segment`); BOSS deferred the `chixie-rs-layout`
+  crate to M6. Defaults: 避头尾 on (ruled/free pull chars down, 作文格 hangs closing marks);
+  作文格分词 (jieba-rs, feature `segment`) off. The 作文格 capture test stays at 0.7 mm: our ink
+  top is 0.64 mm above the capture, which includes ≤ 0.3 mm jitter; tightening it needs a
+  vertical-placement calibration, not M3. BOSS: hardware checklist #13a.
 - Alignment (left/center/right/justify) and first-line indent (Tab and button, random width
   15.5–17 mm).
 - **Real 避头尾** with hanging punctuation in 作文格; ChiXie3 only warns.
@@ -248,7 +254,7 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   one cell).
 - 作文格 word segmentation (`jieba-rs`, verify).
 - Rationality check badge (位置合理性检测) as a status-bar item.
-- Introduce `chixie-rs-layout`.
+- Introduce `chixie-rs-layout` (deferred to M6 by BOSS, 2026-11-17).
 - **Done when:**
   - goldens for each alignment and indent;
   - 1,000-character fuzz: no line starts with a closing mark;

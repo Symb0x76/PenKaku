@@ -54,6 +54,12 @@ pub struct PageSettings {
     pub margins: (f32, f32, f32, f32),
     /// Active page template (name in `templates.toml`); `None` = blank page.
     pub template: Option<String>,
+    /// 避头尾 (参数设置 › 排版).
+    pub kinsoku: bool,
+    /// 数字/字母两个一格: two Latin letters share a 作文格 cell (digits always do).
+    pub grid_pair_letters: bool,
+    /// 作文格分词: keep a word on one 作文格 row.
+    pub grid_keep_words: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,7 +80,7 @@ impl Default for DeviceSettings {
 impl Default for PageSettings {
     fn default() -> Self {
         // A4 with 21 mm side margins matches the ≈168 mm writable width seen in captures.
-        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None }
+        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None, kinsoku: true, grid_pair_letters: false, grid_keep_words: false }
     }
 }
 
@@ -119,6 +125,9 @@ impl Settings {
             style: self.style.handwriting.clone(),
             deformation: self.style.deformation.clone(),
             ruling: template.map(|t| t.ruling()).unwrap_or_default(),
+            kinsoku: self.page.kinsoku,
+            grid_pair_letters: self.page.grid_pair_letters,
+            grid_keep_words: self.page.grid_keep_words,
             ..Default::default()
         }
     }

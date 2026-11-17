@@ -174,5 +174,22 @@
 - Passed by BOSS 2026-11-17 (COM5 CH340, Grbl_ESP32 1.3a): hardware #1–#5, #10, #11, #11b,
   #11c; Word save/reopen round trip.
 - Open (BOSS): .docx in WPS and LibreOffice; M1 checks #5a–#9, #12–#15 (Telnet, 20-page job).
-- Next: M3 (typesetting parity).
+- **M3 code done (2026-11-17), branch `m3-typesetting`** (plan in `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
+  - `core/src/layout/` module dir (crate split deferred to M6 by BOSS): `mod.rs` (`layout_flow`
+    with `Flow { chars, ids, paras, joins }`, `layout_doc`, `layout_ids` wrappers), `pen.rs`
+    (line/page bookkeeping, `align_line`, `truncate_to`, `draw_char`, `glyph_for`),
+    `kinsoku.rs`, `segment.rs` (jieba-rs behind core feature `segment`; GUI enables it).
+  - `Align`/`Para` moved to core (`chixie_rs_doc` re-exports). Alignment per paragraph,
+    explicit indent (`Para.first_indent`), Tab / 首行缩进 toggle (`HandwritingStyle::indent_width`).
+  - 避头尾 (`PageParams.kinsoku`, settings `page.kinsoku` default on): main loop is `while` and
+    steps back ≤ 3 chars; grid hangs ≤ 2 closing marks in the last cell. `Document.punct_issues`
+    → status-bar badge (`NextPunctIssue`). Fuzz: `core/tests/kinsoku_fuzz.rs`.
+  - Grid: two digits (letters with `grid_pair_letters`) per cell; 合并内容 via
+    `Attrs.combine_next` + `EditDoc::toggle_combine`; half space U+2009 (Shift+Space);
+    width fallback `glyph_for`.
+  - GUI: 段落 group (4 align toggles, 首行缩进, 合并内容 grid-only), 布局 › 排版 checkboxes,
+    autotest `AUTOTEST_TYPESET` (CI greps it).
+  - Fixed a racy device test (`connects_and_jogs`).
+- Known: 作文格 capture test stays at 0.7 mm (ink top 0.64 mm above capture; calibration task).
+- Next: BOSS hardware #13a → merge M3 → M4 (fonts).
 

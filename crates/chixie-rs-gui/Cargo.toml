@@ -10,7 +10,7 @@ name = "chixie-rs"
 path = "src/main.rs"
 
 [dependencies]
-chixie-rs-core.workspace = true
+chixie-rs-core = { workspace = true, features = ["segment"] }
 chixie-rs-device.workspace = true
 chixie-rs-doc.workspace = true
 gpui-kit.workspace = true

@@ -473,8 +473,11 @@ mod tests {
 
     fn sample() -> Document {
         let mut d = Document::from_text("你好，chixie-rs！\n第二段\t制表 & <符号>\n");
-        let red = Attrs { colour: Some([200, 0, 0]), size_pt: Some(14.5), font: Some("楷体".into()), v_offset: Some(-0.7) };
+        let red = Attrs { colour: Some([200, 0, 0]), size_pt: Some(14.5), font: Some("楷体".into()), v_offset: Some(-0.7), combine_next: false };
         d.apply(Command::SetAttrs { at: 0, attrs: vec![red; 2] });
+        // 合并内容 on "ch" (custom part only).
+        let joined = Attrs { combine_next: true, ..Attrs::default() };
+        d.apply(Command::SetAttrs { at: 3, attrs: vec![joined] });
         d.apply(Command::SetParas { first: 1, paras: vec![Para { align: Align::Center, first_indent: Some(16.25) }] });
         // Ids no longer 0..n.
         let x = d.new_chars("啊", &Attrs::default());

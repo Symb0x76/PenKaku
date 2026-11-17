@@ -29,7 +29,7 @@ fn gcode_of(d: &EditDoc, seed: u64) -> String {
         style: HandwritingStyle { enabled: true, seed, ..Default::default() },
         ..Default::default()
     };
-    let laid = layout::layout_ids(d.chars(), d.ids(), &font(), &p);
+    let laid = layout::layout_doc(d.chars(), d.ids(), d.document().paras(), &font(), &p);
     gcode::emit_document(&laid, &DeviceProfile::default())
 }
 
@@ -41,6 +41,9 @@ fn docx_round_trip_keeps_gcode_byte_identical() {
     d.insert("好写");
     d.move_to(0, false);
     d.delete(false);
+    // Paragraph formatting is part of the round trip too.
+    d.move_to(20, false);
+    d.set_align(layout::Align::Right);
     let before = gcode_of(&d, 77);
     let loaded = docx::read(&docx::write(d.document(), 77).unwrap()).unwrap();
     let after = gcode_of(&EditDoc::from_document(loaded.doc), loaded.seed.unwrap());

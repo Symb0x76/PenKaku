@@ -19,6 +19,8 @@ use chixie_rs_core::handwriting::StyleFile;
 use chixie_rs_core::template::Template;
 use chixie_rs_core::layout::{self, Document};
 use gpui_kit::*;
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::notification::Notification;
 
 use crate::state::AppState;
 
@@ -37,7 +39,8 @@ actions!(
         MoveLeft, MoveRight, MoveUp, MoveDown, SelectLeft, SelectRight, SelectUp, SelectDown,
         WordLeft, WordRight, SelectWordLeft, SelectWordRight, LineStart, LineEnd, SelectLineStart,
         SelectLineEnd, DocStart, DocEnd, Backspace, Delete, BackspaceWord, DeleteWord, Newline,
-        SelectAll, Copy, Cut, Paste, Undo, Redo, Save,
+        SelectAll, Copy, Cut, Paste, Undo, Redo, Save, AlignLeft, AlignCenter, AlignRight,
+        AlignJustify, ToggleIndent, HalfSpace, Combine, NextPunctIssue,
     ]
 );
 
@@ -46,6 +49,9 @@ actions!(
 pub fn bind_keys(cx: &mut App) {
     let c = Some(KEY_CONTEXT);
     cx.bind_keys([KeyBinding::new(if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" }, Save, None)]);
+    // Tab toggles the paragraph indent; Shift+Space types a half space (Ctrl+Space is the IME
+    // toggle on Windows).
+    cx.bind_keys([KeyBinding::new("tab", ToggleIndent, c), KeyBinding::new("shift-space", HalfSpace, c)]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("left", MoveLeft, c),
@@ -271,7 +277,9 @@ impl DocView {
             None => (Arc::new(empty), false),
         };
         self.has_font = has_font;
-        self.layout = Arc::new(layout::layout_ids(self.doc.chars(), self.doc.ids(), &font, &params));
+        let joins = self.doc.joins();
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins };
+        self.layout = Arc::new(layout::layout_flow(&flow, &font, &params));
         cx.notify();
     }
 
@@ -406,6 +414,50 @@ impl DocView {
     }
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
         self.type_text("\n", cx);
+    }
+    fn half_space(&mut self, _: &HalfSpace, _: &mut Window, cx: &mut Context<Self>) {
+        self.type_text(&layout::HALF_SPACE.to_string(), cx);
+    }
+    pub fn set_align(&mut self, align: layout::Align, cx: &mut Context<Self>) {
+        self.doc.set_align(align);
+        self.edited(cx);
+    }
+    fn align_left(&mut self, _: &AlignLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_align(layout::Align::Left, cx);
+    }
+    fn align_center(&mut self, _: &AlignCenter, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_align(layout::Align::Center, cx);
+    }
+    fn align_right(&mut self, _: &AlignRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_align(layout::Align::Right, cx);
+    }
+    fn align_justify(&mut self, _: &AlignJustify, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_align(layout::Align::Justify, cx);
+    }
+    /// Tab / 首行缩进: the width comes from the handwriting style's range, keyed by the
+    /// paragraph's first char, so toggling it off and on again gives the same indent.
+    pub fn toggle_indent(&mut self, cx: &mut Context<Self>) {
+        let style = cx.global::<AppState>().settings.style.handwriting.clone();
+        self.doc.toggle_indent(|id| style.indent_width(id));
+        self.edited(cx);
+    }
+    fn toggle_indent_action(&mut self, _: &ToggleIndent, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_indent(cx);
+    }
+    fn combine(&mut self, _: &Combine, window: &mut Window, cx: &mut Context<Self>) {
+        match self.doc.toggle_combine() {
+            Ok(()) => self.edited(cx),
+            Err(msg) => window.push_notification(Notification::warning(msg), cx),
+        }
+    }
+    /// 位置合理性检测: put the caret at the start of the next line with a misplaced mark.
+    fn next_punct_issue(&mut self, _: &NextPunctIssue, _: &mut Window, cx: &mut Context<Self>) {
+        let caret_line = self.layout.line_of(self.doc.caret());
+        let issues = &self.layout.punct_issues;
+        if let Some(&l) = issues.iter().find(|&&l| l > caret_line).or(issues.first()) {
+            self.doc.move_to(self.layout.lines[l].start, false);
+            self.after_move(cx);
+        }
     }
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.doc.select_all();
@@ -624,6 +676,14 @@ impl Render for DocView {
             .on_action(cx.listener(Self::backspace_word))
             .on_action(cx.listener(Self::delete_word))
             .on_action(cx.listener(Self::newline))
+            .on_action(cx.listener(Self::half_space))
+            .on_action(cx.listener(Self::align_left))
+            .on_action(cx.listener(Self::align_center))
+            .on_action(cx.listener(Self::align_right))
+            .on_action(cx.listener(Self::align_justify))
+            .on_action(cx.listener(Self::toggle_indent_action))
+            .on_action(cx.listener(Self::combine))
+            .on_action(cx.listener(Self::next_punct_issue))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
