@@ -18,6 +18,9 @@ pub struct Attrs {
     pub colour: Option<[u8; 3]>,
     /// Raised (+) or lowered (−) baseline, mm.
     pub v_offset: Option<f32>,
+    /// 合并内容: the next char shares this char's grid cell. Stored in our custom XML part only.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub combine_next: bool,
 }
 
 /// Paragraph formatting lives in core so layout reads it directly.
