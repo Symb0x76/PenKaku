@@ -174,7 +174,7 @@
 - Passed by BOSS 2026-11-17 (COM5 CH340, Grbl_ESP32 1.3a): hardware #1–#5, #10, #11, #11b,
   #11c; Word save/reopen round trip.
 - Open (BOSS): .docx in WPS and LibreOffice; M1 checks #5a–#9, #12–#15 (Telnet, 20-page job).
-- **M3 code done (2026-11-17), branch `m3-typesetting`** (plan in `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
+- **M3 done (2026-11-17), merged to master (`6f018f0`)** (plan in `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
   - `core/src/layout/` module dir (crate split deferred to M6 by BOSS): `mod.rs` (`layout_flow`
     with `Flow { chars, ids, paras, joins }`, `layout_doc`, `layout_ids` wrappers), `pen.rs`
     (line/page bookkeeping, `align_line`, `truncate_to`, `draw_char`, `glyph_for`),
@@ -191,5 +191,5 @@
     autotest `AUTOTEST_TYPESET` (CI greps it).
   - Fixed a racy device test (`connects_and_jogs`).
 - Known: 作文格 capture test stays at 0.7 mm (ink top 0.64 mm above capture; calibration task).
-- Next: BOSS hardware #13a → merge M3 → M4 (fonts).
+- Next: BOSS hardware #13a → M4 (fonts).
 

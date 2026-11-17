@@ -240,7 +240,7 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - fake link killed at line k → resumed stream = pen up + travel + identical tail;
   - hardware: unplug mid-page, resume, no duplicated or missing stroke.
 
-### M3 Typesetting parity and better (2–3 wk) — spec R3, R6 — code done 2026-11-17 (branch `m3-typesetting`)
+### M3 Typesetting parity and better (2–3 wk) — spec R3, R6 — merged 2026-11-17 (`6f018f0`); hardware check #13a pending
 - Status: all items below are implemented and tested. Layout became the module directory
   `core/src/layout/` (`mod`, `pen`, `kinsoku`, `segment`); BOSS deferred the `chixie-rs-layout`
   crate to M6. Defaults: 避头尾 on (ruled/free pull chars down, 作文格 hangs closing marks);
