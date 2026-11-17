@@ -990,6 +990,7 @@ dependencies = [
  "keyring",
  "log",
  "proptest",
+ "quick-xml",
  "reqwest",
  "serde",
  "serde_json",
