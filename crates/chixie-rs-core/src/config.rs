@@ -240,6 +240,12 @@ pub fn import_chixie3(ini_text: &str) -> StyleFile {
     if let Some(v) = num(c, "stroke_deform_degree") {
         d.stroke_degree = v;
     }
+    if let Some(v) = num(c, "shape_deform_degree") {
+        d.shape_degree = v;
+    }
+    if let Some(v) = flag(c, "randomly_delete_trailing") {
+        d.remove_tails = v;
+    }
     s
 }
 

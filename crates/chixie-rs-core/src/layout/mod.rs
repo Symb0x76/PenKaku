@@ -548,7 +548,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
             }
             pen.cx += glyph.advance * s + p.char_spacing;
         } else {
-            let voff = if jitter_on { jit.vertical(id) } else { 0.0 };
+            let voff = if jitter_on { jit.vertical(id, pen.cx, pen.line_w) } else { 0.0 };
             let mut drng = rng_for(p.style.seed, SALT_DEFORM, id);
             let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), s, &mut drng);
             for stroke in &strokes {

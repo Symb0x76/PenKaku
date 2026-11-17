@@ -30,6 +30,8 @@ pub struct Deformation {
     pub stroke_degree: f32,
     /// Shape deformation amplitude (字形变形幅度), slider 0–10; 0 disables shape deformation.
     pub shape_degree: f32,
+    /// 随机删除小尾巴: with base deformation, sometimes drop a stroke's short end hook.
+    pub remove_tails: bool,
 }
 
 impl Default for Deformation {
@@ -44,6 +46,7 @@ impl Default for Deformation {
             rotation_deg: Span::new(-2.0, 2.0),
             stroke_degree: 1.0,
             shape_degree: 7.0,
+            remove_tails: true,
         }
     }
 }
@@ -105,7 +108,53 @@ impl Deformation {
                 *p = (x + k * (cy - y) + nx, y + ny);
             }
         }
+
+        if self.base && self.remove_tails {
+            // Its own stream, drawn after everything above, so the other effects are unchanged.
+            let mut trng = Rng::new(rng.next_u64());
+            let max_len = unit(TAIL_MAX_MM);
+            for s in &mut out {
+                if trng.unit() < TAIL_P {
+                    drop_tail(s, max_len);
+                }
+            }
+        }
         out
+    }
+}
+
+/// Chance per stroke that its end hook is dropped (随机删除小尾巴). Best guess, VERIFY.
+const TAIL_P: f32 = 0.3;
+/// A hook is at most this long (mm).
+const TAIL_MAX_MM: f32 = 0.3;
+
+/// Drop a short end hook: the trailing points within `max_len` of the stroke's end, when they
+/// turn back more than 90° from the direction the stroke was going. At least three points stay.
+fn drop_tail(s: &mut Stroke, max_len: f32) {
+    let n = s.len();
+    if n < 4 || max_len <= 0.0 {
+        return;
+    }
+    let dist = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).hypot(a.1 - b.1);
+    // `j`: first point of the tail; the tail is s[j..], its length < max_len.
+    let mut j = n - 1;
+    let mut len = 0.0;
+    while j > 2 {
+        let d = dist(s[j - 1], s[j]);
+        if len + d > max_len {
+            break;
+        }
+        len += d;
+        j -= 1;
+    }
+    if j == n - 1 || len <= 0.0 {
+        return;
+    }
+    let (a, b, end) = (s[j - 1], s[j], s[n - 1]);
+    let main = (b.0 - a.0, b.1 - a.1);
+    let tail = (end.0 - b.0, end.1 - b.1);
+    if main.0 * tail.0 + main.1 * tail.1 < 0.0 {
+        s.truncate(j + 1);
     }
 }
 
@@ -181,6 +230,34 @@ mod tests {
         let lean = (cjk[0][0].0 - cjk[0][1].0) / 10.0;
         assert!((0.10..=0.15).contains(&lean), "lean {lean}");
         assert_eq!(d.apply(&vertical, false, 1.0, &mut Rng::new(9)), vertical);
+    }
+
+    #[test]
+    fn hooks_are_dropped_straight_strokes_kept() {
+        // A long stroke right, then a 0.2-unit hook back left-down (turn > 90°).
+        let mut hooked = vec![(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (3.9, 0.15)];
+        drop_tail(&mut hooked, 0.3);
+        assert_eq!(hooked, vec![(0.0, 0.0), (2.0, 0.0), (4.0, 0.0)]);
+        let straight = vec![(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (4.2, 0.0)];
+        let mut s = straight.clone();
+        drop_tail(&mut s, 0.3);
+        assert_eq!(s, straight, "no turn, no tail");
+        // Through `apply`: some hooks go, stable per seed, none when switched off.
+        let d = Deformation {
+            enabled: true,
+            base: true,
+            h_scale_pct: Span::new(100.0, 100.0),
+            v_scale_pct: Span::new(100.0, 100.0),
+            rotation_deg: Span::new(0.0, 0.0),
+            stroke_degree: 0.0,
+            ..Default::default()
+        };
+        let glyph = vec![vec![(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (3.9, 0.15)]];
+        let cut = (0..200).filter(|&k| d.apply(&glyph, true, 1.0, &mut Rng::new(k))[0].len() == 3).count();
+        assert!((30..=90).contains(&cut), "{cut} of 200 hooks dropped");
+        assert_eq!(d.apply(&glyph, true, 1.0, &mut Rng::new(5)), d.apply(&glyph, true, 1.0, &mut Rng::new(5)));
+        let off = Deformation { remove_tails: false, ..d };
+        assert!((0..50).all(|k| off.apply(&glyph, true, 1.0, &mut Rng::new(k))[0].len() == 4));
     }
 
     #[test]

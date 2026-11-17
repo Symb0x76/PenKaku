@@ -154,22 +154,26 @@ pub const SALT_DEFORM: u64 = 0x4445_464F_0000_0004;
 /// Jitter values for each character, keyed by the character's stable id.
 pub struct Jitter<'a> {
     style: &'a HandwritingStyle,
-    /// Last vertical offset on the current line (for `intelligent_vertical_offset`).
-    walk: Option<f32>,
+    /// The current row's drift for `intelligent_vertical_offset`, −1…1 (set by `line_start`).
+    row_sweep: f32,
 }
+
+/// Per-row 同向偏移 drift.
+const SALT_ROW_DRIFT: u64 = 0x4452_4946_0000_0007;
 
 impl<'a> Jitter<'a> {
     pub fn new(style: &'a HandwritingStyle) -> Self {
-        Self { style, walk: None }
+        Self { style, row_sweep: 0.0 }
     }
 
     fn rng(&self, salt: u64, id: u64) -> Rng {
         rng_for(self.style.seed, salt, id)
     }
 
-    /// X offset of a line's first character; `id` = that character's id.
+    /// X offset of a line's first character; `id` = that character's id. Also starts the row's
+    /// 同向偏移 drift.
     pub fn line_start(&mut self, id: u64) -> f32 {
-        self.walk = None;
+        self.row_sweep = self.rng(SALT_ROW_DRIFT, id).unit() * 2.0 - 1.0;
         self.style.line_start_offset.sample(&mut self.rng(SALT_LINE, id))
     }
 
@@ -189,7 +193,11 @@ impl<'a> Jitter<'a> {
         if prev.is_some_and(is_cjk) { s.space_width_zh } else { s.space_width_en }.sample(&mut self.rng(SALT_GLYPH, id))
     }
 
-    pub fn vertical(&mut self, id: u64) -> f32 {
+    /// Vertical offset (mm, down) of a glyph whose left edge is `x` mm along a row `row_w` mm
+    /// wide. Independent per glyph, or with 智能偏移 (同向偏移) a drift in one direction along
+    /// the row: each row draws a slope (keyed by its first character) so the offset runs from
+    /// one side of the range to the other, plus a little noise.
+    pub fn vertical(&mut self, id: u64, x: f32, row_w: f32) -> f32 {
         let r = self.style.vertical_offset;
         // Second draw of the glyph stream (the first is spacing).
         let mut rng = self.rng(SALT_GLYPH, id);
@@ -197,16 +205,16 @@ impl<'a> Jitter<'a> {
         if !self.style.intelligent_vertical_offset {
             return r.sample(&mut rng);
         }
-        let step = (r.max - r.min) / 3.0;
-        let mid = (r.min + r.max) / 2.0;
-        let prev = self.walk.unwrap_or(mid);
-        let mut v = prev + (rng.unit() * 2.0 - 1.0) * step;
+        let (mid, half) = ((r.min + r.max) / 2.0, (r.max - r.min) / 2.0);
+        let w = if row_w.is_finite() && row_w > 1.0 { row_w } else { 150.0 };
+        // Fraction of the range the row sweeps, −1…1 (halved by 随机纠正).
+        let mut sweep = self.row_sweep;
         if self.style.random_correct_offset {
-            v += (mid - v) * 0.5;
+            sweep *= 0.5;
         }
-        let v = v.clamp(r.min, r.max);
-        self.walk = Some(v);
-        v
+        let along = (x / w).clamp(0.0, 1.0) - 0.5;
+        let noise = (rng.unit() * 2.0 - 1.0) * half * 0.2;
+        (mid + sweep * half * 2.0 * along * 0.9 + noise).clamp(r.min, r.max)
     }
 }
 
@@ -273,7 +281,7 @@ mod tests {
             assert!(style.char_spacing_en.contains(j.spacing('A', id)));
             assert!(style.space_width_zh.contains(j.space(Some('你'), id)));
             assert!(style.space_width_en.contains(j.space(Some('A'), id)));
-            assert!(style.vertical_offset.contains(j.vertical(id)));
+            assert!(style.vertical_offset.contains(j.vertical(id, 0.0, 150.0)));
             assert!(style.line_start_offset.contains(j.line_start(id)));
         }
     }
@@ -286,31 +294,37 @@ mod tests {
         // b draws for other ids first; a's values for id 42 must not care.
         for id in 0..10 {
             b.spacing('你', id);
-            b.vertical(id);
+            b.vertical(id, 0.0, 150.0);
         }
         assert_eq!(a.spacing('你', 42), b.spacing('你', 42));
-        assert_eq!(a.vertical(42), b.vertical(42));
+        assert_eq!(a.vertical(42, 0.0, 150.0), b.vertical(42, 0.0, 150.0));
         assert_ne!(a.spacing('你', 42), a.spacing('你', 43));
     }
 
     #[test]
-    fn intelligent_walk_stays_in_range() {
-        let style = HandwritingStyle {
-            enabled: true,
-            intelligent_vertical_offset: true,
-            random_correct_offset: true,
-            ..Default::default()
-        };
+    fn same_direction_offset_drifts_along_each_row() {
+        let style = HandwritingStyle { enabled: true, intelligent_vertical_offset: true, ..Default::default() };
         let mut j = Jitter::new(&style);
-        let mut prev = None::<f32>;
-        for id in 0..500 {
-            let v = j.vertical(id);
-            assert!(style.vertical_offset.contains(v));
-            if let Some(p) = prev {
-                assert!((v - p).abs() <= 0.3 / 3.0 + 1e-6, "step {}", v - p);
+        let mut steep = 0;
+        for row in 0..50u64 {
+            j.line_start(row * 100);
+            let v: Vec<f32> = (0..15).map(|k| j.vertical(row * 100 + k, k as f32 * 10.0, 150.0)).collect();
+            assert!(v.iter().all(|&o| style.vertical_offset.contains(o)), "{v:?}");
+            // Same direction: the row's end minus its start has the sign of the trend, with
+            // the noise (±0.03 mm) far smaller than a clear drift.
+            let (a, b) = (v[..3].iter().sum::<f32>() / 3.0, v[12..].iter().sum::<f32>() / 3.0);
+            if (b - a).abs() > 0.1 {
+                steep += 1;
+                let dir = (b - a).signum();
+                assert!(v.windows(5).all(|w| (w[4] - w[0]) * dir > -0.07), "{v:?}");
             }
-            prev = Some(v);
         }
+        assert!(steep > 10, "rows should drift visibly: {steep}");
+        // The same row gives the same offsets.
+        j.line_start(7);
+        let first = j.vertical(8, 30.0, 150.0);
+        j.line_start(7);
+        assert_eq!(first, j.vertical(8, 30.0, 150.0));
     }
 
     #[test]

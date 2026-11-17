@@ -289,7 +289,8 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
         return;
     };
     let p = pen.p;
-    let voff = voff + if p.style.enabled { jit.vertical(id) } else { 0.0 };
+    let row_w = pen.line_w;
+    let voff = voff + if p.style.enabled { jit.vertical(id, x, row_w) } else { 0.0 };
     if p.deformation.is_active() {
         let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), sy, &mut rng_for(p.style.seed, SALT_DEFORM, id));
         draw_scaled(pen, &strokes, x, voff, sx, sy);
