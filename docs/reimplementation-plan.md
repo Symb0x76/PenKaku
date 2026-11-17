@@ -260,7 +260,7 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - 1,000-character fuzz: no line starts with a closing mark;
   - 作文格 and 信纸 captures still match within 0.3 mm.
 
-### M4 Fonts (2–3 wk) — spec R4 — code done 2026-11-17 (branch `m4-fonts`)
+### M4 Fonts (2–3 wk) — spec R4 — merged 2026-11-17 (`f876812`); hardware check #13b pending
 - Status: SVG font files in watched library folders (default `Documents/chixie-rs/Fonts`, movable, extra
   folders), import / export (SVG or ZIP), one-time migration of the old store; role fonts, fallback
   chain and 字体混用 (`font::fontset`, layout reads glyphs through the `Glyphs` trait, golden unchanged);
