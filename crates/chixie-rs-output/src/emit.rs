@@ -11,7 +11,7 @@
 use std::fmt::Write;
 
 use chixie_rs_core::layout::{Document, Page};
-use chixie_rs_core::profile::{DeviceProfile, PenChange, PenSlot, Rgb, num};
+use chixie_rs_core::profile::{DeviceProfile, DeviceType, PenChange, PenSlot, Rgb, num};
 
 use crate::plan::Written;
 
@@ -90,6 +90,33 @@ fn changer_macro(slots: &[PenSlot], held: Option<Rgb>, next: Rgb) -> Option<Stri
     Some(m)
 }
 
+type P = (f32, f32);
+
+/// 笔锋: the stroke with a Z on every point of its last `len` mm, rising linearly from `z0` (pen
+/// down) to `z1` at the end. A point is inserted where the tail starts. Points before the tail
+/// carry no Z (the pen stays at its down position).
+fn taper_points(s: &[P], len: f32, z0: f32, z1: f32) -> Vec<(P, Option<f32>)> {
+    let total: f32 = s.windows(2).map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1)).sum();
+    if s.len() < 2 || len <= 0.0 || total <= 0.0 {
+        return s.iter().map(|&p| (p, None)).collect();
+    }
+    let len = len.min(total);
+    let start = total - len;
+    let z_at = |d: f32| z0 + (z1 - z0) * ((d - start) / len).clamp(0.0, 1.0);
+    let mut out = vec![(s[0], (start <= 0.0).then(|| z_at(0.0)))];
+    let mut d = 0.0;
+    for w in s.windows(2) {
+        let seg = (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1);
+        if d < start && d + seg > start {
+            let f = (start - d) / seg;
+            out.push(((w[0].0 + (w[1].0 - w[0].0) * f, w[0].1 + (w[1].1 - w[0].1) * f), Some(z0)));
+        }
+        d += seg;
+        out.push((w[1], (d >= start).then(|| z_at(d))));
+    }
+    out
+}
+
 /// `runs`: (stroke index, colour) where each colour run starts; empty = one pen, no changes.
 fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode {
     let slots: &[PenSlot] = match &d.pen_change {
@@ -97,6 +124,8 @@ fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode 
         PenChange::Manual => &[],
     };
     let (mut pens, mut held) = (Vec::new(), None);
+    // 笔锋 needs a Z axis that moves continuously: stepper lift only.
+    let taper = d.tip_taper.filter(|_| d.device_type == DeviceType::StepperPenUp);
     let (up, down) = (d.pen_up_cmd(), d.pen_down_cmd());
     let dwell = (d.pause_after_down_s > 0.0).then(|| format!("G4 P{}", num(d.pause_after_down_s)));
     let mut g = String::new();
@@ -118,7 +147,13 @@ fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode 
             held = Some(colour);
         }
         let improved = d.route.apply(stroke);
-        for (i, &p) in improved.as_deref().unwrap_or(stroke).iter().enumerate() {
+        let pts = improved.as_deref().unwrap_or(stroke);
+        let tapered = taper.map(|t| taper_points(pts, t.len_mm, d.pen_down_z, t.z_end));
+        let zs: Vec<(P, Option<f32>)> = match tapered {
+            Some(v) => v,
+            None => pts.iter().map(|&p| (p, None)).collect(),
+        };
+        for (i, &(p, z)) in zs.iter().enumerate() {
             let (mx, my) = if d.axis_map.is_identity() { p } else { d.axis_map.apply(p) };
             if i == 0 {
                 let _ = writeln!(g, "G0 X{mx:.3} Y{my:.3}");
@@ -127,12 +162,27 @@ fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode 
                     let _ = writeln!(g, "{w}");
                 }
             }
-            let _ = writeln!(g, "G1 X{mx:.3} Y{my:.3} F{:.0}", d.write_speed);
+            match z {
+                Some(z) => _ = writeln!(g, "G1 X{mx:.3} Y{my:.3} Z{} F{:.0}", num(z), d.write_speed),
+                None => _ = writeln!(g, "G1 X{mx:.3} Y{my:.3} F{:.0}", d.write_speed),
+            }
         }
         // Unconditional (even for an empty stroke) to stay byte-identical with the original.
         let _ = writeln!(g, "{up} F{:.0}", d.travel_speed);
     }
     PageCode { text: g, stroke_lines, pens }
+}
+
+/// A self-contained program for the SD card (上传SD卡书写): mm and absolute mode first, then the
+/// page body, then pen up and the 写完位置 move that a streamed job sends at its end.
+pub fn standalone(body: &str, d: &DeviceProfile) -> String {
+    let mut g = String::from("G21\nG90\n");
+    g.push_str(body);
+    let _ = writeln!(g, "{} F{:.0}", d.pen_up_cmd(), d.travel_speed);
+    if let Some((x, y)) = d.end_position.target(&d.axis_map) {
+        let _ = writeln!(g, "G90G0 X{}Y{}", num(x), num(y));
+    }
+    g
 }
 
 /// All pages back to back, for single-sheet output (CLI). Multi-page jobs should stream
@@ -150,7 +200,7 @@ pub fn emit_document(doc: &Document, d: &DeviceProfile) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chixie_rs_core::profile::{AxisMap, DeviceType};
+    use chixie_rs_core::profile::AxisMap;
 
     fn page() -> Page {
         Page { strokes: vec![vec![(10.0, 50.0), (10.0, 48.0)]], ..Default::default() }
@@ -169,6 +219,32 @@ mod tests {
     fn two_colour_page() -> Written {
         let s = |x: f32| vec![(x, 0.0), (x + 1.0, 0.0)];
         Written { page: Page { strokes: vec![s(0.0), s(2.0), s(4.0)], ..Default::default() }, pens: vec![(0, [0, 0, 0]), (2, [255, 0, 0])] }
+    }
+
+    #[test]
+    fn tip_taper_lifts_along_the_tail_only() {
+        use chixie_rs_core::profile::TipTaper;
+        let line = Page { strokes: vec![vec![(0.0, 0.0), (4.0, 0.0)]], ..Default::default() };
+        let d = DeviceProfile { tip_taper: Some(TipTaper { len_mm: 1.0, z_end: 0.5 }), ..Default::default() };
+        let out = emit(&line, &d);
+        let g1: Vec<&str> = out.lines().filter(|l| l.starts_with("G1 X")).collect();
+        assert_eq!(g1, ["G1 X0.000 Y0.000 F3000", "G1 X3.000 Y0.000 Z2 F3000", "G1 X4.000 Y0.000 Z0.5 F3000"]);
+        // Z only falls towards the pen-up height along the tail.
+        let pts = taper_points(&[(0.0, 0.0), (1.0, 0.0), (1.5, 0.0), (2.0, 0.0)], 1.5, 2.0, 0.5);
+        let zs: Vec<f32> = pts.iter().filter_map(|p| p.1).collect();
+        assert!(zs.windows(2).all(|w| w[1] <= w[0]) && zs.first() == Some(&2.0) && zs.last() == Some(&0.5), "{pts:?}");
+        // Off, or not a stepper: unchanged.
+        assert_eq!(emit(&line, &DeviceProfile { device_type: DeviceType::ServoPenUp, ..d.clone() }), emit(&line, &DeviceProfile { device_type: DeviceType::ServoPenUp, ..Default::default() }));
+    }
+
+    #[test]
+    fn standalone_program_sets_modes_and_parks() {
+        let d = DeviceProfile::default();
+        let g = standalone(&emit(&page(), &d), &d);
+        assert!(g.starts_with("G21\nG90\nG1G90 Z0 F8000\nG0 X10.000"), "{g}");
+        assert!(g.ends_with("G1G90 Z0 F8000\nG1G90 Z0 F8000\nG90G0 X0Y0\n"), "{g}");
+        let stay = DeviceProfile { end_position: chixie_rs_core::profile::EndPosition::Stay, ..Default::default() };
+        assert!(standalone("", &stay).ends_with("Z0 F8000\n"));
     }
 
     #[test]

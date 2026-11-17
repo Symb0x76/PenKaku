@@ -160,6 +160,16 @@ pub struct DeviceProfile {
     pub path_plan: PathPlan,
     /// 换笔模式 for 多色绘制.
     pub pen_change: PenChange,
+    /// 笔锋 (experimental, stepper lift only): lift the pen gradually over each stroke's tail.
+    pub tip_taper: Option<TipTaper>,
+}
+
+/// 笔锋: over the last `len_mm` of a stroke, Z moves linearly from `pen_down_z` to `z_end`, so a
+/// soft pen thins out like a brush tip.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TipTaper {
+    pub len_mm: f32,
+    pub z_end: f32,
 }
 
 /// Pen colour, RGB. Text without a colour is written in [`BLACK`].
@@ -297,13 +307,14 @@ impl Default for DeviceProfile {
             route: Default::default(),
             path_plan: PathPlan::default(),
             pen_change: PenChange::default(),
+            tip_taper: None,
         }
     }
 }
 
 /// `2.0` → "2", `1.25` → "1.25" (keeps the historical `Z0` / `Z2` literals byte-identical).
 pub fn num(v: f32) -> String {
-    let s = format!("{v:.3}");
+    let s = format!("{:.3}", v + 0.0); // + 0.0 turns -0.0 into 0.0
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 

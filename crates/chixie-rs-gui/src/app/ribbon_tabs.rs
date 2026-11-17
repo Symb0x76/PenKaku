@@ -450,6 +450,11 @@ impl ChixieRsApp {
                             .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.open_resume(cx)))
                             .into_any_element(),
                     ]))
+                    .child(stack([small("write-sd", "上传SD卡", IconName::Upload)
+                        .disabled(running)
+                        .tooltip("上传此页到无线控制板的SD卡并开始书写（炽写 ESP32 固件）")
+                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_sd_upload(w, cx)))
+                        .into_any_element()]))
                     .child(
                         big(if paused { "resume" } else { "pause" }, if paused { "继续" } else { "暂停" }, if paused { IconName::Play } else { IconName::Pause })
                             .disabled(!running || awaiting.is_some())

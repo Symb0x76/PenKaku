@@ -6,6 +6,7 @@
 mod backstage;
 pub(crate) mod fonts_ctl;
 mod resume;
+mod sd;
 mod tune;
 mod ribbon_tabs;
 

@@ -4,5 +4,5 @@
 pub mod emit;
 pub mod plan;
 
-pub use emit::{PageCode, emit, emit_document, emit_mapped, emit_written};
+pub use emit::{PageCode, emit, emit_document, emit_mapped, emit_written, standalone};
 pub use plan::{OutputOptions, Sheet, Written, plan, plan_all, write};

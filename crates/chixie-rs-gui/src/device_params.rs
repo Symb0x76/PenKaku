@@ -278,6 +278,31 @@ impl DeviceParams {
     }
 
     #[inline(never)]
+    /// 笔锋 (experimental): tail length; the pen rises halfway to its up height.
+    fn taper_menu(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> AnyElement {
+        use chixie_rs_core::profile::TipTaper;
+        let cur = p.tip_taper.map(|t| t.len_mm);
+        let this = cx.entity().downgrade();
+        let label = cur.map_or("关闭".to_string(), |l| format!("末端 {} mm 渐抬", fmt_num(l)));
+        Button::new("taper")
+            .small()
+            .outline()
+            .w_full()
+            .label(label)
+            .dropdown_caret(true)
+            .dropdown_menu(move |m, _w, _cx| {
+                [None, Some(1.0), Some(2.0), Some(4.0)].into_iter().fold(m, |m, len: Option<f32>| {
+                    let this = this.clone();
+                    let name = len.map_or("关闭".to_string(), |l| format!("末端 {} mm 渐抬", fmt_num(l)));
+                    m.item(PopupMenuItem::new(name).checked(len == cur).on_click(move |_, _w, cx| {
+                        let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.tip_taper = len.map(|len_mm| TipTaper { len_mm, z_end: (p.pen_up_z + p.pen_down_z) / 2.0 })));
+                    }))
+                })
+            })
+            .into_any_element()
+    }
+
+    #[inline(never)]
     /// 多色绘制 on/off and 换笔模式. The automatic changer's pens (macros) live in the settings
     /// file; the form shows how many there are.
     fn multicolour_rows(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> AnyElement {
@@ -398,6 +423,7 @@ impl DeviceParams {
             .child(div().text_xs().text_color(muted).child(format!("抬笔：{}　落笔：{}", p.pen_up_cmd(), p.pen_down_cmd())))
             .child(row("写完位置", end.into_any_element()))
             .child(row("书写优化", self.route_menu(&p, cx)))
+            .when(p.device_type == DeviceType::StepperPenUp, |el| el.child(row("笔锋(实验)", self.taper_menu(&p, cx))))
             .child(row("路径规划", plan_el))
             .child(row("书写原点", origin_el))
             .child(row("页面旋转", rot_el))
