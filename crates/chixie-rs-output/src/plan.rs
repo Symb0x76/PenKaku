@@ -69,7 +69,7 @@ impl OutputOptions {
 pub fn plan(doc: &Document, k: usize, o: &OutputOptions) -> Page {
     let mut page = doc.pages[k].clone();
     if o.path_plan == PathPlan::Serpentine {
-        serpentine(doc, k, &mut page);
+        serpentine(doc, &mut page);
     }
     let turn = o.rotation.turns(k);
     let (ox, oy) = o.sheet.origin_point(o.origin);
@@ -143,14 +143,17 @@ fn reorder(page: &mut Page, order: &[usize]) {
 
 /// 弓字型: on every second row of the page (by line, top to bottom), characters run right to left.
 /// Each character's strokes keep their order; strokes without a character stay where they are.
-fn serpentine(doc: &Document, k: usize, page: &mut Page) {
+fn serpentine(doc: &Document, page: &mut Page) {
     if page.stroke_chars.len() != page.strokes.len() {
         return;
     }
-    let lines: Vec<usize> = doc.lines.iter().enumerate().filter(|(_, l)| l.page == k).map(|(i, _)| i).collect();
+    // Rows that carry ink, top to bottom: blank lines don't flip the direction.
+    let line_of = |c: usize| doc.boxes.get(c).map_or(0, |b| b.line);
+    let mut lines: Vec<usize> = page.stroke_chars.iter().map(|&c| line_of(c)).collect();
+    lines.sort_unstable();
+    lines.dedup();
     let key = |c: usize| -> (usize, i64) {
-        let line = doc.boxes.get(c).map_or(0, |b| b.line);
-        let row = lines.binary_search(&line).unwrap_or_else(|i| i);
+        let row = lines.binary_search(&line_of(c)).unwrap_or_else(|i| i);
         (row, if row % 2 == 1 { -(c as i64) } else { c as i64 })
     };
     let mut order: Vec<usize> = (0..page.strokes.len()).collect();
@@ -204,6 +207,10 @@ mod tests {
             assert_eq!(at(&p, c), at(src, c));
         }
         assert_eq!(p.strokes.len(), src.strokes.len());
+        // A blank line doesn't count as a row.
+        let d = doc("abc\n\nabc");
+        let p = plan(&d, 0, &OutputOptions { path_plan: PathPlan::Serpentine, ..opts() });
+        assert_eq!(char_order(&p), vec![0, 1, 2, 7, 6, 5]);
     }
 
     #[test]

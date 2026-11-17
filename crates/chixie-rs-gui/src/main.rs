@@ -508,7 +508,9 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             (st.settings.page.multicolour, st.settings.device.profile.path_plan) = (false, chixie_rs_core::profile::PathPlan::Serpentine);
             // Row 2 of page 0 (the second line with ink): written right to left.
             let w = app.read(cx).written_pages(cx).remove(0).page;
-            let row = layout.lines.iter().enumerate().filter(|(_, l)| l.page == 0).map(|(i, _)| i).nth(1);
+            let mut rows: Vec<usize> = layout.pages[0].stroke_chars.iter().map(|&c| layout.boxes[c].line).collect();
+            rows.dedup();
+            let row = rows.get(1).copied();
             let inked: Vec<usize> = row.map(|r| layout.pages[0].stroke_chars.iter().copied().filter(|&c| layout.boxes[c].line == r).collect()).unwrap_or_default();
             let mut order: Vec<usize> = w.stroke_chars.iter().copied().filter(|c| inked.contains(c)).collect();
             order.dedup();
