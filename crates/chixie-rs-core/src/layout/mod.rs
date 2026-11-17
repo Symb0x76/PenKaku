@@ -9,7 +9,7 @@
 //! test and the `legacy` oracle below check this; don't reorder the math.
 
 use crate::deformation::Deformation;
-use crate::font::Font;
+use crate::font::{Font, Glyph};
 use crate::handwriting::{HandwritingStyle, Jitter, SALT_DEFORM, is_cjk, rng_for};
 
 pub mod kinsoku;
@@ -19,7 +19,8 @@ pub(crate) mod legacy;
 #[cfg(test)]
 mod tests;
 
-use pen::{Pen, draw_glyph};
+pub use pen::glyph_for;
+use pen::{Pen, draw_char};
 
 /// One pen-down polyline in machine mm.
 pub type Stroke = Vec<(f32, f32)>;
@@ -239,6 +240,8 @@ pub struct PageParams {
     /// 避头尾: never start a wrapped line with a closing mark or end one with an opening mark
     /// (ruled/free: pull chars down; grid: hang closing marks in the last cell).
     pub kinsoku: bool,
+    /// Grid: two Latin letters share a cell like two digits do.
+    pub grid_pair_letters: bool,
 }
 
 impl Default for PageParams {
@@ -254,6 +257,7 @@ impl Default for PageParams {
             deformation: Deformation::default(),
             ruling: Ruling::Free,
             kinsoku: false,
+            grid_pair_letters: false,
         }
     }
 }
@@ -279,8 +283,36 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
 /// [`layout_ids`] with paragraph formatting: `paras[k]` applies to the k-th `'\n'`-separated
 /// paragraph (missing entries are left-aligned with the default indent).
 pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &PageParams) -> Document {
+    layout_flow(&Flow { chars, ids, paras, joins: &[] }, font, p)
+}
+
+/// Everything layout reads from a document.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Flow<'a> {
+    pub chars: &'a [char],
+    /// One stable id per char.
+    pub ids: &'a [u64],
+    /// One per paragraph; missing entries use the default.
+    pub paras: &'a [Para],
+    /// 合并内容: `joins[k]` puts char `k + 1` in the same grid cell as char `k`. Missing = false.
+    pub joins: &'a [bool],
+}
+
+/// Half-width in a grid: two in a row share one cell. Digits and the half space always;
+/// Latin letters when `letters` (参数设置 › 数字/字母两个一格).
+pub fn half_width(c: char, letters: bool) -> bool {
+    c.is_ascii_digit() || c == HALF_SPACE || (letters && c.is_ascii_alphabetic())
+}
+
+/// 半格空格 (Shift+Space): half as wide as a space.
+pub const HALF_SPACE: char = '\u{2009}';
+
+/// Lay out a [`Flow`]. See [`layout_ids`].
+pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
+    let Flow { chars, ids, paras, joins } = *f;
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
+    let join = |k: usize| joins.get(k).copied().unwrap_or(false);
     let mut para_ix = 0;
     let s = p.mm_per_unit;
     let (ox, oy) = p.origin;
@@ -322,6 +354,17 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
     let (mut fresh_line, mut fresh_paragraph) = (true, true);
     // Grid: closing marks hung past the row's last cell so far.
     let mut hung = 0u32;
+    // Grid: the open shared cell (x, next slot, slots, squeezed 合并内容 run vs half-width pair).
+    let mut shared: Option<(f32, usize, usize, bool)> = None;
+    // Scales for a char in a shared cell's slot `w` mm wide: a 合并内容 run is squeezed across;
+    // a half-width char keeps its size unless it would not fit.
+    let slot_scale = |g: Option<&Glyph>, squeeze: bool, n: usize, w: f32| {
+        if squeeze {
+            return (s / n as f32, s);
+        }
+        let fit = g.map_or(s, |g| if g.advance > 0.0 { s.min(0.9 * w / g.advance) } else { s });
+        (fit, fit)
+    };
 
     // A `while` loop: 避头尾 can step back and lay a few chars again on the next line. Every
     // char's randomness is keyed by its id, so laying it again gives the same strokes.
@@ -350,17 +393,26 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
         let x0 = pen.cx;
         if let (Some((cols, cw, cg)), false) = (grid, ch == '\n') {
             // One character per cell, centred; spaces and missing glyphs take a cell too.
+            // 合并内容 groups and pairs of half-width chars share one cell, one slot each.
+            if let Some((cell_x, slot, n, squeeze)) = shared {
+                let w = cw / n as f32;
+                let x = cell_x + w * slot as f32;
+                let (sx, sy) = slot_scale(glyph_for(font, ch), squeeze, n, w);
+                let adv = glyph_for(font, ch).map_or(0.0, |g| g.advance * sx);
+                draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0);
+                pen.cx = x + w;
+                pen.push_box(x);
+                shared = (slot + 1 < n).then_some((cell_x, slot + 1, n, squeeze));
+                prev = Some(ch);
+                continue;
+            }
             if pen.col >= cols {
                 if p.kinsoku && kinsoku::is_closing(ch) && hung < 2 && i > pen.line_start {
                     // 避头尾 in a grid: hang the mark in the lower right of the row's last cell
                     // (half size; a second one beside it), as composition paper is written.
                     let x = (cols - 1) as f32 * (cw + cg) + cw * (0.5 + 0.25 * hung as f32);
-                    if let Some(glyph) = font.get(ch) {
-                        let hs = s * 0.5;
-                        let voff = pen.em * 0.5 + if jitter_on { jit.vertical(id) } else { 0.0 };
-                        let strokes = if deform_on { p.deformation.apply(&glyph.strokes, is_cjk(ch), hs, &mut rng_for(p.style.seed, SALT_DEFORM, id)) } else { glyph.strokes.clone() };
-                        draw_glyph(&mut pen, &strokes, x, voff, hs);
-                    }
+                    let lower = pen.em * 0.5;
+                    draw_char(&mut pen, font, &mut jit, ch, id, x, s * 0.5, s * 0.5, lower);
                     pen.cx = x + cw * 0.25;
                     pen.push_box(x);
                     hung += 1;
@@ -374,24 +426,29 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
             }
             hung = 0;
             let cell_x = pen.col as f32 * (cw + cg);
-            match (ch, font.get(ch)) {
-                (' ', _) => {}
-                (_, None) => {
-                    if !pen.doc.missing.contains(&ch) {
-                        pen.doc.missing.push(ch);
-                    }
-                }
-                (_, Some(glyph)) => {
-                    let voff = if jitter_on { jit.vertical(id) } else { 0.0 };
-                    let x = cell_x + (cw - glyph.advance * s) / 2.0;
-                    if deform_on {
-                        let mut drng = rng_for(p.style.seed, SALT_DEFORM, id);
-                        let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), s, &mut drng);
-                        draw_glyph(&mut pen, &strokes, x, voff, s);
-                    } else {
-                        draw_glyph(&mut pen, &glyph.strokes, x, voff, s);
-                    }
-                }
+            // Chars sharing this cell: a 合并内容 run, or two half-width chars.
+            let n = if join(i) {
+                (i..chars.len()).take_while(|&k| join(k) && chars.get(k + 1).is_some_and(|&c| c != '\n')).count() + 1
+            } else if half_width(ch, p.grid_pair_letters) && chars.get(i + 1).is_some_and(|&c| half_width(c, p.grid_pair_letters)) {
+                2
+            } else {
+                1
+            };
+            if n > 1 {
+                let w = cw / n as f32;
+                let (sx, sy) = slot_scale(glyph_for(font, ch), join(i), n, w);
+                let adv = glyph_for(font, ch).map_or(0.0, |g| g.advance * sx);
+                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0);
+                pen.cx = cell_x + w;
+                pen.col += 1;
+                pen.push_box(cell_x);
+                shared = Some((cell_x, 1, n, join(i)));
+                prev = Some(ch);
+                continue;
+            }
+            if ch != ' ' {
+                let adv = glyph_for(font, ch).map_or(0.0, |g| g.advance * s);
+                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (cw - adv) / 2.0, s, s, 0.0);
             }
             pen.cx = cell_x + cw;
             pen.col += 1;
@@ -419,9 +476,15 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
                 pen.push_box(x0);
                 continue;
             }
+            HALF_SPACE => {
+                let full = if jitter_on { jit.space(prev, id) } else { font.get(' ').map(|gl| gl.advance * s).unwrap_or(p.space_width) + p.char_spacing };
+                pen.cx += full / 2.0;
+                pen.push_box(x0);
+                continue;
+            }
             _ => {}
         }
-        let Some(glyph) = font.get(ch) else {
+        let Some(glyph) = glyph_for(font, ch) else {
             if !pen.doc.missing.contains(&ch) {
                 pen.doc.missing.push(ch);
             }

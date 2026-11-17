@@ -1,7 +1,8 @@
 //! Line and page bookkeeping while laying out.
 
 use super::{Align, CharBox, Document, Guide, LineInfo, Page, PageBox, PageParams, Ruling};
-use crate::handwriting::{SALT_ROWS, rng_for};
+use crate::font::{Font, Glyph};
+use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, is_cjk, rng_for};
 
 /// Pen state while laying out; owns the line/page bookkeeping.
 pub(super) struct Pen<'p> {
@@ -258,11 +259,50 @@ impl Pen<'_> {
     }
 }
 
-/// Place one glyph's strokes with its left edge at `x` (mm from origin) on the current line.
-pub(super) fn draw_glyph(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, s: f32) {
+/// Place one glyph's strokes with its left edge at `x` (mm from origin) on the current line,
+/// glyph units scaled `sx` across and `sy` down.
+fn draw_scaled(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, sx: f32, sy: f32) {
     let (ox, oy) = pen.p.origin;
     let top = pen.text_top;
     for stroke in strokes {
-        pen.page.strokes.push(stroke.iter().map(|&(gx, gy)| (ox + x + gx * s, oy - (top + voff + gy * s))).collect());
+        pen.page.strokes.push(stroke.iter().map(|&(gx, gy)| (ox + x + gx * sx, oy - (top + voff + gy * sy))).collect());
+    }
+}
+
+/// Draw `ch` at `x` with glyph units scaled `sx` across and `sy` down, `voff` mm lower than the
+/// line's text top, plus its jitter and deformation as configured. A char the font lacks is
+/// listed as missing and draws nothing.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_char(pen: &mut Pen, font: &Font, jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32) {
+    let Some(glyph) = glyph_for(font, ch) else {
+        if !pen.doc.missing.contains(&ch) {
+            pen.doc.missing.push(ch);
+        }
+        return;
+    };
+    let p = pen.p;
+    let voff = voff + if p.style.enabled { jit.vertical(id) } else { 0.0 };
+    if p.deformation.is_active() {
+        let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), sy, &mut rng_for(p.style.seed, SALT_DEFORM, id));
+        draw_scaled(pen, &strokes, x, voff, sx, sy);
+    } else {
+        draw_scaled(pen, &glyph.strokes, x, voff, sx, sy);
+    }
+}
+
+/// The font's glyph for `ch`, or for its full/half-width counterpart when the font lacks it
+/// (`,` ↔ `，`, `A` ↔ `Ａ`, space ↔ ideographic space). The text itself never changes.
+pub fn glyph_for(font: &Font, ch: char) -> Option<&Glyph> {
+    font.get(ch).or_else(|| width_counterpart(ch).and_then(|c| font.get(c)))
+}
+
+fn width_counterpart(ch: char) -> Option<char> {
+    const SHIFT: u32 = 0xFF01 - 0x21;
+    match ch as u32 {
+        0x20 => Some('\u{3000}'),
+        0x3000 => Some(' '),
+        c @ 0x21..=0x7E => char::from_u32(c + SHIFT),
+        c @ 0xFF01..=0xFF5E => char::from_u32(c - SHIFT),
+        _ => None,
     }
 }

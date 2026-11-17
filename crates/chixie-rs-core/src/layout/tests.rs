@@ -299,6 +299,67 @@ fn kinsoku_hangs_closing_marks_in_the_grid() {
     assert_eq!(line_texts("你“好", &on), ["你", "“好"]);
 }
 
+fn grid_params(letters: bool) -> PageParams {
+    PageParams {
+        page: Some(PageBox { width: 50.0, height: 100.0 }),
+        ruling: Ruling::Grid { rows: 4, cols: 5, cell: (10.0, 10.0), gap: (0.0, 0.0) },
+        grid_pair_letters: letters,
+        ..Default::default()
+    }
+}
+
+fn grid_font() -> Font {
+    let g = Glyph { advance: 2.0, strokes: vec![vec![(0.0, 0.0), (2.0, 0.0)]] };
+    Font { glyphs: "0123456789ab你好世界年".chars().map(|c| (c, g.clone())).collect() }
+}
+
+fn box_x0s(doc: &Document) -> Vec<f32> {
+    doc.boxes.iter().map(|b| b.x0).collect()
+}
+
+#[test]
+fn grid_pairs_digits_and_optionally_letters() {
+    let doc = layout("2026年", &grid_font(), &grid_params(false));
+    assert_eq!(box_x0s(&doc), vec![0.0, 5.0, 10.0, 15.0, 20.0]);
+    // Each digit centred in its half cell.
+    assert_eq!(doc.pages[0].strokes[1][0].0, 5.0 + 1.5);
+    // A lone digit keeps a whole cell; letters pair only with the option.
+    assert_eq!(box_x0s(&layout("年1年", &grid_font(), &grid_params(false))), vec![0.0, 10.0, 20.0]);
+    assert_eq!(box_x0s(&layout("ab", &grid_font(), &grid_params(false))), vec![0.0, 10.0]);
+    assert_eq!(box_x0s(&layout("ab", &grid_font(), &grid_params(true))), vec![0.0, 5.0]);
+}
+
+#[test]
+fn combined_chars_share_one_cell_squeezed() {
+    let chars: Vec<char> = "你好世界".chars().collect();
+    let ids = [0, 1, 2, 3];
+    let joins = [true, true, false, false];
+    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins }, &grid_font(), &grid_params(false));
+    let w = 10.0 / 3.0;
+    let want = [0.0, w, 2.0 * w, 10.0];
+    assert!(box_x0s(&doc).iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4), "{:?}", box_x0s(&doc));
+    // Squeezed across (2 units → 2/3 mm wide), full height.
+    let st = &doc.pages[0].strokes[0];
+    assert!((st[1].0 - st[0].0 - 2.0 / 3.0).abs() < 1e-4);
+}
+
+#[test]
+fn half_space_is_half_a_space() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let full = layout("你 好", &font, &jitter_params(3));
+    let half = layout("你\u{2009}好", &font, &jitter_params(3));
+    let w = |d: &Document| d.boxes[1].x1 - d.boxes[1].x0;
+    assert!((w(&half) - w(&full) / 2.0).abs() < 1e-5, "{} vs {}", w(&half), w(&full));
+}
+
+#[test]
+fn missing_width_falls_back_to_the_counterpart() {
+    let g = Glyph { advance: 1.0, strokes: vec![vec![(0.0, 0.0)]] };
+    let doc = layout(",Ａ", &Font { glyphs: HashMap::from([('，', g.clone()), ('A', g)]) }, &PageParams::default());
+    assert!(doc.missing.is_empty());
+    assert_eq!(doc.pages[0].strokes.len(), 2);
+}
+
 fn paras(v: &[(Align, Option<f32>)]) -> Vec<Para> {
     v.iter().map(|&(align, first_indent)| Para { align, first_indent }).collect()
 }
