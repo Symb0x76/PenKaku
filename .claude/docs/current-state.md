@@ -203,5 +203,18 @@
     (reload_fonts → `AppState.font_set` + `font_set_gen`, roles, mix, watcher, import/export, folders,
     缺失字符 dialog), 字体库 card ⋯ menu + roles/mix bar, 选项 › 字体; autotest `AUTOTEST_FONTS`.
   - Dropped by BOSS: 收藏/取消收藏, 主字体 sync, 我的录制, 今日试用, all network capture (memory: no-network-analysis).
-- Next: BOSS hardware #13a/#13b; M5 (handwriting effects fidelity) in progress.
+- Next: BOSS hardware #13a/#13b.
+- **M5 code done (2026-11-17), branch `m5-effects`:**
+  - `deformation.rs`: shape = slant + `Tps` warp (4×4 grid, hand-written solve, affine part dropped),
+    `remove_tails` (随机删除小尾巴, drawn last), `Deformation::recommended()` (使用推荐参数).
+  - `handwriting.rs`: `Jitter::vertical(id, x, row_w)`; 智能偏移 = per-row sweep keyed by the row's
+    first char (`SALT_ROW_DRIFT`).
+  - `layout::Tuning` + `Flow.tuning`; `draw_char(.., t)` moves / scales about the foot / re-rolls;
+    doc `Attrs.tuning`, `EditDoc::{tune, tune_same_chars, tunings}`; GUI `app/tune.rs` card.
+  - `path.rs` + `DeviceProfile.route` (书写优化) in `gcode::emit_mapped`; 设备 › 参数设置 menu.
+  - Captures 2026-11-17 in `captures/m5/` (local); finding in protocol.md: ChiXie3 paste noise hides
+    the shape level. Harness `tools/capture/capture.ps1` now maximizes ChiXie3, waits 30 s, `-Probe`,
+    clicks measured at 3840×2160 150 % (tools/ is git-ignored).
+  - Autotest `AUTOTEST_EFFECTS`; styled golden re-blessed once.
+- Next: BOSS hardware #13a/#13b/#13c → merge M5 → M6 (output options).
 

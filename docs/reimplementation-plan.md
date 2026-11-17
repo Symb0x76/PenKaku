@@ -303,7 +303,12 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - a font file copied into an extra folder shows up within 2 s; moving the default folder keeps
     every font usable; the same tests pass on all 3 OSes.
 
-### M5 Handwriting effects fidelity (2 wk) — spec R8
+### M5 Handwriting effects fidelity (2 wk) — spec R8 — code done 2026-11-17 (branch `m5-effects`)
+- Status: TPS shape warp (~8 µs per glyph in release), 随机删除小尾巴, per-row 同向偏移, 字符微调
+  (`Attrs.tuning`, task-pane card), 书写优化 (`path.rs`, `DeviceProfile.route`), 使用推荐参数. The
+  styled golden was re-blessed once for the new warp and is stable since. Shape levels 3 and 10
+  were captured, but ChiXie3's per-paste randomness is as large as the effect (protocol.md), so the
+  model stays calibrated on level 7 and scales linearly. BOSS: hardware checklist #13c.
 - Random tail removal (随机删除小尾巴), TPS shape deformation (字形变形 0–10), smart vertical
   offset (同向偏移).
 - **字符微调** panel: per-character nudge, size and deform, stored in `Attrs.tuning`.
