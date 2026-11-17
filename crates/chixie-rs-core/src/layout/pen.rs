@@ -236,6 +236,15 @@ impl Pen<'_> {
         self.line_stroke = self.page.strokes.len();
     }
 
+    /// Drop everything laid for chars `b..` on the current line (boxes and tagged strokes), so
+    /// they can be laid again on the next line.
+    pub(super) fn truncate_to(&mut self, b: usize) {
+        self.doc.boxes.truncate(b);
+        let keep = self.page.stroke_chars.iter().position(|&c| c >= b).unwrap_or(self.page.stroke_chars.len()).max(self.line_stroke);
+        self.page.strokes.truncate(keep);
+        self.page.stroke_chars.truncate(keep);
+    }
+
     /// Attribute every untagged stroke on the current page to character `i`.
     pub(super) fn tag_strokes(&mut self, i: usize) {
         let n = self.page.strokes.len();

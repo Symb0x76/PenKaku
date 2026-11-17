@@ -12,6 +12,7 @@ use crate::deformation::Deformation;
 use crate::font::Font;
 use crate::handwriting::{HandwritingStyle, Jitter, SALT_DEFORM, is_cjk, rng_for};
 
+pub mod kinsoku;
 mod pen;
 #[cfg(test)]
 pub(crate) mod legacy;
@@ -100,6 +101,9 @@ pub struct Document {
     pub lines: Vec<LineInfo>,
     /// Layout origin (machine mm): caret x on an empty line.
     pub origin: (f32, f32),
+    /// Lines that still start with a closing mark or end with an opening mark after a wrap
+    /// (避头尾 off, or nothing could be moved): the 位置合理性检测 badge.
+    pub punct_issues: Vec<usize>,
 }
 
 /// Where one input character sits (machine mm; y up, so `top > bottom`).
@@ -232,6 +236,9 @@ pub struct PageParams {
     pub deformation: Deformation,
     /// Line placement; anything but `Free` needs `page`.
     pub ruling: Ruling,
+    /// 避头尾: never start a wrapped line with a closing mark or end one with an opening mark
+    /// (ruled/free: pull chars down; grid: hang closing marks in the last cell).
+    pub kinsoku: bool,
 }
 
 impl Default for PageParams {
@@ -246,6 +253,7 @@ impl Default for PageParams {
             style: HandwritingStyle::default(),
             deformation: Deformation::default(),
             ruling: Ruling::Free,
+            kinsoku: false,
         }
     }
 }
@@ -312,8 +320,16 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
     let mut prev: Option<char> = None;
     // Jitter: the next placed character starts a line (and maybe a paragraph).
     let (mut fresh_line, mut fresh_paragraph) = (true, true);
+    // Grid: closing marks hung past the row's last cell so far.
+    let mut hung = 0u32;
 
-    for (i, (&ch, &id)) in chars.iter().zip(ids).enumerate() {
+    // A `while` loop: 避头尾 can step back and lay a few chars again on the next line. Every
+    // char's randomness is keyed by its id, so laying it again gives the same strokes.
+    let mut next = 0;
+    while next < chars.len() {
+        let i = next;
+        next += 1;
+        let (ch, id) = (chars[i], ids[i]);
         // Strokes so far belong to the previous character (before any page break below).
         if i > 0 {
             pen.tag_strokes(i - 1);
@@ -335,8 +351,28 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
         if let (Some((cols, cw, cg)), false) = (grid, ch == '\n') {
             // One character per cell, centred; spaces and missing glyphs take a cell too.
             if pen.col >= cols {
+                if p.kinsoku && kinsoku::is_closing(ch) && hung < 2 && i > pen.line_start {
+                    // 避头尾 in a grid: hang the mark in the lower right of the row's last cell
+                    // (half size; a second one beside it), as composition paper is written.
+                    let x = (cols - 1) as f32 * (cw + cg) + cw * (0.5 + 0.25 * hung as f32);
+                    if let Some(glyph) = font.get(ch) {
+                        let hs = s * 0.5;
+                        let voff = pen.em * 0.5 + if jitter_on { jit.vertical(id) } else { 0.0 };
+                        let strokes = if deform_on { p.deformation.apply(&glyph.strokes, is_cjk(ch), hs, &mut rng_for(p.style.seed, SALT_DEFORM, id)) } else { glyph.strokes.clone() };
+                        draw_glyph(&mut pen, &strokes, x, voff, hs);
+                    }
+                    pen.cx = x + cw * 0.25;
+                    pen.push_box(x);
+                    hung += 1;
+                    prev = Some(ch);
+                    continue;
+                }
+                pen.newline(i, i);
+            } else if p.kinsoku && pen.col + 1 == cols && pen.col > 0 && kinsoku::is_opening(ch) && chars.get(i + 1).is_some_and(|&c| c != '\n') {
+                // An opening mark never takes a row's last cell; it starts the next row.
                 pen.newline(i, i);
             }
+            hung = 0;
             let cell_x = pen.col as f32 * (cw + cg);
             match (ch, font.get(ch)) {
                 (' ', _) => {}
@@ -400,6 +436,16 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
         };
         // Wrap before a glyph that would cross the right edge (never on an empty line).
         if p.page.is_some() && pen.cx > 0.0 && pen.cx + glyph.advance * s > pen.line_w {
+            let b = if p.kinsoku { kinsoku::break_before(chars, pen.line_start, i) } else { i };
+            if b < i {
+                // Take chars b..i off this line and lay them again from the next one.
+                pen.truncate_to(b);
+                pen.newline(b, b);
+                fresh_line = true;
+                prev = Some(chars[b - 1]);
+                next = b;
+                continue;
+            }
             pen.newline(i, i);
             if jitter_on {
                 pen.cx = jit.line_start(id);
@@ -439,6 +485,7 @@ pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &
     pen.close_line(chars.len(), false);
     let mut doc = pen.doc;
     doc.pages.push(pen.page);
+    doc.punct_issues = kinsoku::issues(chars, &doc.lines);
     doc
 }
 

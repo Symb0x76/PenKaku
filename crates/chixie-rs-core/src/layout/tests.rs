@@ -248,6 +248,57 @@ fn wraps_at_width_and_breaks_pages() {
     );
 }
 
+fn cjk_font() -> Font {
+    let g = Glyph { advance: 2.0, strokes: vec![vec![(0.0, 0.0)]] };
+    Font { glyphs: "你好世界，。“”".chars().map(|c| (c, g.clone())).collect() }
+}
+
+fn line_texts(text: &str, doc: &Document) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    doc.lines.iter().map(|l| chars[l.start..l.end].iter().collect()).collect()
+}
+
+#[test]
+fn kinsoku_pulls_the_previous_char_down() {
+    // Two chars per line (width 5, advance 2).
+    let p = |kinsoku| PageParams { kinsoku, ..page(5.0) };
+    let off = layout("你好，世界", &cjk_font(), &p(false));
+    assert_eq!(line_texts("你好，世界", &off), ["你好", "，世", "界"]);
+    assert_eq!(off.punct_issues, vec![1]);
+    let on = layout("你好，世界", &cjk_font(), &p(true));
+    assert_eq!(line_texts("你好，世界", &on), ["你", "好，", "世界"]);
+    assert!(on.punct_issues.is_empty());
+    // An opening mark moves down with the char after it (three chars per line).
+    let on = layout("你“好”", &cjk_font(), &PageParams { kinsoku: true, ..page(7.0) });
+    assert_eq!(line_texts("你“好”", &on), ["你", "“好”"]);
+    // "“好”" cannot fit two per line: break as before and report it.
+    let on = layout("你“好”", &cjk_font(), &p(true));
+    assert_eq!(line_texts("你“好”", &on), ["你", "“好", "”"]);
+    assert_eq!(on.punct_issues, vec![2]);
+}
+
+#[test]
+fn kinsoku_hangs_closing_marks_in_the_grid() {
+    let p = |kinsoku| PageParams {
+        page: Some(PageBox { width: 20.0, height: 100.0 }),
+        ruling: Ruling::Grid { rows: 4, cols: 2, cell: (10.0, 10.0), gap: (0.0, 0.0) },
+        kinsoku,
+        ..Default::default()
+    };
+    let text = "你好。”世";
+    let on = layout(text, &cjk_font(), &p(true));
+    assert_eq!(line_texts(text, &on), ["你好。”", "世"]);
+    // Both marks sit in the right half of the last cell, smaller.
+    assert_eq!((on.boxes[2].x0, on.boxes[3].x0), (15.0, 17.5));
+    assert!(on.punct_issues.is_empty());
+    let off = layout(text, &cjk_font(), &p(false));
+    assert_eq!(line_texts(text, &off), ["你好", "。”", "世"]);
+    assert_eq!(off.punct_issues, vec![1]);
+    // An opening mark never takes the last cell.
+    let on = layout("你“好", &cjk_font(), &p(true));
+    assert_eq!(line_texts("你“好", &on), ["你", "“好"]);
+}
+
 fn paras(v: &[(Align, Option<f32>)]) -> Vec<Para> {
     v.iter().map(|&(align, first_indent)| Para { align, first_indent }).collect()
 }

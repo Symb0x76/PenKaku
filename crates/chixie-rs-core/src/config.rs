@@ -54,6 +54,8 @@ pub struct PageSettings {
     pub margins: (f32, f32, f32, f32),
     /// Active page template (name in `templates.toml`); `None` = blank page.
     pub template: Option<String>,
+    /// 避头尾 (参数设置 › 排版).
+    pub kinsoku: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,7 +76,7 @@ impl Default for DeviceSettings {
 impl Default for PageSettings {
     fn default() -> Self {
         // A4 with 21 mm side margins matches the ≈168 mm writable width seen in captures.
-        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None }
+        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None, kinsoku: true }
     }
 }
 
@@ -119,6 +121,7 @@ impl Settings {
             style: self.style.handwriting.clone(),
             deformation: self.style.deformation.clone(),
             ruling: template.map(|t| t.ruling()).unwrap_or_default(),
+            kinsoku: self.page.kinsoku,
             ..Default::default()
         }
     }
