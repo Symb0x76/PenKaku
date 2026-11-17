@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::gcode::DeviceProfile;
+use crate::profile::DeviceProfile;
 use crate::handwriting::{Span, StyleFile};
 use crate::{Error, Result};
 

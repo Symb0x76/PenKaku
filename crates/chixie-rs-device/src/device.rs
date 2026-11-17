@@ -18,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chixie_rs_core::gcode::DeviceProfile;
+use chixie_rs_core::profile::DeviceProfile;
 use crate::grbl::{self, Control, GrblStatus, MachineSettings, StreamEvent, realtime};
 use crate::transport::{self, Link};
 use chixie_rs_core::{Error, Result};
@@ -1033,7 +1033,7 @@ mod tests {
 
     #[test]
     fn end_position_controls_park() {
-        use chixie_rs_core::gcode::{AxisMap, DeviceProfile, EndPosition};
+        use chixie_rs_core::profile::{AxisMap, DeviceProfile, EndPosition};
         let cases = [
             (EndPosition::OriginLeft { mm: 20.0 }, AxisMap::default(), Some("G90G0 X-20Y0")),
             (EndPosition::OriginLeft { mm: 20.0 }, AxisMap { swap_xy: true, invert_x: false, invert_y: true }, Some("G90G0 X0Y20")),

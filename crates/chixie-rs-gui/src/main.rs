@@ -287,7 +287,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let connected = cx.update(|cx| device.read(cx).connected.clone());
         cx.update(|cx| {
             let profile = cx.global::<AppState>().settings.device.profile.clone();
-            let codes: Vec<_> = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_core::gcode::emit_mapped(p, &profile)).collect();
+            let codes: Vec<_> = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_output::emit_mapped(p, &profile)).collect();
             let job = chixie_rs_device::device::Job {
                 pages: codes.iter().map(|c| c.text.clone()).collect(),
                 maps: codes.into_iter().map(|c| c.stroke_lines).collect(),
@@ -397,7 +397,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             let machine = device.read(cx).params.read(cx).machine.clone();
             let st = cx.global::<AppState>();
             let doc = app.read(cx).doc.read(cx).document();
-            let g = chixie_rs_core::gcode::emit(&doc.pages[0], &st.settings.device.profile);
+            let g = chixie_rs_output::emit(&doc.pages[0], &st.settings.device.profile);
             println!(
                 "AUTOTEST_PARAMS travel={:?} max_feed={:?} dwell={} feed5000={} pen_down_z2_5={}",
                 machine.as_ref().and_then(|m| m.travel),
@@ -432,7 +432,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 let st = cx.global::<AppState>();
                 let doc = app.read(cx).doc.read(cx).document();
                 let profile = &st.settings.device.profile;
-                let gcode: String = doc.pages.iter().map(|p| chixie_rs_core::gcode::emit(p, profile)).collect();
+                let gcode: String = doc.pages.iter().map(|p| chixie_rs_output::emit(p, profile)).collect();
                 let guides_in_gcode = doc.pages[0].guides.iter().any(|g| gcode.contains(&format!("X{:.3} Y{:.3}", g.a.0, g.a.1)));
                 println!(
                     "AUTOTEST_TEMPLATE name={name:?} active={:?} paper={:?} pages={} lines_p0={} guides_p0={} strokes={} guides_in_gcode={guides_in_gcode}",
@@ -491,9 +491,9 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let route_ok = cx.update(|cx| {
             let d = app.read(cx).doc.read(cx).document();
             let mut prof = cx.global::<AppState>().settings.device.profile.clone();
-            let plain = d.pages.first().map(|p| chixie_rs_core::gcode::emit(p, &prof).lines().count()).unwrap_or(0);
+            let plain = d.pages.first().map(|p| chixie_rs_output::emit(p, &prof).lines().count()).unwrap_or(0);
             prof.route = chixie_rs_core::path::RouteImprove { mode: chixie_rs_core::path::RouteMode::Simplify, value: 0.02 };
-            let simplified = d.pages.first().map(|p| chixie_rs_core::gcode::emit(p, &prof).lines().count()).unwrap_or(0);
+            let simplified = d.pages.first().map(|p| chixie_rs_output::emit(p, &prof).lines().count()).unwrap_or(0);
             plain > 0 && simplified <= plain
         });
         println!("AUTOTEST_EFFECTS tuned={tuned} undo={undone} route={route_ok}");

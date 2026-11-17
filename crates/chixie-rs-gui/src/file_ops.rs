@@ -4,7 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use chixie_rs_core::gcode::{self, DeviceProfile};
+use chixie_rs_core::profile::DeviceProfile;
+use chixie_rs_output as gcode;
 use chixie_rs_core::layout::Document;
 use chixie_rs_doc::EditDoc;
 

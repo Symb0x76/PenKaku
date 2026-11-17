@@ -2,31 +2,11 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::font::Glyph;
-use crate::gcode::{DeviceProfile, emit_document};
 
 const FIXTURE: &[u8] = include_bytes!("../../tests/fixtures/font_fixture.json");
 
 fn font_with(c: char, glyph: Glyph) -> Font {
     Font { glyphs: HashMap::from([(c, glyph)]) }
-}
-
-#[test]
-fn matches_legacy_oracle_across_params() {
-    let font = Font::from_json(FIXTURE).unwrap();
-    let d = DeviceProfile::default();
-    let texts = ["你好 A.\n好你", "", "  ", "A\n\n.你", "x你y好z", "好好好好好好好好好好好好"];
-    let params = [
-        PageParams::default(),
-        PageParams { mm_per_unit: 3.0, origin: (0.0, 24.0), ..Default::default() },
-        PageParams { mm_per_unit: 0.37, char_spacing: 0.13, origin: (12.5, 280.1), ..Default::default() },
-        PageParams { mm_per_unit: 7.1, space_width: 2.2, line_height: 13.7, ..Default::default() },
-    ];
-    for t in texts {
-        for p in &params {
-            let new = emit_document(&layout(t, &font, p), &d);
-            assert_eq!(new, legacy::text_to_gcode(t, &font, p, &d), "text {t:?} params {p:?}");
-        }
-    }
 }
 
 fn dot_font() -> Font {

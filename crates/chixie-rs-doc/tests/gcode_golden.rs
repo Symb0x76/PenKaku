@@ -4,7 +4,8 @@
 use std::collections::HashMap;
 
 use chixie_rs_core::font::{Font, Glyph};
-use chixie_rs_core::gcode::{self, DeviceProfile};
+use chixie_rs_core::profile::DeviceProfile;
+use chixie_rs_output as gcode;
 use chixie_rs_core::handwriting::HandwritingStyle;
 use chixie_rs_core::layout::{self, PageBox, PageParams};
 use chixie_rs_doc::{EditDoc, docx};

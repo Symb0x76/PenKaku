@@ -4,7 +4,7 @@
 
 use chixie_rs_core::chixie3_devices;
 use chixie_rs_device::device::{Command, DeviceHandle, Pen};
-use chixie_rs_core::gcode::{DeviceProfile, DeviceType, EndPosition, Firmware};
+use chixie_rs_core::profile::{DeviceProfile, DeviceType, EndPosition, Firmware};
 use chixie_rs_device::grbl::MachineSettings;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};

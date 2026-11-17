@@ -5,7 +5,8 @@
 
 use std::fmt::Write as _;
 
-use chixie_rs_core::gcode::{self, DeviceProfile};
+use chixie_rs_core::profile::DeviceProfile;
+use chixie_rs_output as gcode;
 use chixie_rs_core::layout::{Guide, Page, Stroke};
 
 /// 巡边模式.

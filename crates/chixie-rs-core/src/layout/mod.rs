@@ -1,12 +1,12 @@
 //! Text → positioned pen strokes in machine mm (`Document`).
 //!
-//! The preview and the G-code emitter (`gcode.rs`) both consume the same `Document`, so what is
+//! The preview and the G-code emitter (`chixie-rs-output`) both consume the same `Document`, so what is
 //! shown is what is drawn. Glyph units are scaled to mm and Y is flipped (glyph y-down → machine
 //! y-up). The page origin is the top-left corner, in machine mm.
 //!
 //! With every effect off, the arithmetic here keeps the exact float expressions and operation
 //! order of the original `writing::text_to_gcode`, so its output stays byte-identical. The golden
-//! test and the `legacy` oracle below check this; don't reorder the math.
+//! test and the `legacy_oracle` test (both in `chixie-rs-output`) check this; don't reorder the math.
 
 use crate::deformation::Deformation;
 use crate::font::Glyph;
@@ -19,7 +19,6 @@ pub mod kinsoku;
 mod pen;
 mod segment;
 #[cfg(test)]
-pub(crate) mod legacy;
 #[cfg(test)]
 mod tests;
 

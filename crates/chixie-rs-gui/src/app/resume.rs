@@ -3,7 +3,7 @@
 //! 开始续写; the page is re-emitted from that character's first stroke, byte-identical to the
 //! uninterrupted tail, then the following pages run as usual.
 
-use chixie_rs_core::gcode::{self, PageCode};
+use chixie_rs_output::{self as gcode, PageCode};
 use chixie_rs_core::layout::Page;
 use chixie_rs_device::device::{Event as DevEvent, Job, JobOutcome, PLANNER_DEPTH};
 use gpui_kit::component::button::{Button, ButtonVariants as _};

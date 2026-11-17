@@ -14,3 +14,4 @@ zip.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+chixie-rs-output.workspace = true
