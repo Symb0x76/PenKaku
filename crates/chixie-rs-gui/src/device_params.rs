@@ -277,6 +277,54 @@ impl DeviceParams {
         [plan_el.into_any_element(), rot_el.into_any_element(), origin_el.into_any_element()]
     }
 
+    #[inline(never)]
+    /// 多色绘制 on/off and 换笔模式. The automatic changer's pens (macros) live in the settings
+    /// file; the form shows how many there are.
+    fn multicolour_rows(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> AnyElement {
+        use chixie_rs_core::profile::PenChange;
+        let muted = cx.theme().muted_foreground;
+        let on = cx.global::<AppState>().settings.page.multicolour;
+        let mode = p.pen_change.clone();
+        let auto = matches!(mode, PenChange::Auto { .. });
+        let slots = match &mode {
+            PenChange::Auto { slots } => slots.len(),
+            PenChange::Manual => 0,
+        };
+        let this = cx.entity().downgrade();
+        let mode_el = Button::new("pen-change").small().outline().w_full().label(if auto { "自动换笔（需设备支持）" } else { "手动换笔（弹窗提示）" }).dropdown_caret(true).dropdown_menu(
+            move |m, _w, _cx| {
+                let (a, b) = (this.clone(), this.clone());
+                m.item(PopupMenuItem::new("手动换笔（弹窗提示）").checked(!auto).on_click(move |_, _w, cx| {
+                    let _ = a.update(cx, |v, cx| v.edit(cx, |p| p.pen_change = PenChange::Manual));
+                }))
+                .item(PopupMenuItem::new("自动换笔（需设备支持）").checked(auto).on_click(move |_, _w, cx| {
+                    let _ = b.update(cx, |v, cx| {
+                        v.edit(cx, |p| {
+                            if !matches!(p.pen_change, PenChange::Auto { .. }) {
+                                p.pen_change = PenChange::Auto { slots: Vec::new() };
+                            }
+                        })
+                    });
+                }))
+            },
+        );
+        v_flex()
+            .gap_1p5()
+            .child(Checkbox::new("multicolour").small().label("多色绘制（按笔色分组书写，换色时换笔）").checked(on).on_click(cx.listener(|v, on: &bool, _w, cx| {
+                let on = *on;
+                v.edit_page(cx, |s| s.multicolour = on)
+            })))
+            .when(on, |el| {
+                el.child(h_flex().gap_2().child(div().w(px(76.)).flex_none().text_sm().text_color(muted).child("换笔模式")).child(div().flex_1().child(mode_el)))
+                    .when(auto, |el| {
+                        el.child(div().text_xs().text_color(muted).child(format!(
+                            "自动换笔配置：共{slots}支笔（在设置文件 [device.profile.pen_change] 的 slots 里填写各笔颜色与取笔/放笔 G-code；没有配置的颜色会弹窗提示手动换笔）"
+                        )))
+                    })
+            })
+            .into_any_element()
+    }
+
     fn form(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.profile(cx).clone();
         let theme = cx.theme();
@@ -354,6 +402,7 @@ impl DeviceParams {
             .child(row("书写原点", origin_el))
             .child(row("页面旋转", rot_el))
             .when(turned, |el| el.child(div().text_xs().text_color(muted).child("页面预览不旋转，只旋转书写输出；转过的页面原点仍在纸张左上角。")))
+            .child(self.multicolour_rows(&p, cx))
             .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("坐标方向"))
             .child(
                 h_flex()

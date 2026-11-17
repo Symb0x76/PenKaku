@@ -158,6 +158,44 @@ pub struct DeviceProfile {
     pub route: crate::path::RouteImprove,
     /// 路径规划: the order rows are written in.
     pub path_plan: PathPlan,
+    /// 换笔模式 for 多色绘制.
+    pub pen_change: PenChange,
+}
+
+/// Pen colour, RGB. Text without a colour is written in [`BLACK`].
+pub type Rgb = [u8; 3];
+pub const BLACK: Rgb = [0, 0, 0];
+
+/// 换笔模式 (ChiXie3 `PenChangingMode`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PenChange {
+    /// 手动换笔（弹窗提示）: the job pauses and asks for the next colour.
+    #[default]
+    Manual,
+    /// 自动换笔（需设备支持）: G-code macros put the old pen back and pick the new one.
+    Auto { slots: Vec<PenSlot> },
+}
+
+/// One pen of an automatic changer.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PenSlot {
+    pub colour: Rgb,
+    /// G-code that picks this pen up / puts it back (one command per line).
+    pub pick: String,
+    pub drop: String,
+}
+
+/// A colour's name for prompts (common pens by name, else `#RRGGBB`).
+pub fn colour_name(c: Rgb) -> String {
+    match c {
+        [0, 0, 0] => "黑色".into(),
+        [255, 0, 0] | [200, 0, 0] | [192, 0, 0] => "红色".into(),
+        [0, 0, 255] | [0, 112, 192] => "蓝色".into(),
+        [0, 128, 0] | [0, 176, 80] => "绿色".into(),
+        [c0, c1, c2] => format!("#{c0:02X}{c1:02X}{c2:02X}"),
+    }
 }
 
 /// 路径规划 (ChiXie3 `path_planning_type`). Output order only; the layout is unchanged.
@@ -258,6 +296,7 @@ impl Default for DeviceProfile {
             end_position: EndPosition::default(),
             route: Default::default(),
             path_plan: PathPlan::default(),
+            pen_change: PenChange::default(),
         }
     }
 }

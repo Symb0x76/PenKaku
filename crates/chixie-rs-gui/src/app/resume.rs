@@ -3,9 +3,8 @@
 //! 开始续写; the page is re-emitted from that character's first stroke, byte-identical to the
 //! uninterrupted tail, then the following pages run as usual.
 
-use chixie_rs_output::{self as gcode, PageCode};
-use chixie_rs_core::layout::Page;
-use chixie_rs_device::device::{Event as DevEvent, Job, JobOutcome, PLANNER_DEPTH};
+use chixie_rs_output::{self as gcode, PageCode, Written};
+use chixie_rs_device::device::{Event as DevEvent, JobOutcome, PLANNER_DEPTH};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
@@ -25,8 +24,8 @@ pub(crate) struct JobMeta {
 }
 
 impl JobMeta {
-    pub fn new(first_page: usize, codes: &[PageCode], pages: &[Page], ids: &[u64]) -> Self {
-        let pages = codes.iter().zip(pages).map(|(c, p)| (c.stroke_lines.clone(), p.stroke_chars.clone())).collect();
+    pub fn new(first_page: usize, codes: &[PageCode], pages: &[Written], ids: &[u64]) -> Self {
+        let pages = codes.iter().zip(pages).map(|(c, w)| (c.stroke_lines.clone(), w.page.stroke_chars.clone())).collect();
         Self { first_page, pages, ids: ids.to_vec() }
     }
 
@@ -116,15 +115,15 @@ impl ChixieRsApp {
         let profile = cx.global::<AppState>().settings.device.profile.clone();
         let written = self.written_pages(cx);
         let pages = &written[page_ix..];
-        let mut codes: Vec<PageCode> = pages.iter().map(|p| gcode::emit_mapped(p, &profile)).collect();
-        let k = pages[0].first_stroke_from(i);
+        let mut codes: Vec<PageCode> = pages.iter().map(|w| gcode::emit_written(w, &profile)).collect();
+        let k = pages[0].page.first_stroke_from(i);
         codes[0] = codes[0].from_stroke(k);
         let mut first = pages[0].clone();
-        first.stroke_chars.drain(..k.min(first.stroke_chars.len()));
-        let metas: Vec<Page> = std::iter::once(first).chain(pages[1..].iter().cloned()).collect();
+        first.page.stroke_chars.drain(..k.min(first.page.stroke_chars.len()));
+        let metas: Vec<Written> = std::iter::once(first).chain(pages[1..].iter().cloned()).collect();
         let ids = self.doc.read(cx).doc().ids().to_vec();
         self.resume.job_started(Some(JobMeta::new(page_ix, &codes, &metas, &ids)));
-        let job = Job { pages: codes.iter().map(|c| c.text.clone()).collect(), first_page: page_ix, maps: codes.into_iter().map(|c| c.stroke_lines).collect() };
+        let job = super::job_of(page_ix, codes);
         self.resume.open = false;
         self.device.update(cx, |d, cx| d.run(job, cx));
     }
@@ -177,8 +176,8 @@ mod tests {
     #[core::prelude::v1::test]
     fn break_point_names_the_character() {
         // Page 2 of a job starting at page 2: strokes at lines 1, 6, 11 draw chars 0, 0, 3.
-        let codes = [PageCode { text: String::new(), stroke_lines: vec![1, 6, 11] }];
-        let pages = [Page { stroke_chars: vec![0, 0, 3], ..Default::default() }];
+        let codes = [PageCode { text: String::new(), stroke_lines: vec![1, 6, 11], pens: vec![] }];
+        let pages = [Written { page: chixie_rs_core::layout::Page { stroke_chars: vec![0, 0, 3], ..Default::default() }, pens: vec![] }];
         let meta = JobMeta::new(2, &codes, &pages, &[10, 11, 12, 13]);
         assert_eq!(meta.char_id(2, 7), Some(10));
         assert_eq!(meta.char_id(2, 12), Some(13));

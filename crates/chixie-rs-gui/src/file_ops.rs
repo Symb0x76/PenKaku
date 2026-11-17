@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use chixie_rs_core::profile::DeviceProfile;
 use chixie_rs_output as gcode;
-use chixie_rs_core::layout::Page;
+use chixie_rs_output::Written;
 use chixie_rs_doc::EditDoc;
 
 pub struct Loaded {
@@ -42,13 +42,13 @@ pub fn documents_dir() -> PathBuf {
 
 /// Write one G-code file per page (pages as written, see `chixie_rs_output::plan`): `name.gcode` for a single page, `name_p1.gcode`, … otherwise
 /// (each page is a separate sheet). Returns the written paths.
-pub fn export_files(pages: &[Page], profile: &DeviceProfile, path: &Path) -> std::io::Result<Vec<PathBuf>> {
+pub fn export_files(pages: &[Written], profile: &DeviceProfile, path: &Path) -> std::io::Result<Vec<PathBuf>> {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("chixie").to_string();
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut out = Vec::new();
     for (i, page) in pages.iter().enumerate() {
         let p = if pages.len() == 1 { path.to_path_buf() } else { dir.join(format!("{stem}_p{}.gcode", i + 1)) };
-        std::fs::write(&p, gcode::emit(page, profile))?;
+        std::fs::write(&p, gcode::emit_written(page, profile).text)?;
         out.push(p);
     }
     Ok(out)

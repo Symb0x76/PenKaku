@@ -101,12 +101,27 @@ pub struct ChixieRsApp {
     _subs: Vec<Subscription>,
 }
 
+/// A device job from page bodies (resume maps and pen stops included).
+pub(crate) fn job_of(first_page: usize, codes: Vec<gcode::PageCode>) -> Job {
+    let mut job = Job { first_page, ..Default::default() };
+    for c in codes {
+        job.pages.push(c.text);
+        job.maps.push(c.stroke_lines);
+        job.pens.push(c.pens);
+    }
+    job
+}
+
 impl ChixieRsApp {
     /// Every page as it is written (路径规划, 页面旋转, 书写原点 applied); the editor shows the
     /// layout itself.
-    pub(crate) fn written_pages(&self, cx: &App) -> Vec<chixie_rs_core::layout::Page> {
-        let opts = gcode::OutputOptions::from_settings(&cx.global::<AppState>().settings);
-        gcode::plan_all(&self.doc.read(cx).document(), &opts)
+    pub(crate) fn written_pages(&self, cx: &App) -> Vec<gcode::Written> {
+        let settings = &cx.global::<AppState>().settings;
+        let opts = gcode::OutputOptions::from_settings(settings);
+        let view = self.doc.read(cx);
+        let d = view.doc().document();
+        let colours: Vec<_> = (0..view.doc().len()).map(|i| d.attrs(i).colour).collect();
+        gcode::plan_all(&view.document(), &colours, settings.page.multicolour, &opts)
     }
 
     pub fn new(
@@ -653,7 +668,7 @@ impl ChixieRsApp {
         let doc = self.doc.read(cx).document();
         let here = self.doc.read(cx).caret_page().min(doc.pages.len().saturating_sub(1));
         let written = self.written_pages(cx);
-        let Some(page) = written.get(here) else { return };
+        let Some(page) = written.get(here).map(|w| &w.page) else { return };
         let profile = cx.global::<AppState>().settings.device.profile.clone();
         let (gcode, title) = match tool {
             PageTool::Patrol(mode, template) => {
@@ -705,18 +720,18 @@ impl ChixieRsApp {
         };
         let written = self.written_pages(cx);
         let chosen = &written[first..first + count];
-        let strokes: usize = chosen.iter().map(|p| p.strokes.len()).sum();
+        let strokes: usize = chosen.iter().map(|w| w.page.strokes.len()).sum();
         if strokes == 0 {
             let msg = if scope == JobScope::ThisPage { "该页没有书写内容" } else { "没有可书写的笔画（请先选择字体并输入文字）" };
             window.push_notification(Notification::warning(msg), cx);
             return;
         }
         let profile = cx.global::<AppState>().settings.device.profile.clone();
-        let codes: Vec<gcode::PageCode> = chosen.iter().map(|p| gcode::emit_mapped(p, &profile)).collect();
+        let codes: Vec<gcode::PageCode> = chosen.iter().map(|w| gcode::emit_written(w, &profile)).collect();
         let ids = self.doc.read(cx).doc().ids().to_vec();
         self.resume.job_started(Some(resume::JobMeta::new(first, &codes, chosen, &ids)));
-        let job = Job { pages: codes.iter().map(|c| c.text.clone()).collect(), first_page: first, maps: codes.into_iter().map(|c| c.stroke_lines).collect() };
-        let pts = || chosen.iter().flat_map(|p| p.strokes.iter().flatten());
+        let job = job_of(first, codes);
+        let pts = || chosen.iter().flat_map(|w| w.page.strokes.iter().flatten());
         let (w, h) = match pts().next() {
             Some(&(x, y)) => {
                 let (x0, y0, x1, y1) = pts().fold((x, y, x, y), |(a, b, c, d), &(x, y)| (a.min(x), b.min(y), c.max(x), d.max(y)));
@@ -795,6 +810,26 @@ impl ChixieRsApp {
                     })
                 });
                 window.push_notification(n, cx);
+            }
+            Notice::AwaitingPen(colour) => {
+                let device = self.device.clone();
+                let name = chixie_rs_core::profile::colour_name(colour);
+                window.open_alert_dialog(cx, move |a, _w, _cx| {
+                    let (ok, cancel) = (device.clone(), device.clone());
+                    a.title("换笔提示")
+                        .description(format!("您已启用多色绘制，请更换笔颜色为：{name}"))
+                        .confirm()
+                        .ok_text("换笔完成")
+                        .cancel_text("停止任务")
+                        .on_ok(move |_, _w, cx| {
+                            ok.update(cx, |d, cx| d.next_sheet(cx));
+                            true
+                        })
+                        .on_cancel(move |_, _w, cx| {
+                            cancel.update(cx, |d, cx| d.stop(cx));
+                            true
+                        })
+                });
             }
             Notice::AwaitingSheet(next) => {
                 let device = self.device.clone();

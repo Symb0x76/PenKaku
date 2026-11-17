@@ -420,6 +420,12 @@ impl DocView {
         self.type_text(&layout::HALF_SPACE.to_string(), cx);
     }
     /// 字符微调 on the selection (or, with `same`, on every equal character).
+    /// 笔色 of the selection (`None` = default black). One undo step.
+    pub fn set_colour(&mut self, c: Option<chixie_rs_core::profile::Rgb>, cx: &mut Context<Self>) {
+        self.doc.set_attrs(|a| a.colour = c);
+        self.edited(cx);
+    }
+
     pub fn tune(&mut self, f: fn(&mut layout::Tuning), same: bool, cx: &mut Context<Self>) {
         if same {
             self.doc.tune_same_chars(f);
@@ -679,6 +685,10 @@ impl Render for DocView {
         let focus = self.focus.clone();
         let focused = focus.is_focused(window);
         let layout_doc = self.layout.clone();
+        let ink_of: Vec<Option<chixie_rs_core::profile::Rgb>> = {
+            let d = self.doc.document();
+            (0..self.doc.len()).map(|i| d.attrs(i).colour).collect()
+        };
         let sel = self.doc.selection();
         let caret = self.doc.caret();
         let marked = self.doc.marked();
@@ -798,22 +808,34 @@ impl Render for DocView {
                             if p.strokes.is_empty() {
                                 continue;
                             }
-                            let mut path = PathBuilder::stroke(stroke_w);
-                            for s in &p.strokes {
-                                let mut pts = s.iter().map(|&(x, y)| g.screen(k, x, y));
-                                let Some(first) = pts.next() else { continue };
-                                path.move_to(first);
-                                let mut drew = false;
-                                for q in pts {
-                                    path.line_to(q);
-                                    drew = true;
-                                }
-                                if !drew {
-                                    path.line_to(first + point(px(0.6), px(0.6)));
+                            let colour_at = |i: usize| p.stroke_chars.get(i).and_then(|&c| ink_of.get(c).copied().flatten());
+                            let mut inks: Vec<Option<chixie_rs_core::profile::Rgb>> = vec![None];
+                            for i in 0..p.strokes.len() {
+                                if let Some(c) = colour_at(i)
+                                    && !inks.contains(&Some(c))
+                                {
+                                    inks.push(Some(c));
                                 }
                             }
-                            if let Ok(path) = path.build() {
-                                window.paint_path(path, gpui_kit::black());
+                            for ink in inks {
+                                let mut path = PathBuilder::stroke(stroke_w);
+                                for s in p.strokes.iter().enumerate().filter(|(i, _)| colour_at(*i) == ink).map(|(_, s)| s) {
+                                    let mut pts = s.iter().map(|&(x, y)| g.screen(k, x, y));
+                                    let Some(first) = pts.next() else { continue };
+                                    path.move_to(first);
+                                    let mut drew = false;
+                                    for q in pts {
+                                        path.line_to(q);
+                                        drew = true;
+                                    }
+                                    if !drew {
+                                        path.line_to(first + point(px(0.6), px(0.6)));
+                                    }
+                                }
+                                if let Ok(path) = path.build() {
+                                    let colour = ink.map_or(gpui_kit::black(), |[r, g, b]| Hsla::from(Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }));
+                                    window.paint_path(path, colour);
+                                }
                             }
                         }
                         // 书写原点: a blue ring where the pen tip must stand at job start.

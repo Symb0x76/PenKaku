@@ -4,7 +4,7 @@
 
 use chixie_rs_core::config::Settings;
 use chixie_rs_core::layout::{Document, Page};
-use chixie_rs_core::profile::{Origin, PageRotation, PathPlan};
+use chixie_rs_core::profile::{BLACK, Origin, PageRotation, PathPlan, Rgb};
 
 /// Paper and margins (mm: left, top, right, bottom), as in `PageSettings`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,9 +90,55 @@ pub fn plan(doc: &Document, k: usize, o: &OutputOptions) -> Page {
     page
 }
 
-/// Every page of `doc` as written.
-pub fn plan_all(doc: &Document, o: &OutputOptions) -> Vec<Page> {
-    (0..doc.pages.len()).map(|k| plan(doc, k, o)).collect()
+/// A page as written, with the pen colour runs of 多色绘制.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Written {
+    pub page: Page,
+    /// (stroke index, colour) where each colour run starts, in writing order. Empty when
+    /// 多色绘制 is off (one pen, no changes).
+    pub pens: Vec<(usize, Rgb)>,
+}
+
+/// Page `k` as written. `colours[c]` is character `c`'s pen colour (`None` = black). With
+/// `multicolour`, strokes are grouped by colour in order of first appearance, keeping writing
+/// order inside a colour, so each pen is changed once per page.
+pub fn write(doc: &Document, k: usize, colours: &[Option<Rgb>], multicolour: bool, o: &OutputOptions) -> Written {
+    let mut page = plan(doc, k, o);
+    if !multicolour || page.stroke_chars.len() != page.strokes.len() {
+        return Written { page, pens: Vec::new() };
+    }
+    let colour_of = |c: usize| colours.get(c).copied().flatten().unwrap_or(BLACK);
+    let mut seen: Vec<Rgb> = Vec::new();
+    for &c in &page.stroke_chars {
+        let col = colour_of(c);
+        if !seen.contains(&col) {
+            seen.push(col);
+        }
+    }
+    let rank = |c: usize| seen.iter().position(|&s| s == colour_of(c)).unwrap_or(0);
+    let mut order: Vec<usize> = (0..page.strokes.len()).collect();
+    order.sort_by_key(|&i| rank(page.stroke_chars[i]));
+    reorder(&mut page, &order);
+    let mut pens: Vec<(usize, Rgb)> = Vec::new();
+    for (i, &c) in page.stroke_chars.iter().enumerate() {
+        let col = colour_of(c);
+        if pens.last().is_none_or(|p| p.1 != col) {
+            pens.push((i, col));
+        }
+    }
+    Written { page, pens }
+}
+
+/// Every page of `doc` as written (see [`write`]).
+pub fn plan_all(doc: &Document, colours: &[Option<Rgb>], multicolour: bool, o: &OutputOptions) -> Vec<Written> {
+    (0..doc.pages.len()).map(|k| write(doc, k, colours, multicolour, o)).collect()
+}
+
+/// Put the strokes (and their chars) in `order`.
+fn reorder(page: &mut Page, order: &[usize]) {
+    let mut slots: Vec<Option<_>> = std::mem::take(&mut page.strokes).into_iter().map(Some).collect();
+    page.strokes = order.iter().map(|&i| slots[i].take().unwrap_or_default()).collect();
+    page.stroke_chars = order.iter().map(|&i| page.stroke_chars[i]).collect();
 }
 
 /// 弓字型: on every second row of the page (by line, top to bottom), characters run right to left.
@@ -109,10 +155,7 @@ fn serpentine(doc: &Document, k: usize, page: &mut Page) {
     };
     let mut order: Vec<usize> = (0..page.strokes.len()).collect();
     order.sort_by_key(|&i| key(page.stroke_chars[i]));
-    let strokes = std::mem::take(&mut page.strokes);
-    let mut slots: Vec<Option<_>> = strokes.into_iter().map(Some).collect();
-    page.strokes = order.iter().map(|&i| slots[i].take().unwrap_or_default()).collect();
-    page.stroke_chars = order.iter().map(|&i| page.stroke_chars[i]).collect();
+    reorder(page, &order);
 }
 
 #[cfg(test)]
@@ -187,6 +230,22 @@ mod tests {
     fn odd_and_even_rotation_pick_pages() {
         assert!(PageRotation::Odd180.turns(0) && !PageRotation::Odd180.turns(1));
         assert!(!PageRotation::Even180.turns(0) && PageRotation::Even180.turns(1));
+    }
+
+    #[test]
+    fn two_colours_make_two_runs_in_first_seen_order() {
+        let d = doc("abc\nabc");
+        const RED: Rgb = [255, 0, 0];
+        // Chars 1 and 5 red, the rest black.
+        let colours = [None, Some(RED), None, None, None, Some(RED), None];
+        let w = write(&d, 0, &colours, true, &opts());
+        assert_eq!(w.pens, vec![(0, BLACK), (8, RED)]);
+        let mut order = w.page.stroke_chars.clone();
+        order.dedup();
+        assert_eq!(order, vec![0, 2, 4, 6, 1, 5], "reading order inside each colour");
+        assert_eq!(write(&d, 0, &colours, false, &opts()), Written { page: d.pages[0].clone(), pens: vec![] });
+        // A one-colour page still names its pen, so the device can ask for it.
+        assert_eq!(write(&d, 0, &[], true, &opts()).pens, vec![(0, BLACK)]);
     }
 
     #[test]

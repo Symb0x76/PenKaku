@@ -3,13 +3,19 @@
 //! Each stroke: travel (`G0`) to its start, pen down (+ optional dwell), write moves (`G1`), pen
 //! up. The page starts with a pen-up. Feeds are always explicit: the ChiXie3 pen literals carry no
 //! `F` and rely on the modal feed (see docs/protocol.md).
-
+//!
+//! 多色绘制: a page written with several pens is cut into colour runs. A manual changer gets a
+//! pen stop (line + colour) at each run start; the device pauses there. An automatic changer gets
+//! its put-back / pick-up macros written in front of the run's first stroke instead.
 
 use std::fmt::Write;
 
 use chixie_rs_core::layout::{Document, Page};
-use chixie_rs_core::profile::{DeviceProfile, num};
+use chixie_rs_core::profile::{DeviceProfile, PenChange, PenSlot, Rgb, num};
 
+use crate::plan::Written;
+
+/// G-code body for one page. The pen starts and ends up.
 pub fn emit(page: &Page, d: &DeviceProfile) -> String {
     emit_mapped(page, d).text
 }
@@ -21,6 +27,9 @@ pub struct PageCode {
     /// Line index (0-based, into `text.lines()`) of each stroke's travel `G0`. Line 0 is the
     /// leading pen-up; stroke `k` runs from `stroke_lines[k]` up to the next entry.
     pub stroke_lines: Vec<usize>,
+    /// 多色绘制 with a manual changer: (line, colour) where each colour run starts; the device
+    /// asks for that pen there unless it is already in the holder. Empty when single-colour.
+    pub pens: Vec<(usize, Rgb)>,
 }
 
 impl PageCode {
@@ -41,7 +50,15 @@ impl PageCode {
             }
             stroke_lines = self.stroke_lines[k..].iter().map(|&s| s - start + 1).collect();
         }
-        PageCode { text, stroke_lines }
+        // The restarted body opens with the colour of the run stroke `k` is in.
+        let start = self.stroke_lines.get(k).copied().unwrap_or(usize::MAX);
+        let mut pens: Vec<(usize, Rgb)> = self.pens.iter().filter(|p| p.0 >= start).map(|&(l, c)| (l - start + 1, c)).collect();
+        if let Some(&(_, c)) = self.pens.iter().rev().find(|p| p.0 < start)
+            && pens.first().is_none_or(|p| p.0 != 1)
+        {
+            pens.insert(0, (1, c));
+        }
+        PageCode { text, stroke_lines, pens }
     }
 
     /// Stroke that line `line` belongs to (`None` for the leading pen-up).
@@ -52,6 +69,34 @@ impl PageCode {
 
 /// `emit` with the line index of every stroke start.
 pub fn emit_mapped(page: &Page, d: &DeviceProfile) -> PageCode {
+    emit_runs(page, &[], d)
+}
+
+/// A written page (see [`crate::plan::write`]) with its pen stops or changer macros.
+pub fn emit_written(w: &Written, d: &DeviceProfile) -> PageCode {
+    emit_runs(&w.page, &w.pens, d)
+}
+
+/// The automatic changer's macro in front of a run: put the held pen back, pick the next one.
+/// `None` when the next colour has no slot (that run falls back to a manual stop).
+fn changer_macro(slots: &[PenSlot], held: Option<Rgb>, next: Rgb) -> Option<String> {
+    let pick = slots.iter().find(|s| s.colour == next)?;
+    let drop = held.and_then(|h| slots.iter().find(|s| s.colour == h)).map_or("", |s| s.drop.as_str());
+    let mut m = String::new();
+    for l in drop.lines().chain(pick.pick.lines()).map(str::trim).filter(|l| !l.is_empty()) {
+        m.push_str(l);
+        m.push('\n');
+    }
+    Some(m)
+}
+
+/// `runs`: (stroke index, colour) where each colour run starts; empty = one pen, no changes.
+fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode {
+    let slots: &[PenSlot] = match &d.pen_change {
+        PenChange::Auto { slots } => slots,
+        PenChange::Manual => &[],
+    };
+    let (mut pens, mut held) = (Vec::new(), None);
     let (up, down) = (d.pen_up_cmd(), d.pen_down_cmd());
     let dwell = (d.pause_after_down_s > 0.0).then(|| format!("G4 P{}", num(d.pause_after_down_s)));
     let mut g = String::new();
@@ -59,11 +104,19 @@ pub fn emit_mapped(page: &Page, d: &DeviceProfile) -> PageCode {
     let _ = writeln!(g, "{up} F{:.0}", d.travel_speed);
     // Lines are counted from the text (a custom pen command may span several).
     let (mut line, mut counted) = (0, 0);
-    for stroke in &page.strokes {
+    for (k, stroke) in page.strokes.iter().enumerate() {
         line += g[counted..].matches('\n').count();
         counted = g.len();
-        // An empty stroke is just its pen-up line; it starts there.
+        // An empty stroke is just its pen-up line; it starts there. A pen change in front of a
+        // stroke belongs to it, so resuming at the stroke replays the change.
         stroke_lines.push(line);
+        if let Some(&(_, colour)) = runs.iter().find(|r| r.0 == k) {
+            match changer_macro(slots, held, colour) {
+                Some(m) => g.push_str(&m),
+                None => pens.push((line, colour)),
+            }
+            held = Some(colour);
+        }
         let improved = d.route.apply(stroke);
         for (i, &p) in improved.as_deref().unwrap_or(stroke).iter().enumerate() {
             let (mx, my) = if d.axis_map.is_identity() { p } else { d.axis_map.apply(p) };
@@ -79,7 +132,7 @@ pub fn emit_mapped(page: &Page, d: &DeviceProfile) -> PageCode {
         // Unconditional (even for an empty stroke) to stay byte-identical with the original.
         let _ = writeln!(g, "{up} F{:.0}", d.travel_speed);
     }
-    PageCode { text: g, stroke_lines }
+    PageCode { text: g, stroke_lines, pens }
 }
 
 /// All pages back to back, for single-sheet output (CLI). Multi-page jobs should stream
@@ -111,6 +164,36 @@ mod tests {
             "G1G90 Z0 F8000\nG0 X10.000 Y50.000\nG1G90 Z2 F8000\nG1 X10.000 Y50.000 F3000\n\
              G1 X10.000 Y48.000 F3000\nG1G90 Z0 F8000\n"
         );
+    }
+
+    fn two_colour_page() -> Written {
+        let s = |x: f32| vec![(x, 0.0), (x + 1.0, 0.0)];
+        Written { page: Page { strokes: vec![s(0.0), s(2.0), s(4.0)], ..Default::default() }, pens: vec![(0, [0, 0, 0]), (2, [255, 0, 0])] }
+    }
+
+    #[test]
+    fn manual_changer_stops_at_each_run() {
+        let pc = emit_written(&two_colour_page(), &DeviceProfile::default());
+        assert_eq!(pc.pens, vec![(1, [0, 0, 0]), (pc.stroke_lines[2], [255, 0, 0])]);
+        assert_eq!(pc.text, emit(&two_colour_page().page, &DeviceProfile::default()), "manual stops add no G-code");
+        // Resuming inside the black run asks for black first; at the red run, for red.
+        assert_eq!(pc.from_stroke(1).pens, vec![(1, [0, 0, 0]), (6, [255, 0, 0])]);
+        assert_eq!(pc.from_stroke(2).pens, vec![(1, [255, 0, 0])]);
+    }
+
+    #[test]
+    fn auto_changer_writes_macros_instead_of_stops() {
+        use chixie_rs_core::profile::PenSlot;
+        let slot = |c: Rgb, n: u8| PenSlot { colour: c, pick: format!("M800 P{n}"), drop: format!("M801 P{n}") };
+        let d = DeviceProfile { pen_change: PenChange::Auto { slots: vec![slot([0, 0, 0], 1), slot([255, 0, 0], 2)] }, ..Default::default() };
+        let pc = emit_written(&two_colour_page(), &d);
+        assert!(pc.pens.is_empty());
+        let lines: Vec<&str> = pc.text.lines().collect();
+        assert_eq!(lines[pc.stroke_lines[0]], "M800 P1");
+        assert_eq!(&lines[pc.stroke_lines[2]..pc.stroke_lines[2] + 3], ["M801 P1", "M800 P2", "G0 X4.000 Y0.000"]);
+        // A colour without a slot falls back to a manual stop.
+        let d1 = DeviceProfile { pen_change: PenChange::Auto { slots: vec![slot([0, 0, 0], 1)] }, ..Default::default() };
+        assert_eq!(emit_written(&two_colour_page(), &d1).pens.len(), 1);
     }
 
     #[test]

@@ -90,6 +90,8 @@ pub struct PageSettings {
     pub origin: crate::profile::Origin,
     /// 页面旋转: pages written turned 180°.
     pub rotation: crate::profile::PageRotation,
+    /// 多色绘制: write each pen colour in turn, changing pens in between.
+    pub multicolour: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,7 +112,7 @@ impl Default for DeviceSettings {
 impl Default for PageSettings {
     fn default() -> Self {
         // A4 with 21 mm side margins matches the ≈168 mm writable width seen in captures.
-        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None, kinsoku: true, grid_pair_letters: false, grid_keep_words: false, origin: Default::default(), rotation: Default::default() }
+        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None, kinsoku: true, grid_pair_letters: false, grid_keep_words: false, origin: Default::default(), rotation: Default::default(), multicolour: false }
     }
 }
 

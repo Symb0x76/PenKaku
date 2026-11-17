@@ -5,6 +5,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeMode, h_flex, v_flex};
@@ -56,6 +57,7 @@ impl ChixieRsApp {
         let act = |a: Box<dyn Action>| editor_action(self.doc.clone(), a);
         let has_fonts = !self.font_ids.is_empty();
         let font_size = cx.global::<AppState>().settings.page.font_size;
+        let pen_menu = self.pen_colour_menu();
         let grid = matches!(cx.global::<AppState>().active_template().map(|t| t.ruling()), Some(Ruling::Grid { .. }));
         let (align, indented) = {
             let d = self.doc.read(cx).doc();
@@ -102,7 +104,8 @@ impl ChixieRsApp {
                             })))
                             .child(ribbon::icon_btn("shrink", IconName::AArrowDown, "减小字号").on_click(cx.listener(move |t, _: &ClickEvent, w, cx| {
                                 t.set_font_size(font_size - 10.0, w, cx)
-                            }))),
+                            })))
+                            .child(pen_menu),
                     ),
                 None,
             ))
@@ -158,6 +161,27 @@ impl ChixieRsApp {
                 ]),
                 None,
             ))
+            .into_any_element()
+    }
+
+    /// 笔色: the pen colour of the selected text (多色绘制 writes each colour with its own pen).
+    #[inline(never)]
+    fn pen_colour_menu(&self) -> AnyElement {
+        const PENS: [(&str, Option<[u8; 3]>); 4] = [("黑色（默认）", None), ("红色", Some([255, 0, 0])), ("蓝色", Some([0, 0, 255])), ("绿色", Some([0, 128, 0]))];
+        let doc = self.doc.clone();
+        ribbon::icon_btn("pen-colour", IconName::Palette, "笔色（选中文字）")
+            .dropdown_menu(move |m, _w, _cx| {
+                PENS.iter().fold(m, |m, &(name, c)| {
+                    let doc = doc.clone();
+                    m.item(PopupMenuItem::new(name).on_click(move |_, w, cx| {
+                        if doc.read(cx).doc().selection().is_empty() {
+                            w.push_notification(gpui_kit::component::notification::Notification::warning("请先选中要换色的文字"), cx);
+                            return;
+                        }
+                        doc.update(cx, |d, cx| d.set_colour(c, cx));
+                    }))
+                })
+            })
             .into_any_element()
     }
 
