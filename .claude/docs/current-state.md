@@ -192,4 +192,16 @@
   - Fixed a racy device test (`connects_and_jogs`).
 - Known: 作文格 capture test stays at 0.7 mm (ink top 0.64 mm above capture; calibration task).
 - Next: BOSS hardware #13a → M4 (fonts).
+- **M4 code done (2026-11-17), branch `m4-fonts`:**
+  - core `font/` module dir: `crypto.rs` (Fernet), `svg.rs` (SVG font files, exact round trip), `library.rs`
+    (`FontLibrary`, `FontKey` = `cloud:<id>` | `sha:<12 hex>`, `local_id()` ↔ i64 for the GUI, scan/import/
+    export/move/migrate, `watch` via notify 8.2), `fontset.rs` (`Glyphs` trait, `FontRoles`, `MixEntry`,
+    `FontSet`), `fix.rs` (字体优化).
+  - Settings `fonts: FontSettings { library_dir, extra_dirs, roles, mix, mix_salt, fix }`; fake/autotest mode
+    uses `<temp>/chixie-rs-demo/Fonts`, never Documents.
+  - GUI: `font_lib.rs` (`LibraryStore`, cached scan, old FontStore API by i64), `app/fonts_ctl.rs`
+    (reload_fonts → `AppState.font_set` + `font_set_gen`, roles, mix, watcher, import/export, folders,
+    缺失字符 dialog), 字体库 card ⋯ menu + roles/mix bar, 选项 › 字体; autotest `AUTOTEST_FONTS`.
+  - Dropped by BOSS: 收藏/取消收藏, 主字体 sync, 我的录制, 今日试用, all network capture (memory: no-network-analysis).
+- Next: BOSS hardware #13a/#13b → merge M4 → M5 (handwriting effects fidelity).
 

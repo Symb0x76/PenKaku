@@ -260,7 +260,13 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - 1,000-character fuzz: no line starts with a closing mark;
   - 作文格 and 信纸 captures still match within 0.3 mm.
 
-### M4 Fonts (2–3 wk) — spec R4
+### M4 Fonts (2–3 wk) — spec R4 — code done 2026-11-17 (branch `m4-fonts`)
+- Status: SVG font files in watched library folders (default `Documents/chixie-rs/Fonts`, movable, extra
+  folders), import / export (SVG or ZIP), one-time migration of the old store; role fonts, fallback
+  chain and 字体混用 (`font::fontset`, layout reads glyphs through the `Glyphs` trait, golden unchanged);
+  字体优化 (`font::fix`); 缺字 placeholders and list. Fonts stayed a module directory in core (crate split
+  waits for M6/M10). **Dropped by BOSS (2026-11-17):** 收藏/取消收藏, 主字体 sync, 我的录制, 今日试用 and
+  any further network capture; the done-when item "collect request matches a capture" no longer applies.
 - Font roles 主线/英文/符号/数字 (right-click card → 设为…); per-character fallback chain;
   weighted mixing keyed by character id.
 - 收藏/取消收藏 (30-font cap is a server rule; surface the message).

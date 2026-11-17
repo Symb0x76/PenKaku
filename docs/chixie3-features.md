@@ -138,13 +138,13 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Partial (writable top-left only) | P1 | M |
 | Templates | 模板库 (cloud) | online templates: 绘图/激光/写字 | Missing | P3 | M |
 | Fonts | 字体库 browse | 在线字体 / 我的收藏 / 我的录制, filter, sort, search, pager | Partial (no 录制, no filter/sort UI) | P1 | S |
-| Fonts | 收藏/取消收藏 | `font/collect_a_font`, 30-font cap | Missing | P1 | S |
-| Fonts | 主字体 slots | 主线/主英文/主符号/主数字 font | Missing | P1 | M |
-| Fonts | 字体调用/混用 | per char-type fallback lists; weighted mix | Missing (one font) | P1 | M |
-| Fonts | 缺字处理 | auto-substitute, 查看缺失字符 dialog | Partial (missing list in layout) | P1 | S |
-| Fonts | 今日试用字体 | daily free font for ordinary users | Missing | P3 | S |
+| Fonts | 收藏/取消收藏 | `font/collect_a_font`, 30-font cap | Dropped (BOSS, 2026-11-17) | — | — |
+| Fonts | 主字体 slots | 主线/主英文/主符号/主数字 font | Done (M4, local) | P1 | M |
+| Fonts | 字体调用/混用 | per char-type fallback lists; weighted mix | Done (M4) | P1 | M |
+| Fonts | 缺字处理 | auto-substitute, 查看缺失字符 dialog | Done (M4) | P1 | S |
+| Fonts | 今日试用字体 | daily free font for ordinary users | Dropped (BOSS, 2026-11-17) | — | — |
 | Fonts | 字体下拉框 | regions, hover preview | Partial (`font_preview.rs` picker) | P1 | S |
-| Fonts | 本地字体 (offline) | ChiXie3 has none | Done (`font_store.rs`, better) | P0 | — |
+| Fonts | 本地字体 (offline) | ChiXie3 has none | Done (M4: SVG font folders, watched) | P0 | — |
 | Fonts | 录制字体 | WeChat mini-program guide only | Not planned (link only) | P3 | S |
 | Effects | 字符间隔/空格/垂直偏移/首字不对齐 | layout-time jitter | Done (`handwriting.rs`) | P0 | — |
 | Effects | 智能垂直偏移 | position-proportional drift | Partial (guess, VERIFY) | P2 | S |
@@ -717,7 +717,7 @@ WebEngine page.
 **ChiXie3:** star on the card (`font/collect_a_font`). Limits: "当前版本客户端软件最多只支持收藏30种字体";
 "普通账号无法收藏字体喔！（只能使用今日试用字体）"; a default font cannot be uncollected
 ("默认字体不能取消收藏，如需取消收藏，请先更换默认字体") (A) [high].
-**chixie-rs today:** missing (collected list is read-only).
+**chixie-rs today:** Dropped by BOSS (2026-11-17), together with all further network capture; the collected list stays read-only.
 **Recommended implementation:** `Backend::collect_font(id, on: bool)` in `session.rs`; capture
 the request body first. Keep the 30 cap client-side only if the server enforces it (it is a
 "client version" limit; check the server's error).
@@ -728,7 +728,7 @@ the request body first. Keep the 30 cap client-side only if the server enforces 
 also 设为主线字体 etc.); only VIP ("普通账号或者未登录无法指定默认字体喔！"), must be collected first
 ("请先收藏该字体后再设置"). Stored as `[FontConfig] MainFont, MainSymbolFont, MainEnglishFont,
 MainNumberFont` and synced via `font/get_main_fonts_info` / `config/font_config` (A, C) [high].
-**chixie-rs today:** missing (one active font).
+**chixie-rs today:** Done (M4): `FontRoles` in `settings.fonts.roles` (local only; `get_main_fonts_info` dropped); 字体库 card ⋯ › 设为…; unset roles use the main font.
 **Recommended implementation:** `FontRoles { main, english, symbol, number }` in
 `PageSettings`, each `Option<FontId>` falling back to `main`. Set from the 字体库 card menu and
 from a 字体 group dialog in the ribbon. No VIP gating locally (offline-first; the server still
@@ -742,7 +742,7 @@ the glyph wins. Mix mode (`FontMixer`, 2025-09-02): `{font_id: weight}` from `Fo
 the collection's `mixing_ratio`; strategies weighted random, deterministic by char hash ("相同字符总是返回相同字体"),
 or by code point; a `seed` attribute exists. Table cells override with 指定字体优先 /
 字体库配置优先 / 随机字体模式 (C §字体调用模式) [high]; which mix strategy the UI exposes [low].
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M4): `font::fontset::FontSet` — per-class chains (role → main → mixed → other loaded fonts), 字体混用 weights keyed by char id (`mix_salt` = 换一组); 3:1 over 1,000 chars within ±3 %.
 **Recommended implementation:** core `fontset.rs`:
 `FontSet { roles: FontRoles, fallbacks: Vec<FontId>, mix: Option<Vec<(FontId, f32)>> }` and
 `fn pick(&self, c: char, char_id: u64, seed: u64, fonts: &FontCache) -> Option<FontId>`.
@@ -759,7 +759,7 @@ Tests: missing glyph falls through to fallback; mix weights 3:1 give ≈ 75% ove
 text area plus one button [ui-form]) (A, C) [high]. Missing chars are reported to the server
 on exit (`user/collect_missing_characters`). The failure message for unloadable fonts:
 "字体（…）加载失败，建议重启或取消收藏该字体。如是您本人的字体，请确保该字符已有录制数据" (C @9511728).
-**chixie-rs today:** `layout::Document.missing` lists missing characters once.
+**chixie-rs today:** Done (M4): fall-through via `FontSet`; `Document.missing_at` → dashed boxes in the editor (never plotted); status item 缺字 n opens 缺失字符 with 复制. Nothing is reported to the server.
 **Recommended implementation:** fall through `FontSet` first; if still missing, draw a dashed
 box placeholder in the preview (never plotted) and show a status-bar badge "缺字 N" that opens a
 list with 复制. Do not report to the server.
@@ -770,7 +770,7 @@ the font dropdown's 今日免费试用字体 region; members do not see that reg
 `UI_DailyFreeFontDialog` [ui-form] (title 今日试用字体) greets "哈喽，亲爱的用户。", says "当前为普通账号，如需升级请前往个人中心或炽写店铺",
 "今日炽写为您准备的全量试用字体是", then shows 标题预览：, 字体描述：, 字符数量：, 字体类型：, 作者 ：, 字体名： and closes with
 "祝您有个愉快的一天！". The dropdown region label itself is 今日试用 (see below).
-**chixie-rs today:** Missing.
+**chixie-rs today:** Dropped by BOSS (2026-11-17).
 **Recommended implementation:** P3; a single call shown as a card in 字体库 when the account is
 `ordinary_user`.
 
@@ -787,7 +787,7 @@ font override, no edit recorded). Load fonts lazily per use instead of blocking 
 
 #### Offline font store (本地字体)
 **ChiXie3:** none; every session re-downloads and decrypts fonts (6–13 MB each) (server-api.md).
-**chixie-rs today:** Done: `font_store.rs` keeps decrypted glyph maps on disk
+**chixie-rs today:** Done (M4): SVG font files in `Documents/chixie-rs/Fonts` (movable) plus extra folders, watched with `notify`; the pre-M4 `<config>/fonts` JSON store is converted once and kept as `fonts.migrated`.
 (`<config>/fonts/<id>.json` + `index.json`), usable without login.
 **Recommended implementation:** keep; consider a compact binary cache (`postcard` or a custom
 f32 array file) if load time > 200 ms per font (measure first).
@@ -809,7 +809,7 @@ three per-font buttons are labelled 统一字符尺寸, 重复轨迹优化, 异�
 (the 百宝箱 tile subtitle is 优化部分字体问题). Unify: compute each glyph's bbox, fetch a standard bbox
 set (`font/get_standard_br`), scale/move strokes into the target box (default size 10). Uses a
 Fernet key embedded in the binary (A §Font data optimize) [med].
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M4): `font::fix` (统一字符尺寸 / 重复轨迹优化 / 异常宽度优化) applied on load, toggled in 选项 › 字体; files are never rewritten.
 **Recommended implementation:** core `glyph_fix.rs` with three pure functions over `Glyph`:
 `normalize_bbox(glyph, target)`, `dedupe_overlapping_segments(glyph, tol_mm)` (same as 字符重复轨迹优化,
 §3.4), `clamp_abnormal_width(glyph, median_advance)`. Apply on load when enabled ("启动自动调用"),
