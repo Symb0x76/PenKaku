@@ -68,7 +68,9 @@ impl OutputOptions {
 /// the G-code stays byte-identical to the layout's.
 pub fn plan(doc: &Document, k: usize, o: &OutputOptions) -> Page {
     let mut page = doc.pages[k].clone();
-    if o.path_plan == PathPlan::Serpentine {
+    // ChiXie3 reverses a row's text, not a grid's cells: 弓字型 leaves 作文格 pages as they are
+    // (captured 2026-11-17, docs/protocol.md).
+    if o.path_plan == PathPlan::Serpentine && !doc.grid {
         serpentine(doc, &mut page);
     }
     let turn = o.rotation.turns(k);
@@ -211,6 +213,18 @@ mod tests {
         let d = doc("abc\n\nabc");
         let p = plan(&d, 0, &OutputOptions { path_plan: PathPlan::Serpentine, ..opts() });
         assert_eq!(char_order(&p), vec![0, 1, 2, 7, 6, 5]);
+    }
+
+    #[test]
+    fn serpentine_leaves_a_grid_alone() {
+        let p = PageParams {
+            page: Some(PageBox { width: 100.0, height: 200.0 }),
+            ruling: chixie_rs_core::layout::Ruling::Grid { rows: 4, cols: 5, cell: (10.0, 10.0), gap: (0.0, 0.0) },
+            ..Default::default()
+        };
+        let d = layout("abc\nabc", &font(), &p);
+        assert!(d.grid);
+        assert_eq!(plan(&d, 0, &OutputOptions { path_plan: PathPlan::Serpentine, ..opts() }), d.pages[0]);
     }
 
     #[test]

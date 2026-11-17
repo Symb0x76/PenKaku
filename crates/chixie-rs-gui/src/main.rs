@@ -494,7 +494,10 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         });
         println!("AUTOTEST_EFFECTS tuned={tuned} undo={undone} route={route_ok}");
         // Output: the selected character in red → two pen runs with 多色绘制; 弓字型 reverses the
-        // second row; 旋转180° mirrors about the frame centre. Settings and text are put back.
+        // second row (ruled paper: ChiXie3 leaves 作文格 rows alone); 旋转180° mirrors about the
+        // frame centre. Settings and text are put back.
+        cx.update(|cx| app.update(cx, |a, cx| a.apply_template(Some("信纸 22 行".to_string()), cx)));
+        cx.background_executor().timer(pause(400)).await;
         cx.update(|cx| app.read(cx).doc.clone().update(cx, |d, cx| d.set_colour(Some([255, 0, 0]), cx)));
         cx.background_executor().timer(pause(300)).await;
         let saved = cx.update(|cx| cx.global::<AppState>().settings.clone());

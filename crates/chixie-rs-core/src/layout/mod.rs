@@ -141,6 +141,8 @@ pub struct Document {
     /// Lines that still start with a closing mark or end with an opening mark after a wrap
     /// (避头尾 off, or nothing could be moved): the 位置合理性检测 badge.
     pub punct_issues: Vec<usize>,
+    /// Laid out on a composition grid (one character per cell).
+    pub grid: bool,
 }
 
 /// Where one input character sits (machine mm; y up, so `top > bottom`).
@@ -372,7 +374,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
         align: para(0).align,
         line_stroke: 0,
         pitch: grid.map(|(_, cw, cg)| cw + cg),
-        doc: Document { origin: p.origin, ..Default::default() },
+        doc: Document { origin: p.origin, grid: grid.is_some(), ..Default::default() },
         page: Page::default(),
         page_ix: 0,
         cx: 0.0,

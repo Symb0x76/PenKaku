@@ -185,12 +185,12 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Jobs | 换纸 | sheet change between pages | Done | P0 | — |
 | Jobs | 断点续写 | resume from a chosen character | Partial (page/line toast) | P0 | M |
 | Jobs | 多色绘制 / 换笔 | manual / automatic pen change | Done (M6; auto slots in settings file only) | P2 | M |
-| Jobs | 页面旋转 (奇偶页) | 180° rotation of odd/even pages | Done (M6; centre VERIFY) | P2 | S |
+| Jobs | 页面旋转 (奇偶页) | 180° rotation of odd/even pages | Done (M6; matches capture) | P2 | S |
 | Jobs | 自动换纸设备 | Marlin sheet feeder, loops | Missing | P3 | M |
 | Jobs | 工作区巡边/绘制框架线 | trace bounds; draw template lines | Missing | P1 | S |
 | Jobs | 上传SD卡书写 | upload page to TF and run | Done (M6; untested on a board) | P2 | S |
 | G-code | 书写 G-code | initial/body/end, signed coords | Done (`chixie-rs-output`) | P0 | — |
-| G-code | 路径规划 之/弓 | row order | Done (M6; semantics VERIFY) | P1 | S |
+| G-code | 路径规划 之/弓 | row order | Done (M6; matches capture) | P1 | S |
 | G-code | 起点模式 | 纸张/框线/自定义 origin | Done (M6) | P1 | S |
 | G-code | 写完位置 | 原点 / 原点左2cm / 任务结束点 | Partial (always X0 Y0) | P1 | S |
 | G-code | 抬落笔 per device type | stepper / servo / magnet / laser / 3D / custom | Partial (Z + custom) | P1 | S |
@@ -1339,12 +1339,13 @@ one pause; colour order stable.
 [UI]. Modes `SameDirectionForParity`, `OddPagesRotate180`, `EvenPagesRotate180`,
 `SameDirection180` (`[ParityPageConfig] ParityPageDirectionMode=0`); the form labels are 不旋转,
 奇数页旋转180°, 偶数页旋转180°, 旋转180° in that order [ui-form], which pins the mapping of the four identifiers
-(order inferred, integer values still unconfirmed); the generator mirrors each
+(captured 2026-11-17: 0..3 in that order); the generator mirrors each
 point about the paper/frame centre for rotated pages (`calculate_symmetric_point`) and the origin
 marker moves accordingly (A, C) [high]; numeric mapping [med]. Purpose: writing both sides of a
 sheet or a feeder that returns sheets upside down (inferred).
-**chixie-rs today:** Done (M6): `PageSettings.rotation`, mirrored about the writable frame's centre
-(VERIFY against a capture: paper vs frame centre).
+**chixie-rs today:** Done (M6): `PageSettings.rotation`, mirrored about the writable frame's centre,
+stroke order unchanged. **Matches the 2026-11-17 capture** (docs/protocol.md): the centre is the
+frame's (作文格1 grid), not the paper's.
 **Recommended implementation:** `PageRotation::{None, Odd180, Even180, All180}` in
 `PageSettings`; applied in `gcode::emit` as `p → (W − x, −H − y)` relative to the writable area
 (origin becomes the bottom-right corner, so the job start hint must say so). Test: All180 twice =
@@ -1418,13 +1419,14 @@ behind a setting (some firmware echo comments; Grbl ignores `;`).
 The character shapes (之 = Z-scan, 弓 = serpentine) and the CNC meaning of 弓字形 favour A
 (inferred).
 **chixie-rs today:** Done (M6): `DeviceProfile.path_plan` (之字型 / 弓字型), output order only; 弓 writes
-every second row of a page right to left (VERIFY by capture).
+every second inked row of a page right to left, each character's strokes in order; 作文格 pages are
+left alone. **Matches the 2026-11-17 capture** (A is right: 之 = 1 = all rows left to right, 弓 = 2;
+docs/protocol.md).
 **Recommended implementation:** `PathPlan::{Raster, Serpentine}` in `DeviceProfile` (output
 order only; the layout is unchanged). Serpentine writes odd rows' characters right-to-left (each
 character's own strokes keep their order). Default Raster until VERIFY. Also add a greedy
 nearest-neighbour stroke order option within a character for fonts with bad stroke order
 (measure travel saved). Test: serpentine reverses glyph order on row 2 only.
-**Open questions / VERIFY:** capture two lines with each mode and compare glyph order.
 
 #### Start-point modes (起点模式 / 书写原点)
 **ChiXie3:** `StartPointOfPaper` (paper top-left), `StartPointOfFrame` (frame/margin start; uses
@@ -2307,7 +2309,7 @@ VERIFY); see protocol.md.
 | 写字速度 | feed rate (mm/min) |
 | 书写原点 / 设置原点 / 回到原点 | job origin marker / `G92 X0 Y0` / move to X0 Y0 |
 | 纸张起点 / 框线起点 / 自定义原点 | origin modes |
-| 之字型 / 弓字型 | path planning: raster vs serpentine row order (semantics VERIFY) |
+| 之字型 / 弓字型 | path planning: raster vs serpentine row order (captured) |
 | 写完位置 | where the pen parks after a job (原点 / 原点左2cm / 任务结束点) |
 | 换纸 | sheet change between pages |
 | 断点续写 | resume an interrupted page from a chosen character |

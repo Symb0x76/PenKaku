@@ -230,5 +230,8 @@
   - GUI: `ChixieRsApp::written_pages` + `app::job_of` feed every job/export/patrol; 参数设置 rows (路径规划,
     书写原点, 页面旋转, 多色绘制/换笔模式, 笔锋); draggable origin ring in `doc_view.rs`; 笔色 menu; coloured ink;
     换笔提示 dialog; `app/sd.rs` 上传SD卡; autotest `AUTOTEST_OUTPUT`.
-  - Open: ChiXie3 captures for 弓 and rotation (need the screen); auto changer slot editor; hardware #13d/#13e.
+  - Captured 2026-11-17 (`captures/m6/`, docs/protocol.md "Output options"): 弓 = row 2 right to left on
+    ruled pages, no effect on 作文格 (`Document.grid` skips it); rotation 1 = odd, 2 = even, about the
+    frame centre. Local harness gained `-Text2` (typed Enter) and `-StartX` (▶ moves per template).
+  - Open: auto changer slot editor; hardware #13d/#13e; not captured: rotation mode 3, 起点模式.
 
