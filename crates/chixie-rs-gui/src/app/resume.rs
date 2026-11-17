@@ -114,7 +114,8 @@ impl ChixieRsApp {
         let layout = self.doc.read(cx).document();
         let Some(page_ix) = layout.boxes.get(i).map(|b| b.page) else { return };
         let profile = cx.global::<AppState>().settings.device.profile.clone();
-        let pages = &layout.pages[page_ix..];
+        let written = self.written_pages(cx);
+        let pages = &written[page_ix..];
         let mut codes: Vec<PageCode> = pages.iter().map(|p| gcode::emit_mapped(p, &profile)).collect();
         let k = pages[0].first_stroke_from(i);
         codes[0] = codes[0].from_stroke(k);

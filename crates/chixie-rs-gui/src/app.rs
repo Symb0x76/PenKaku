@@ -102,6 +102,13 @@ pub struct ChixieRsApp {
 }
 
 impl ChixieRsApp {
+    /// Every page as it is written (路径规划, 页面旋转, 书写原点 applied); the editor shows the
+    /// layout itself.
+    pub(crate) fn written_pages(&self, cx: &App) -> Vec<chixie_rs_core::layout::Page> {
+        let opts = gcode::OutputOptions::from_settings(&cx.global::<AppState>().settings);
+        gcode::plan_all(&self.doc.read(cx).document(), &opts)
+    }
+
     pub fn new(
         events: async_channel::Receiver<Event>,
         device: DeviceHandle,
@@ -557,10 +564,11 @@ impl ChixieRsApp {
             return;
         }
         let profile = cx.global::<AppState>().settings.device.profile.clone();
+        let pages = self.written_pages(cx);
         let rx = cx.prompt_for_new_path(&file_ops::documents_dir(), Some("chixie.gcode"));
         cx.spawn_in(window, async move |_this, cx| {
             let Ok(Ok(Some(path))) = rx.await else { return };
-            let msg = match file_ops::export_files(&doc, &profile, &path) {
+            let msg = match file_ops::export_files(&pages, &profile, &path) {
                 Ok(files) => Notification::success(format!("已导出 {} 个文件：{}", files.len(), files[0].display())),
                 Err(e) => Notification::error(format!("导出失败：{e}")),
             };
@@ -644,7 +652,8 @@ impl ChixieRsApp {
         }
         let doc = self.doc.read(cx).document();
         let here = self.doc.read(cx).caret_page().min(doc.pages.len().saturating_sub(1));
-        let Some(page) = doc.pages.get(here) else { return };
+        let written = self.written_pages(cx);
+        let Some(page) = written.get(here) else { return };
         let profile = cx.global::<AppState>().settings.device.profile.clone();
         let (gcode, title) = match tool {
             PageTool::Patrol(mode, template) => {
@@ -694,7 +703,8 @@ impl ChixieRsApp {
             JobScope::ThisPage => (here, 1),
             JobScope::FromHere => (here, doc.pages.len() - here),
         };
-        let chosen = &doc.pages[first..first + count];
+        let written = self.written_pages(cx);
+        let chosen = &written[first..first + count];
         let strokes: usize = chosen.iter().map(|p| p.strokes.len()).sum();
         if strokes == 0 {
             let msg = if scope == JobScope::ThisPage { "该页没有书写内容" } else { "没有可书写的笔画（请先选择字体并输入文字）" };

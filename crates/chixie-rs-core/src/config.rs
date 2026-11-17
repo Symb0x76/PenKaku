@@ -86,6 +86,10 @@ pub struct PageSettings {
     pub grid_pair_letters: bool,
     /// 作文格分词: keep a word on one 作文格 row.
     pub grid_keep_words: bool,
+    /// 书写原点: where the pen stands at job start.
+    pub origin: crate::profile::Origin,
+    /// 页面旋转: pages written turned 180°.
+    pub rotation: crate::profile::PageRotation,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,7 +110,7 @@ impl Default for DeviceSettings {
 impl Default for PageSettings {
     fn default() -> Self {
         // A4 with 21 mm side margins matches the ≈168 mm writable width seen in captures.
-        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None, kinsoku: true, grid_pair_letters: false, grid_keep_words: false }
+        Self { font_id: None, font_size: 100.0, line_height: 10.25, paper: (210.0, 297.0), margins: (21.0, 20.0, 21.0, 20.0), template: None, kinsoku: true, grid_pair_letters: false, grid_keep_words: false, origin: Default::default(), rotation: Default::default() }
     }
 }
 

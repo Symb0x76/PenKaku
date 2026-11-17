@@ -89,9 +89,12 @@ pub struct Page {
 }
 
 impl Page {
-    /// First stroke drawn for character `i` or any later one; `strokes.len()` if none.
+    /// First stroke (in writing order) of the first character at or after `i` in text order that
+    /// has strokes; `strokes.len()` if none. Strokes may be reordered (弓字型), so this picks the
+    /// character first, then its earliest stroke.
     pub fn first_stroke_from(&self, i: usize) -> usize {
-        self.stroke_chars.iter().position(|&c| c >= i).unwrap_or(self.strokes.len())
+        let Some(c) = self.stroke_chars.iter().copied().filter(|&c| c >= i).min() else { return self.strokes.len() };
+        self.stroke_chars.iter().position(|&x| x == c).unwrap_or(self.strokes.len())
     }
 }
 

@@ -1,0 +1,210 @@
+//! Laid-out page → the page as it is written: row order (路径规划), 180° turn (页面旋转) and the
+//! pen's start point (书写原点). Coordinates stay layout mm (origin at the frame's top-left, y up);
+//! only the emitter maps them to machine axes.
+
+use chixie_rs_core::config::Settings;
+use chixie_rs_core::layout::{Document, Page};
+use chixie_rs_core::profile::{Origin, PageRotation, PathPlan};
+
+/// Paper and margins (mm: left, top, right, bottom), as in `PageSettings`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sheet {
+    pub paper: (f32, f32),
+    pub margins: (f32, f32, f32, f32),
+}
+
+impl Sheet {
+    /// Writable frame size (paper minus margins).
+    pub fn frame(&self) -> (f32, f32) {
+        let (l, t, r, b) = self.margins;
+        (self.paper.0 - l - r, self.paper.1 - t - b)
+    }
+
+    /// The start point in layout mm (frame top-left = (0, 0), y up).
+    pub fn origin_point(&self, o: Origin) -> (f32, f32) {
+        let (l, t, ..) = self.margins;
+        match o {
+            Origin::Paper => (-l, t),
+            Origin::Frame => (0.0, 0.0),
+            Origin::Custom { x, y } => (x - l, t - y),
+        }
+    }
+
+    /// The 书写原点 for a marker dropped at layout point `(x, y)`: the paper or frame corner when
+    /// within `snap` mm of it, else a custom point rounded to whole mm (kept on the paper).
+    pub fn snap_origin(&self, (x, y): (f32, f32), snap: f32) -> Origin {
+        let near = |(a, b): (f32, f32)| (x - a).hypot(y - b) <= snap;
+        if near(self.origin_point(Origin::Frame)) {
+            return Origin::Frame;
+        }
+        if near(self.origin_point(Origin::Paper)) {
+            return Origin::Paper;
+        }
+        let (l, t, ..) = self.margins;
+        Origin::Custom { x: (x + l).round().clamp(0.0, self.paper.0), y: (t - y).round().clamp(0.0, self.paper.1) }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OutputOptions {
+    pub path_plan: PathPlan,
+    pub origin: Origin,
+    pub rotation: PageRotation,
+    pub sheet: Sheet,
+}
+
+impl OutputOptions {
+    pub fn from_settings(s: &Settings) -> Self {
+        Self {
+            path_plan: s.device.profile.path_plan,
+            origin: s.page.origin,
+            rotation: s.page.rotation,
+            sheet: Sheet { paper: s.page.paper, margins: s.page.margins },
+        }
+    }
+}
+
+/// Page `k` of `doc` as written. With the defaults (之字型, 框线起点, 不旋转) this is a clone, so
+/// the G-code stays byte-identical to the layout's.
+pub fn plan(doc: &Document, k: usize, o: &OutputOptions) -> Page {
+    let mut page = doc.pages[k].clone();
+    if o.path_plan == PathPlan::Serpentine {
+        serpentine(doc, k, &mut page);
+    }
+    let turn = o.rotation.turns(k);
+    let (ox, oy) = o.sheet.origin_point(o.origin);
+    if turn || (ox, oy) != (0.0, 0.0) {
+        let (w, h) = o.sheet.frame();
+        // 180° about the frame centre (w/2, -h/2): the turned page fills the same frame.
+        let f = |(x, y): (f32, f32)| {
+            let (x, y) = if turn { (w - x, -h - y) } else { (x, y) };
+            (x - ox, y - oy)
+        };
+        for s in &mut page.strokes {
+            s.iter_mut().for_each(|p| *p = f(*p));
+        }
+        for g in &mut page.guides {
+            (g.a, g.b) = (f(g.a), f(g.b));
+        }
+    }
+    page
+}
+
+/// Every page of `doc` as written.
+pub fn plan_all(doc: &Document, o: &OutputOptions) -> Vec<Page> {
+    (0..doc.pages.len()).map(|k| plan(doc, k, o)).collect()
+}
+
+/// 弓字型: on every second row of the page (by line, top to bottom), characters run right to left.
+/// Each character's strokes keep their order; strokes without a character stay where they are.
+fn serpentine(doc: &Document, k: usize, page: &mut Page) {
+    if page.stroke_chars.len() != page.strokes.len() {
+        return;
+    }
+    let lines: Vec<usize> = doc.lines.iter().enumerate().filter(|(_, l)| l.page == k).map(|(i, _)| i).collect();
+    let key = |c: usize| -> (usize, i64) {
+        let line = doc.boxes.get(c).map_or(0, |b| b.line);
+        let row = lines.binary_search(&line).unwrap_or_else(|i| i);
+        (row, if row % 2 == 1 { -(c as i64) } else { c as i64 })
+    };
+    let mut order: Vec<usize> = (0..page.strokes.len()).collect();
+    order.sort_by_key(|&i| key(page.stroke_chars[i]));
+    let strokes = std::mem::take(&mut page.strokes);
+    let mut slots: Vec<Option<_>> = strokes.into_iter().map(Some).collect();
+    page.strokes = order.iter().map(|&i| slots[i].take().unwrap_or_default()).collect();
+    page.stroke_chars = order.iter().map(|&i| page.stroke_chars[i]).collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chixie_rs_core::font::{Font, Glyph};
+    use chixie_rs_core::layout::{PageBox, PageParams, layout};
+    use std::collections::HashMap;
+
+    fn font() -> Font {
+        let g = Glyph { advance: 4.0, strokes: vec![vec![(0.0, 0.0), (1.0, 0.0)], vec![(0.0, 1.0)]] };
+        Font { glyphs: HashMap::from([('a', g.clone()), ('b', g.clone()), ('c', g)]) }
+    }
+
+    fn doc(text: &str) -> Document {
+        let p = PageParams { page: Some(PageBox { width: 100.0, height: 200.0 }), ..Default::default() };
+        layout(text, &font(), &p)
+    }
+
+    fn opts() -> OutputOptions {
+        OutputOptions { path_plan: PathPlan::Raster, origin: Origin::Frame, rotation: PageRotation::None, sheet: Sheet { paper: (210.0, 297.0), margins: (20.0, 15.0, 10.0, 25.0) } }
+    }
+
+    /// Char index of each stroke, collapsed to one entry per character.
+    fn char_order(p: &Page) -> Vec<usize> {
+        let mut v = p.stroke_chars.clone();
+        v.dedup();
+        v
+    }
+
+    #[test]
+    fn defaults_change_nothing() {
+        let d = doc("abc\nabc");
+        assert_eq!(plan(&d, 0, &opts()), d.pages[0]);
+    }
+
+    #[test]
+    fn serpentine_reverses_the_second_row_only() {
+        let d = doc("abc\nabc\nabc");
+        let p = plan(&d, 0, &OutputOptions { path_plan: PathPlan::Serpentine, ..opts() });
+        assert_eq!(char_order(&p), vec![0, 1, 2, 6, 5, 4, 8, 9, 10]);
+        // Each character's strokes keep their order and shape.
+        let src = &d.pages[0];
+        let at = |pg: &Page, c: usize| pg.stroke_chars.iter().zip(&pg.strokes).filter(|(x, _)| **x == c).map(|(_, s)| s.clone()).collect::<Vec<_>>();
+        for c in [0, 4, 6, 10] {
+            assert_eq!(at(&p, c), at(src, c));
+        }
+        assert_eq!(p.strokes.len(), src.strokes.len());
+    }
+
+    #[test]
+    fn turning_twice_is_identity_and_keeps_the_frame() {
+        let d = doc("abc\nab");
+        let o = OutputOptions { rotation: PageRotation::All180, ..opts() };
+        let once = plan(&d, 0, &o);
+        let mut d2 = d.clone();
+        d2.pages[0] = once.clone();
+        let twice = plan(&d2, 0, &o);
+        for (a, b) in twice.strokes.iter().flatten().zip(d.pages[0].strokes.iter().flatten()) {
+            assert!((a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4, "{a:?} vs {b:?}");
+        }
+        // Extents: same size, mirrored about the frame centre.
+        let (w, h) = o.sheet.frame();
+        let ext = |p: &Page| p.strokes.iter().flatten().fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |(a, b, c, e), &(x, y)| (a.min(x), b.min(y), c.max(x), e.max(y)));
+        let (x0, y0, x1, y1) = ext(&d.pages[0]);
+        let (u0, v0, u1, v1) = ext(&once);
+        assert!(((u1 - u0) - (x1 - x0)).abs() < 1e-4 && ((v1 - v0) - (y1 - y0)).abs() < 1e-4);
+        assert!((u0 - (w - x1)).abs() < 1e-4 && (v1 - (-h - y0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn odd_and_even_rotation_pick_pages() {
+        assert!(PageRotation::Odd180.turns(0) && !PageRotation::Odd180.turns(1));
+        assert!(!PageRotation::Even180.turns(0) && PageRotation::Even180.turns(1));
+    }
+
+    #[test]
+    fn marker_snaps_to_corners_or_whole_mm() {
+        let s = opts().sheet;
+        assert_eq!(s.snap_origin((1.0, -1.0), 2.0), Origin::Frame);
+        assert_eq!(s.snap_origin((-19.0, 14.5), 2.0), Origin::Paper);
+        assert_eq!(s.snap_origin((10.4, -24.6), 2.0), Origin::Custom { x: 30.0, y: 40.0 });
+        assert_eq!(s.snap_origin((-50.0, 30.0), 2.0), Origin::Custom { x: 0.0, y: 0.0 }, "clamped to the paper");
+    }
+
+    #[test]
+    fn origin_modes_shift_by_the_margins() {
+        let d = doc("ab");
+        let src = d.pages[0].strokes[0][0];
+        let paper = plan(&d, 0, &OutputOptions { origin: Origin::Paper, ..opts() });
+        assert_eq!(paper.strokes[0][0], (src.0 + 20.0, src.1 - 15.0));
+        let custom = plan(&d, 0, &OutputOptions { origin: Origin::Custom { x: 30.0, y: 40.0 }, ..opts() });
+        assert_eq!(custom.strokes[0][0], (src.0 - 10.0, src.1 + 25.0));
+    }
+}

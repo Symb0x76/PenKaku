@@ -156,6 +156,89 @@ pub struct DeviceProfile {
     pub end_position: EndPosition,
     /// 书写优化: how each stroke is reshaped before it is written.
     pub route: crate::path::RouteImprove,
+    /// 路径规划: the order rows are written in.
+    pub path_plan: PathPlan,
+}
+
+/// 路径规划 (ChiXie3 `path_planning_type`). Output order only; the layout is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PathPlan {
+    /// 之字型(默认): every row left to right.
+    #[default]
+    Raster,
+    /// 弓字型: every second row right to left (each character's own strokes keep their order).
+    Serpentine,
+}
+
+impl PathPlan {
+    pub const ALL: [PathPlan; 2] = [PathPlan::Raster, PathPlan::Serpentine];
+    pub fn label(self) -> &'static str {
+        match self {
+            PathPlan::Raster => "之字型(默认)",
+            PathPlan::Serpentine => "弓字型",
+        }
+    }
+}
+
+/// 书写原点 (ChiXie3 `start_point_mode`): where the pen stands when the job starts.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Origin {
+    /// 纸张起点: the paper's top-left corner.
+    Paper,
+    /// 框线起点: the top-left of the writable frame (inside the margins). Today's behaviour.
+    #[default]
+    Frame,
+    /// 自定义: a point in paper mm from the top-left corner (x right, y down).
+    Custom { x: f32, y: f32 },
+}
+
+impl Origin {
+    pub fn label(self) -> String {
+        match self {
+            Origin::Paper => "纸张起点".into(),
+            Origin::Frame => "框线起点".into(),
+            Origin::Custom { x, y } => format!("自定义 ({x:.0}, {y:.0}) mm"),
+        }
+    }
+}
+
+/// 页面旋转 (ChiXie3 `ParityPageDirectionMode`): write some pages turned 180°, for the back of a
+/// sheet or a feeder that returns sheets upside down. The preview is not rotated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageRotation {
+    /// 不旋转.
+    #[default]
+    None,
+    /// 奇数页旋转180° (pages 1, 3, …).
+    Odd180,
+    /// 偶数页旋转180° (pages 2, 4, …).
+    Even180,
+    /// 旋转180°: every page.
+    All180,
+}
+
+impl PageRotation {
+    pub const ALL: [PageRotation; 4] = [PageRotation::None, PageRotation::Odd180, PageRotation::Even180, PageRotation::All180];
+    pub fn label(self) -> &'static str {
+        match self {
+            PageRotation::None => "不旋转",
+            PageRotation::Odd180 => "奇数页旋转180°",
+            PageRotation::Even180 => "偶数页旋转180°",
+            PageRotation::All180 => "旋转180°",
+        }
+    }
+    /// Whether document page `k` (0-based) is turned.
+    pub fn turns(self, k: usize) -> bool {
+        match self {
+            PageRotation::None => false,
+            PageRotation::Odd180 => k.is_multiple_of(2),
+            PageRotation::Even180 => !k.is_multiple_of(2),
+            PageRotation::All180 => true,
+        }
+    }
 }
 
 impl Default for DeviceProfile {
@@ -174,6 +257,7 @@ impl Default for DeviceProfile {
             axis_map: AxisMap::default(),
             end_position: EndPosition::default(),
             route: Default::default(),
+            path_plan: PathPlan::default(),
         }
     }
 }

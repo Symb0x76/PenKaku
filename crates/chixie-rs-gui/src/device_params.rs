@@ -4,7 +4,7 @@
 
 use chixie_rs_core::chixie3_devices;
 use chixie_rs_device::device::{Command, DeviceHandle, Pen};
-use chixie_rs_core::profile::{DeviceProfile, DeviceType, EndPosition, Firmware};
+use chixie_rs_core::profile::{DeviceProfile, DeviceType, EndPosition, Firmware, Origin, PageRotation, PathPlan};
 use chixie_rs_device::grbl::MachineSettings;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -229,6 +229,54 @@ impl DeviceParams {
         h_flex().gap_2().child(div().flex_1().child(mode)).children(strength).into_any_element()
     }
 
+    /// Change the page's output settings (页面旋转, 书写原点). They don't move the layout.
+    fn edit_page(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut chixie_rs_core::config::PageSettings)) {
+        let st = cx.global_mut::<AppState>();
+        f(&mut st.settings.page);
+        st.save_settings();
+        cx.notify();
+    }
+
+    #[inline(never)]
+    /// 路径规划, 页面旋转 and 书写原点 as dropdowns.
+    fn output_menus(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> [AnyElement; 3] {
+        let page = &cx.global::<AppState>().settings.page;
+        let (rotation, origin, plan) = (page.rotation, page.origin, p.path_plan);
+        let this = cx.entity().downgrade();
+        let w1 = this.clone();
+        let plan_el = Button::new("path-plan").small().outline().w_full().label(plan.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            PathPlan::ALL.iter().fold(m, |m, &k| {
+                let this = w1.clone();
+                m.item(PopupMenuItem::new(k.label()).checked(k == plan).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.path_plan = k));
+                }))
+            })
+        });
+        let w2 = this.clone();
+        let rot_el = Button::new("rotation").small().outline().w_full().label(rotation.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            PageRotation::ALL.iter().fold(m, |m, &r| {
+                let this = w2.clone();
+                m.item(PopupMenuItem::new(r.label()).checked(r == rotation).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit_page(cx, |s| s.rotation = r));
+                }))
+            })
+        });
+        let w3 = this.clone();
+        let mut choices = vec![Origin::Paper, Origin::Frame];
+        if matches!(origin, Origin::Custom { .. }) {
+            choices.push(origin);
+        }
+        let origin_el = Button::new("origin").small().outline().w_full().label(origin.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            choices.iter().fold(m, |m, &o| {
+                let this = w3.clone();
+                m.item(PopupMenuItem::new(o.label()).checked(o == origin).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit_page(cx, |s| s.origin = o));
+                }))
+            })
+        });
+        [plan_el.into_any_element(), rot_el.into_any_element(), origin_el.into_any_element()]
+    }
+
     fn form(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.profile(cx).clone();
         let theme = cx.theme();
@@ -279,6 +327,8 @@ impl DeviceParams {
         let too_fast = max_feed.filter(|m| p.write_speed > *m || p.travel_speed > *m);
         let custom = p.device_type == DeviceType::CustomZ;
         let am = p.axis_map;
+        let [plan_el, rot_el, origin_el] = self.output_menus(&p, cx);
+        let turned = cx.global::<AppState>().settings.page.rotation != PageRotation::None;
 
         v_flex()
             .gap_1p5()
@@ -300,6 +350,10 @@ impl DeviceParams {
             .child(div().text_xs().text_color(muted).child(format!("抬笔：{}　落笔：{}", p.pen_up_cmd(), p.pen_down_cmd())))
             .child(row("写完位置", end.into_any_element()))
             .child(row("书写优化", self.route_menu(&p, cx)))
+            .child(row("路径规划", plan_el))
+            .child(row("书写原点", origin_el))
+            .child(row("页面旋转", rot_el))
+            .when(turned, |el| el.child(div().text_xs().text_color(muted).child("页面预览不旋转，只旋转书写输出；转过的页面原点仍在纸张左上角。")))
             .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("坐标方向"))
             .child(
                 h_flex()

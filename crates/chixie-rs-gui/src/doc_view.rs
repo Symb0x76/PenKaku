@@ -168,6 +168,8 @@ pub struct DocView {
     selecting: bool,
     caret_visible: bool,
     reveal_caret: bool,
+    /// 书写原点 marker being dragged: its layout point (mm).
+    origin_drag: Option<(f32, f32)>,
     /// What the current layout was computed from, to skip needless relayouts.
     /// What the layout was made from: font set generation, page and style settings, template.
     layout_key: Option<(u64, PageSettings, StyleFile, Option<Template>)>,
@@ -204,6 +206,7 @@ impl DocView {
             selecting: false,
             caret_visible: true,
             reveal_caret: false,
+            origin_drag: None,
             layout_key: None,
             dirty_draft: false,
             _tasks: vec![blink],
@@ -513,8 +516,23 @@ impl DocView {
         Some(self.layout.index_at(k, x, y))
     }
 
+    /// Layout point of the 书写原点 marker.
+    fn origin_point(&self, cx: &App) -> (f32, f32) {
+        self.origin_drag.unwrap_or_else(|| sheet(&cx.global::<AppState>().settings.page).origin_point(cx.global::<AppState>().settings.page.origin))
+    }
+
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        // Grab the 书写原点 marker (drawn on every page; drag it on any).
+        if let Some(g) = self.geom.get() {
+            let (_, x, y) = g.unproject(e.position, self.layout.pages.len().max(1));
+            let o = self.origin_point(cx);
+            if (x - o.0).hypot(y - o.1) <= ORIGIN_GRAB_MM.max(8.0 / g.zoom) {
+                self.origin_drag = Some(o);
+                cx.notify();
+                return;
+            }
+        }
         let Some(i) = self.index_at_point(e.position) else { return };
         if e.click_count >= 2 {
             let r = self.doc.word_at(i);
@@ -526,6 +544,14 @@ impl DocView {
         self.after_move(cx);
     }
     fn mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.origin_drag.is_some()
+            && let Some(g) = self.geom.get()
+        {
+            let (_, x, y) = g.unproject(e.position, self.layout.pages.len().max(1));
+            self.origin_drag = Some((x, y));
+            cx.notify();
+            return;
+        }
         if self.selecting
             && let Some(i) = self.index_at_point(e.position)
         {
@@ -533,8 +559,14 @@ impl DocView {
             self.after_move(cx);
         }
     }
-    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.selecting = false;
+        if let Some(p) = self.origin_drag.take() {
+            let st = cx.global_mut::<AppState>();
+            st.settings.page.origin = sheet(&st.settings.page).snap_origin(p, ORIGIN_SNAP_MM);
+            st.save_settings();
+            cx.notify();
+        }
     }
     fn scroll_zoom(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         if e.modifiers.secondary(cx) {
@@ -653,6 +685,7 @@ impl Render for DocView {
         let show_caret = focused && self.caret_visible && sel.is_empty();
         let zoom = self.zoom;
         let show_guides = cx.global::<AppState>().settings.ui.show_guides;
+        let origin_pt = self.origin_point(cx);
         let geom_out = self.geom.clone();
         let reveal = std::mem::take(&mut self.reveal_caret);
         let scroll = self.scroll.clone();
@@ -783,6 +816,13 @@ impl Render for DocView {
                                 window.paint_path(path, gpui_kit::black());
                             }
                         }
+                        // 书写原点: a blue ring where the pen tip must stand at job start.
+                        let ring = px((1.6 * g.zoom).max(5.0));
+                        for k in 0..pages {
+                            let c = g.screen(k, origin_pt.0, origin_pt.1);
+                            let b = Bounds::new(c - point(ring, ring), size(ring * 2.0, ring * 2.0));
+                            window.paint_quad(quad(b, ring, transparent_black(), px(2.0), ORIGIN_BLUE, BorderStyle::Solid));
+                        }
                         // IME composition underline.
                         if let Some(m) = marked.clone() {
                             for i in m {
@@ -810,6 +850,15 @@ impl Render for DocView {
                 .h(px(total_h)),
             )
     }
+}
+
+/// The 书写原点 marker: grab radius and corner snap (mm).
+const ORIGIN_GRAB_MM: f32 = 2.5;
+const ORIGIN_SNAP_MM: f32 = 2.0;
+const ORIGIN_BLUE: Hsla = Hsla { h: 0.58, s: 0.85, l: 0.5, a: 0.9 };
+
+fn sheet(p: &PageSettings) -> chixie_rs_output::Sheet {
+    chixie_rs_output::Sheet { paper: p.paper, margins: p.margins }
 }
 
 /// Light-blue ruling lines; dashed ones are cut into 1.2 mm dashes.
