@@ -7,7 +7,8 @@ use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, ThemeMode, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeMode, h_flex, v_flex};
+use chixie_rs_core::layout::{Align, Ruling};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -55,6 +56,11 @@ impl ChixieRsApp {
         let act = |a: Box<dyn Action>| editor_action(self.doc.clone(), a);
         let has_fonts = !self.font_ids.is_empty();
         let font_size = cx.global::<AppState>().settings.page.font_size;
+        let grid = matches!(cx.global::<AppState>().active_template().map(|t| t.ruling()), Some(Ruling::Grid { .. }));
+        let (align, indented) = {
+            let d = self.doc.read(cx).doc();
+            (d.align(), d.indented())
+        };
         h_flex()
             .h_full()
             .child(group(
@@ -106,8 +112,30 @@ impl ChixieRsApp {
                 "段落",
                 v_flex()
                     .gap_1()
+                    .child(
+                        h_flex()
+                            .gap_0p5()
+                            .child(ribbon::icon_btn("al-left", IconName::TextAlignStart, "左对齐").selected(align == Align::Left).on_click(act(Box::new(doc_view::AlignLeft))))
+                            .child(ribbon::icon_btn("al-center", IconName::TextAlignCenter, "居中").selected(align == Align::Center).on_click(act(Box::new(doc_view::AlignCenter))))
+                            .child(ribbon::icon_btn("al-right", IconName::TextAlignEnd, "右对齐").selected(align == Align::Right).on_click(act(Box::new(doc_view::AlignRight))))
+                            .child(
+                                ribbon::icon_btn("al-justify", IconName::TextAlignJustify, "两端对齐")
+                                    .selected(align == Align::Justify)
+                                    .on_click(act(Box::new(doc_view::AlignJustify))),
+                            )
+                            .child(
+                                ribbon::icon_btn("indent", IconName::ListIndentIncrease, "首行缩进 (Tab)")
+                                    .selected(indented)
+                                    .on_click(act(Box::new(doc_view::ToggleIndent))),
+                            ),
+                    )
                     .child(h_flex().gap_1().child(div().text_xs().child("行距")).child(div().w(px(104.)).child(NumberInput::new(&self.line_height).small().suffix("mm"))))
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child("信纸 / 作文格按模板排行")),
+                    .child(
+                        small("combine", "合并内容", IconName::Combine)
+                            .disabled(!grid)
+                            .tooltip(if grid { "选中的几个字写在同一格内（再点一次取消）" } else { "仅作文格可用" })
+                            .on_click(act(Box::new(doc_view::Combine))),
+                    ),
                 None,
             ))
             .child(group(
@@ -224,6 +252,41 @@ impl ChixieRsApp {
                 h_flex().gap_1().child(gallery).child(
                     big("manage", "管理模板", IconName::LayoutGrid).on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_backstage(Stage::Templates, w, cx))),
                 ),
+                None,
+            ))
+            .child(group(
+                cx,
+                "typeset",
+                "排版",
+                stack([
+                    Checkbox::new("kinsoku")
+                        .small()
+                        .label("避头尾（标点不出现在行首）")
+                        .checked(page.kinsoku)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.page.kinsoku = v);
+                        }))
+                        .into_any_element(),
+                    Checkbox::new("pair-letters")
+                        .small()
+                        .label("作文格：两个字母占一格（数字总是）")
+                        .checked(page.grid_pair_letters)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.page.grid_pair_letters = v);
+                        }))
+                        .into_any_element(),
+                    Checkbox::new("keep-words")
+                        .small()
+                        .label("作文格分词（词语不跨行）")
+                        .checked(page.grid_keep_words)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.page.grid_keep_words = v);
+                        }))
+                        .into_any_element(),
+                ]),
                 None,
             ))
             .child(div().px_2().text_xs().text_color(muted).child(format!("{:.0} × {:.0} mm", page.paper.0, page.paper.1)))

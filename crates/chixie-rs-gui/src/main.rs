@@ -221,6 +221,27 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             let same = back.as_ref().is_ok_and(|l| l.doc.text() == d.text() && l.doc.ids() == d.ids() && l.seed == Some(4242));
             println!("AUTOTEST_DOCX round_trip={same}");
         });
+        // Typesetting through the editor's own actions: Tab indent, right align, half space;
+        // then put the document back so the steps below see the same text.
+        let before = cx.update(|cx| app.read(cx).doc.read(cx).doc().clone());
+        dispatch(cx, vec![Box::new(doc_view::DocStart), Box::new(doc_view::ToggleIndent), Box::new(doc_view::AlignRight), Box::new(doc_view::HalfSpace)]);
+        cx.background_executor().timer(pause(300)).await;
+        cx.update(|cx| {
+            let width = cx.global::<AppState>().settings.page.writable().0;
+            let d = app.read(cx).doc.read(cx);
+            let (laid, ed) = (d.document(), d.doc());
+            let p0 = ed.document().paras()[0];
+            let right = laid.boxes.iter().zip(ed.chars()).filter(|(b, c)| b.line == 0 && !c.is_whitespace()).map(|(b, _)| b.x1).fold(f32::MIN, f32::max);
+            println!(
+                "AUTOTEST_TYPESET align={:?} indent={} half_space={} right_at_margin={} punct_issues={}",
+                p0.align,
+                p0.first_indent.is_some_and(|w| (15.5..=17.0).contains(&w)),
+                ed.text().contains(chixie_rs_core::layout::HALF_SPACE),
+                (right - width).abs() < 0.5,
+                laid.punct_issues.len(),
+            );
+        });
+        cx.update(|cx| app.read(cx).doc.clone().update(cx, |v, cx| v.replace_doc(before, cx)));
         // Device: connect to the simulator, write both pages with a sheet change in between.
         let device = cx.update(|cx| app.read(cx).device.clone());
         cx.update(|cx| {

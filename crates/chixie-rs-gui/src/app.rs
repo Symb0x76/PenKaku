@@ -967,6 +967,7 @@ impl ChixieRsApp {
         let pages = layout.pages.len().max(1);
         let words = d.doc().chars().iter().filter(|c| !c.is_whitespace()).count();
         let missing = layout.missing.len();
+        let punct_issues = layout.punct_issues.len();
         let zoom_pct = (d.zoom() / doc_view::ZOOM_100 * 100.0).round();
         let caret_page = d.caret_page() + 1;
         let dev = self.device.read(cx);
@@ -995,6 +996,19 @@ impl ChixieRsApp {
                         .text_color(danger)
                         .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
                         .child(format!("缺字 {missing}：{chars}")),
+                )
+            })
+            .when(punct_issues > 0, |el| {
+                // 位置合理性检测: lines that still start with a closing mark (避头尾 off, or no
+                // way to move it). Each click jumps to the next one.
+                let doc = self.doc.clone();
+                el.child(
+                    cell("sb-punct")
+                        .cursor_pointer()
+                        .text_color(danger)
+                        .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
+                        .child(format!("存在 {punct_issues} 处标点位置异常"))
+                        .on_click(ribbon_tabs::editor_action(doc, Box::new(doc_view::NextPunctIssue))),
                 )
             })
             .child(
