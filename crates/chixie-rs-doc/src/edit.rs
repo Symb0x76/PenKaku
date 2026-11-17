@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use chixie_rs_core::handwriting::is_cjk;
 
-use crate::model::{Align, Attrs, Command, Document, Para};
+use crate::model::{Tuning, Align, Attrs, Command, Document, Para};
 
 /// One undo (or redo) step: commands to apply in reverse order, and the selection to restore.
 #[derive(Debug, Clone)]
@@ -325,6 +325,43 @@ impl EditDoc {
         self.exec(Command::SetParas { first: a, paras });
     }
 
+    /// 字符微调 per char, for layout.
+    pub fn tunings(&self) -> Vec<Option<Tuning>> {
+        (0..self.len()).map(|i| self.doc.attrs(i).tuning).collect()
+    }
+
+    /// 字符微调 of the selected chars (one undo step); an identity result clears it.
+    pub fn tune(&mut self, f: impl Fn(&mut Tuning)) {
+        let sel = self.selection();
+        self.tune_where(|i| sel.contains(&i), f);
+    }
+
+    /// 应用至同字符: the same change on every char equal to a selected one.
+    pub fn tune_same_chars(&mut self, f: impl Fn(&mut Tuning)) {
+        let sel = self.selection();
+        let wanted: Vec<char> = self.doc.chars()[sel].to_vec();
+        let chars = self.doc.chars().to_vec();
+        self.tune_where(|i| wanted.contains(&chars[i]), f);
+    }
+
+    fn tune_where(&mut self, pick: impl Fn(usize) -> bool, f: impl Fn(&mut Tuning)) {
+        let hits: Vec<usize> = (0..self.len()).filter(|&i| pick(i)).collect();
+        let (Some(&first), Some(&last)) = (hits.first(), hits.last()) else { return };
+        self.checkpoint(LastEdit::None);
+        let attrs = (first..=last)
+            .map(|i| {
+                let mut a = self.doc.attrs(i).clone();
+                if hits.binary_search(&i).is_ok() {
+                    let mut t = a.tuning.unwrap_or_default();
+                    f(&mut t);
+                    a.tuning = (!t.is_identity()).then_some(t);
+                }
+                a
+            })
+            .collect();
+        self.exec(Command::SetAttrs { at: first, attrs });
+    }
+
     /// 合并内容 flags per char, for layout (`joins[k]`: char `k + 1` shares char `k`'s cell).
     pub fn joins(&self) -> Vec<bool> {
         (0..self.len()).map(|i| self.doc.attrs(i).combine_next).collect()
@@ -457,6 +494,25 @@ mod tests {
         assert!(d.document().paras().iter().all(|p| p.first_indent.is_none()));
         d.undo();
         assert_eq!(d.document().paras()[1].first_indent, Some(13.0));
+    }
+
+    #[test]
+    fn tuning_selection_same_chars_undo_and_docx() {
+        let mut d = EditDoc::from_text("你好你");
+        d.select_range(0..1);
+        d.tune(|t| t.dx_mm += 0.2);
+        let moved = Tuning { dx_mm: 0.2, ..Tuning::default() };
+        assert_eq!(d.tunings(), vec![Some(moved), None, None]);
+        d.tune_same_chars(|t| t.scale = 1.05);
+        let t = d.tunings();
+        assert_eq!((t[0].map(|t| t.scale), t[1], t[2].map(|t| t.scale)), (Some(1.05), None, Some(1.05)));
+        // Back to identity clears it.
+        d.tune(|t| *t = Tuning::default());
+        assert_eq!(d.tunings()[0], None);
+        d.undo();
+        assert_eq!(d.tunings()[0].map(|t| t.dx_mm), Some(0.2));
+        let back = crate::docx::read(&crate::docx::write(d.document(), 1).unwrap()).unwrap();
+        assert_eq!(EditDoc::from_document(back.doc).tunings(), d.tunings());
     }
 
     #[test]

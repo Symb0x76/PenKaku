@@ -131,10 +131,19 @@ impl ChixieRsApp {
                     )
                     .child(h_flex().gap_1().child(div().text_xs().child("行距")).child(div().w(px(104.)).child(NumberInput::new(&self.line_height).small().suffix("mm"))))
                     .child(
-                        small("combine", "合并内容", IconName::Combine)
-                            .disabled(!grid)
-                            .tooltip(if grid { "选中的几个字写在同一格内（再点一次取消）" } else { "仅作文格可用" })
-                            .on_click(act(Box::new(doc_view::Combine))),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                small("combine", "合并内容", IconName::Combine)
+                                    .disabled(!grid)
+                                    .tooltip(if grid { "选中的几个字写在同一格内（再点一次取消）" } else { "仅作文格可用" })
+                                    .on_click(act(Box::new(doc_view::Combine))),
+                            )
+                            .child(
+                                small("tune", "字符微调", IconName::Move)
+                                    .tooltip("微调选中字符的位置、大小和变形")
+                                    .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.open_tune(cx))),
+                            ),
                     ),
                 None,
             ))

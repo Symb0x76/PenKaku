@@ -275,7 +275,8 @@ impl DocView {
         let fonts = st.font_set.clone();
         self.has_font = !fonts.is_empty();
         let joins = self.doc.joins();
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins };
+        let tuning = self.doc.tunings();
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning };
         self.layout = Arc::new(layout::layout_flow(&flow, &*fonts, &params));
         cx.notify();
     }
@@ -415,6 +416,22 @@ impl DocView {
     fn half_space(&mut self, _: &HalfSpace, _: &mut Window, cx: &mut Context<Self>) {
         self.type_text(&layout::HALF_SPACE.to_string(), cx);
     }
+    /// 字符微调 on the selection (or, with `same`, on every equal character).
+    pub fn tune(&mut self, f: fn(&mut layout::Tuning), same: bool, cx: &mut Context<Self>) {
+        if same {
+            self.doc.tune_same_chars(f);
+        } else {
+            self.doc.tune(f);
+        }
+        self.edited(cx);
+    }
+
+    /// 应用至同字符: every character equal to a selected one gets tuning `t`.
+    pub fn set_tune_same(&mut self, t: layout::Tuning, cx: &mut Context<Self>) {
+        self.doc.tune_same_chars(move |x| *x = t);
+        self.edited(cx);
+    }
+
     pub fn set_align(&mut self, align: layout::Align, cx: &mut Context<Self>) {
         self.doc.set_align(align);
         self.edited(cx);

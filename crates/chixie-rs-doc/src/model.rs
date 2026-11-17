@@ -21,10 +21,13 @@ pub struct Attrs {
     /// 合并内容: the next char shares this char's grid cell. Stored in our custom XML part only.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub combine_next: bool,
+    /// 字符微调 (custom XML part only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<Tuning>,
 }
 
 /// Paragraph formatting lives in core so layout reads it directly.
-pub use chixie_rs_core::layout::{Align, Para};
+pub use chixie_rs_core::layout::{Align, Para, Tuning};
 
 /// One character as stored: the glyph, its stable id (keys the handwriting randomness) and its
 /// formatting.
