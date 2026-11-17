@@ -769,6 +769,11 @@ mod tests {
         h.send(Command::Jog { dx: 1.5, dy: -2.0, feed: 1000.0 });
         h.send(Command::Pen(Pen::Down));
         wait_for(&ev, |e| matches!(e, Event::Log { dir: Dir::Tx, line } if line.starts_with("G1G90 Z2")));
+        // The Tx log comes before the fake board has read the line: wait for it to arrive.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while fake.lock().unwrap().lines.len() < 3 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let lines = fake.lock().unwrap().lines.clone();
         assert_eq!(lines, vec!["$I", "$J=G21G91X1.500Y-2.000F1000", "G1G90 Z2 F8000"]);
         h.send(Command::Shutdown);
