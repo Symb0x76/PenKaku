@@ -108,14 +108,14 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Editor | 撤销 | ChiXie3: not implemented | Done (undo/redo, better) | P0 | — |
 | Editor | 删除/退格 | incl. "清空所选单元格" confirm for tables | Partial (no tables) | P0 | S |
 | Editor | 方向键/Shift 选择 | caret and selection movement | Done (text); tables missing | P0 | S |
-| Editor | 半格空格 | modifier+Space inserts half space | Missing | P2 | S |
+| Editor | 半格空格 | modifier+Space inserts half space | Done (M3, Shift+Space) | P2 | S |
 | Editor | 查找和替换 | plain substring find / replace / replace all | Missing | P1 | S |
 | Editor | 右键菜单 | page / origin / table / base menus | Missing | P1 | M |
 | Editor | 插入菜单 | 表格 公式 图表 图片 文本框 形状 内容块 思维导图 (mostly stubs) | Missing | P3 | L |
 | Editor | 字符格式 | 倾斜 下划线 删除线 颜色 上/下标 标题 清除格式 | Missing | P2 | M |
 | Editor | 格式刷 | copy format (UI only) | Missing | P3 | S |
 | Editor | 字体/字号 per selection | font and size of selected characters | Partial (document-wide) | P1 | M |
-| Editor | 对齐 | left / centre / right / justify; vertical in cells | Missing | P1 | M |
+| Editor | 对齐 | left / centre / right / justify; vertical in cells | Done (M3; vertical in cells with tables) | P1 | M |
 | Editor | 缩放/单双页 | Ctrl+wheel zoom, single/double page preview | Partial (zoom; no double page) | P2 | S |
 | Editor | 显示框线/行号/页码 | toggles | Partial (template grid toggle) | P2 | S |
 | Editor | 大文本模式 | visible-item culling for big docs | Not needed (native) | P3 | — |
@@ -148,18 +148,18 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Fonts | 录制字体 | WeChat mini-program guide only | Not planned (link only) | P3 | S |
 | Effects | 字符间隔/空格/垂直偏移/首字不对齐 | layout-time jitter | Done (`handwriting.rs`) | P0 | — |
 | Effects | 智能垂直偏移 | position-proportional drift | Partial (guess, VERIFY) | P2 | S |
-| Effects | 首行缩进 | Tab / button inserts random indent | Partial (style field, not applied) | P1 | S |
+| Effects | 首行缩进 | Tab / button inserts random indent | Done (M3) | P1 | S |
 | Effects | 基础变形 | scale, rotate, stroke jitter, tail removal | Partial (`deformation.rs`, tails missing) | P1 | S |
 | Effects | 字形变形 (TPS) | thin-plate-spline warp with similarity check | Partial (slant + noise model) | P2 | M |
 | Effects | 字符微调 | per-char font/size/offset/thin/fat/apply-to-same | Missing | P2 | M |
 | Effects | 重复轨迹/异常宽度优化 | glyph clean-ups | Missing | P2 | S |
 | Effects | 书写优化 (路径) | Douglas-Peucker / Catmull-Rom / uniform | Missing | P2 | S |
 | Typeset | 输入排版 / 换行 | width-based row fill, pages | Done (`layout.rs`) | P0 | — |
-| Typeset | 作文格 + 分词 | jieba word blocks kept on one row | Partial (grid; no segmentation) | P2 | M |
-| Typeset | 合并内容 | several chars in one grid cell | Missing | P3 | S |
+| Typeset | 作文格 + 分词 | jieba word blocks kept on one row | Done (M3, option off by default) | P2 | M |
+| Typeset | 合并内容 | several chars in one grid cell | Done (M3) | P3 | S |
 | Typeset | 全角/半角 | auto conversion | Missing | P2 | S |
-| Typeset | 位置合理性检测 | warn on bad line-start/end punctuation | Missing | P1 | S |
-| Typeset | 避头尾 | automatic kinsoku (ChiXie3 lacks it) | Missing | P1 | S |
+| Typeset | 位置合理性检测 | warn on bad line-start/end punctuation | Done (M3, status-bar badge) | P1 | S |
+| Typeset | 避头尾 | automatic kinsoku (ChiXie3 lacks it) | Done (M3) | P1 | S |
 | Typeset | 表格单元格排版 / 溢出 | rows in cells, 3 overflow plans, batch | Missing | P1 | L |
 | Device | 设备列表 / 参数 | named profiles, firmware, type, speed, pen, axis map | Done (`device_params.rs`) | P0 | — |
 | Device | `.cset` import/export | pickled device params | Partial (config.ini import) | P2 | S |
@@ -344,7 +344,7 @@ edits (command pattern: each edit records its inverse). Clearly better than ChiX
 #### Half-width space (半格空格)
 **ChiXie3:** Space with Ctrl or Shift inserts a half-width space (`HalfSpaceFunction`,
 "输入半个空格"); which modifier is not recoverable (C) [high].
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M3): Shift+Space inserts U+2009; half a space wide (same random draw); in 作文格 it pairs like a digit.
 **Recommended implementation:** bind Shift+Space (Ctrl+Space is the Windows IME toggle) to
 insert U+2009 THIN SPACE or a private `HalfSpace` char kind; layout gives it half the random
 space width. Test: width = ½ of the drawn space width with the same seed.
@@ -426,7 +426,7 @@ value or blank when mixed. Layout already scales by `mm_per_unit_for_font_size`.
 centre button's caption is not a form string [ui-form]) per paragraph at the caret or per selected
 cell(s); vertical 顶端 / 垂直居中 / 底端 for table cells. Errors "请先放置光标或者选中字符再使用对齐功能",
 "请先选中单元格". Re-applied after every input (`refresh_alignment_after_input`) (C §对齐) [high].
-**chixie-rs today:** missing (always left).
+**chixie-rs today:** Done (M3): `Para.align` per paragraph; ribbon 段落 buttons; centre/right shift the line, justify stretches wrapped lines; grid moves by whole cells. Vertical alignment in cells: with tables (M7).
 **Recommended implementation:** paragraph attribute `Align` in `EditDoc` (paragraph = text
 between `\n`); `layout.rs` shifts each closed line by `(avail − used)` or `/2`; justify spreads
 the remaining width over inter-glyph gaps (not after the last line). The random line-start
@@ -850,7 +850,7 @@ matches "position proportion" and "同向" (same direction). Capture to confirm.
 paragraph at the caret or every selected paragraph; needs a caret or selection
 ("当前版本首行缩进需在‘选中字符’或‘放置光标’后使用"). In 作文格 it toggles two indent cells (C §首行缩进)
 [high]. This explains why the capture showed no indent (protocol.md).
-**chixie-rs today:** `HandwritingStyle.first_line_indent: Option<Span>` (not applied).
+**chixie-rs today:** Done (M3): Tab / 首行缩进 toggle `Para.first_indent`, width drawn once from the style range (15.5–17 mm default) keyed by the paragraph's first char; two cells in 作文格. A style range set in 设置 still indents every paragraph (as before).
 **Recommended implementation:** paragraph attribute `indent: bool` toggled by Tab-at-paragraph-
 start and the ribbon button; width drawn per paragraph id from the span; grid templates indent
 by two cells. Better than ChiXie3: Tab at paragraph start indents, elsewhere inserts a tab-width
@@ -937,7 +937,7 @@ or right edge (one more capture with a near-margin glyph).
 together) so a word is not broken across grid rows; blocks that do not fit wrap down; two digits
 can share one cell (`generate_combined_text_item`) (C §作文格排版) [med-high]. A server endpoint
 `text_processing/text_block` also exists (A).
-**chixie-rs today:** grid places one char per cell, no word keeping.
+**chixie-rs today:** Done (M3): two digits (optionally two letters) share a cell; 作文格分词 (jieba-rs, off by default, 布局 › 排版) keeps a word on one row.
 **Recommended implementation:** do not keep words together by default in 作文格: Chinese school
 composition paper breaks anywhere (inferred; check with users). Implement only the parts that
 matter: punctuation rules (below) and "two digits / two Latin letters per cell" as an option.
@@ -951,7 +951,7 @@ is a closing mark (`PostPunctuation`) or whose last char is an opening mark
 (`LeadingPunctuation`) and paints them with the warning colour; a badge "存在一些标点符号位置异常 /
 点击处理" (A §Main window; C §字符位置合理性检测) [med]. Punctuation sets (A @944dfb9, @944e001):
 opening `([{·‘“〈《「『【〔〖（．［｛￡￥`; closing `!),.:;?]}¨·ˇˉ―‖’”…∶、。〃々〉》」』】〕〗！＂＇），．：；？］｀｜｝～￠%`.
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M3): 避头尾 on by default (布局 › 排版): ruled/free pull up to 3 chars down; 作文格 hangs up to two closing marks in the last cell; leftovers listed in `Document::punct_issues` and shown as a status-bar badge that jumps to them. 1,000-char fuzz in `core/tests/kinsoku_fuzz.rs`.
 **Recommended implementation:** real kinsoku in `layout.rs` (better than ChiXie3): when a closing
 mark would start a line, either (a) hang it in the margin (default for 作文格: draw it in the
 last cell's lower right, as Chinese composition rules require) or (b) pull the previous char
@@ -961,7 +961,7 @@ default tables (configurable). Tests: "你好，" at a forced wrap never starts 
 #### Full-width / half-width conversion (全角/半角)
 **ChiXie3:** `FullAndHalfWidthUtil.auto_convert` runs before glyph generation (`Q2B`, `B2Q`,
 two mapping tables) (C) [med]; direction per context not recoverable.
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M3): `layout::glyph_for` falls back to the width counterpart (ASCII ↔ U+FF01–FF5E, space ↔ U+3000) when the font lacks a char; the text is unchanged.
 **Recommended implementation:** convert only when the chosen font lacks the glyph in the typed
 width (e.g. font has `，` but not `,` → use `，`). Implement as a fallback step in
 `FontSet::pick`; the text itself is never changed.
@@ -991,7 +991,7 @@ Tests: shrink fits a 40-char text into a 2-row cell; clip never emits overflow s
 **ChiXie3:** 作文格: select ≥ 2 consecutive chars → one cell holding a combined glyph (each squeezed
 horizontally). Errors "合并内容只能合并两个以及以上的字符", "作文格模式合并内容只能选中连续文字内容" (C)
 [high]. Ribbon button 合并内容 [UI].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M3): `Attrs.combine_next` (custom XML part only); ribbon 合并内容 toggles it on a selection with ChiXie3's errors; the run shares one cell, squeezed across.
 **Recommended implementation:** a `CharTweak`-like run flag `combine_with_next` honoured by grid
 layout (scale_x = 1/n). P3.
 
