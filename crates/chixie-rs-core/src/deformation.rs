@@ -105,12 +105,11 @@ impl Deformation {
             // Slant: on paper x shifts right as y goes up; glyph y is down, so use (cy - y).
             let k = SHAPE_SHEAR.sample(rng) * self.shape_degree;
             let amp = unit(SHAPE_NOISE_MM * self.shape_degree);
-            let (p1, p2) = (rng.unit() * std::f32::consts::TAU, rng.unit() * std::f32::consts::TAU);
+            let warp = Tps::random(amp, rng);
             let (w, h) = (w.max(1e-3), h.max(1e-3));
             for p in out.iter_mut().flatten() {
                 let (x, y) = *p;
-                let nx = amp * (std::f32::consts::TAU * (y - cy) / h + p1).sin();
-                let ny = amp * (std::f32::consts::TAU * (x - cx) / w + p2).sin();
+                let (nx, ny) = warp.at((x - cx) / w, (y - cy) / h);
                 *p = (x + k * (cy - y) + nx, y + ny);
             }
         }
@@ -126,6 +125,95 @@ impl Deformation {
             }
         }
         out
+    }
+}
+
+/// Control points per side of the thin-plate-spline grid.
+const TPS_N: usize = 4;
+
+/// The non-affine part of a thin-plate spline through random displacements of a 4×4 grid over
+/// the glyph box (coordinates normalised to −½…½): a smooth warp, like a hand that bends a
+/// character slightly differently each time. Its affine part is dropped, because slant and
+/// scale are modelled separately.
+struct Tps {
+    ctrl: [(f64, f64); TPS_N * TPS_N],
+    wx: [f64; TPS_N * TPS_N],
+    wy: [f64; TPS_N * TPS_N],
+}
+
+fn tps_u(r2: f64) -> f64 {
+    if r2 <= 1e-12 { 0.0 } else { 0.5 * r2 * r2.ln() }
+}
+
+impl Tps {
+    /// Displacements uniform in ±`amp` (glyph units) at every control point.
+    fn random(amp: f32, rng: &mut Rng) -> Self {
+        const M: usize = TPS_N * TPS_N;
+        let mut ctrl = [(0.0, 0.0); M];
+        for (i, c) in ctrl.iter_mut().enumerate() {
+            let (col, row) = (i % TPS_N, i / TPS_N);
+            *c = (col as f64 / (TPS_N - 1) as f64 - 0.5, row as f64 / (TPS_N - 1) as f64 - 0.5);
+        }
+        let d: Vec<(f64, f64)> = (0..M).map(|_| (f64::from((rng.unit() * 2.0 - 1.0) * amp), f64::from((rng.unit() * 2.0 - 1.0) * amp))).collect();
+        // [K P; Pᵀ 0] [w; a] = [d; 0], solved for x and y together.
+        const S: usize = M + 3;
+        let mut a = [[0.0f64; S + 2]; S];
+        for i in 0..M {
+            for j in 0..M {
+                let (dx, dy) = (ctrl[i].0 - ctrl[j].0, ctrl[i].1 - ctrl[j].1);
+                a[i][j] = tps_u(dx * dx + dy * dy);
+            }
+            let p = [1.0, ctrl[i].0, ctrl[i].1];
+            for k in 0..3 {
+                a[i][M + k] = p[k];
+                a[M + k][i] = p[k];
+            }
+            a[i][S] = d[i].0;
+            a[i][S + 1] = d[i].1;
+        }
+        solve(&mut a);
+        let (mut wx, mut wy) = ([0.0; M], [0.0; M]);
+        for i in 0..M {
+            (wx[i], wy[i]) = (a[i][S], a[i][S + 1]);
+        }
+        Self { ctrl, wx, wy }
+    }
+
+    /// The warp's displacement at normalised (x, y).
+    fn at(&self, x: f32, y: f32) -> (f32, f32) {
+        let (x, y) = (f64::from(x), f64::from(y));
+        let (mut dx, mut dy) = (0.0, 0.0);
+        for (i, c) in self.ctrl.iter().enumerate() {
+            let u = tps_u((x - c.0).powi(2) + (y - c.1).powi(2));
+            dx += self.wx[i] * u;
+            dy += self.wy[i] * u;
+        }
+        (dx as f32, dy as f32)
+    }
+}
+
+/// Gauss-Jordan elimination with partial pivoting on an augmented matrix `[A | B]` (B is the
+/// last two columns); leaves the solution in those columns.
+fn solve<const S: usize, const W: usize>(a: &mut [[f64; W]; S]) {
+    for col in 0..S {
+        let piv = (col..S).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs())).unwrap_or(col);
+        a.swap(col, piv);
+        let p = a[col][col];
+        if p.abs() < 1e-12 {
+            continue;
+        }
+        for v in a[col].iter_mut() {
+            *v /= p;
+        }
+        let pivot_row = a[col];
+        for (r, row) in a.iter_mut().enumerate() {
+            if r != col && row[col] != 0.0 {
+                let f = row[col];
+                for (v, pv) in row.iter_mut().zip(pivot_row.iter()) {
+                    *v -= f * pv;
+                }
+            }
+        }
     }
 }
 
@@ -264,6 +352,61 @@ mod tests {
         assert_eq!(d.apply(&glyph, true, 1.0, &mut Rng::new(5)), d.apply(&glyph, true, 1.0, &mut Rng::new(5)));
         let off = Deformation { remove_tails: false, ..d };
         assert!((0..50).all(|k| off.apply(&glyph, true, 1.0, &mut Rng::new(k))[0].len() == 4));
+    }
+
+    /// A dense CJK-sized glyph (6×6 mm at 1 unit = 1 mm) as 7 strokes of 13 points.
+    fn dense() -> Vec<Stroke> {
+        (0..7).map(|r| (0..13).map(|c| (c as f32 * 0.5, r as f32 * 1.0)).collect()).collect()
+    }
+
+    /// RMS distance left after the best affine fit of `out` to `inp` (the non-affine warp).
+    fn affine_residual(inp: &[Stroke], out: &[Stroke]) -> f64 {
+        let ps: Vec<(f64, f64)> = inp.iter().flatten().map(|p| (f64::from(p.0), f64::from(p.1))).collect();
+        let qs: Vec<(f64, f64)> = out.iter().flatten().map(|p| (f64::from(p.0), f64::from(p.1))).collect();
+        let n = ps.len() as f64;
+        let (mx, my) = (ps.iter().map(|p| p.0).sum::<f64>() / n, ps.iter().map(|p| p.1).sum::<f64>() / n);
+        let (sxx, syy, sxy) = ps.iter().fold((0.0, 0.0, 0.0), |(a, b, c), p| (a + (p.0 - mx).powi(2), b + (p.1 - my).powi(2), c + (p.0 - mx) * (p.1 - my)));
+        let det = sxx * syy - sxy * sxy;
+        let mut err = 0.0;
+        for k in 0..2 {
+            let q = |i: usize| if k == 0 { qs[i].0 } else { qs[i].1 };
+            let nq = (0..qs.len()).map(q).sum::<f64>() / n;
+            let bx: f64 = ps.iter().enumerate().map(|(i, p)| (p.0 - mx) * (q(i) - nq)).sum();
+            let by: f64 = ps.iter().enumerate().map(|(i, p)| (p.1 - my) * (q(i) - nq)).sum();
+            let (a, b) = ((bx * syy - by * sxy) / det, (by * sxx - bx * sxy) / det);
+            err += ps.iter().enumerate().map(|(i, p)| (a * (p.0 - mx) + b * (p.1 - my) + nq - q(i)).powi(2)).sum::<f64>();
+        }
+        (err / n).sqrt()
+    }
+
+    #[test]
+    fn shape_warp_magnitude_follows_the_level() {
+        // Captured at level 7 (2026-11-06): 0.035–0.106 mm non-affine residual on CJK.
+        let res = |level: f32| {
+            let d = Deformation { enabled: true, shape: true, shape_degree: level, ..Default::default() };
+            let v: Vec<f64> = (0..40).map(|k| affine_residual(&dense(), &d.apply(&dense(), true, 1.0, &mut Rng::new(k)))).collect();
+            v.iter().sum::<f64>() / v.len() as f64
+        };
+        let (r3, r7, r10) = (res(3.0), res(7.0), res(10.0));
+        assert!((0.02..=0.106).contains(&r7), "level 7 residual {r7}");
+        assert!(r3 < r7 && r7 < r10, "{r3} {r7} {r10}");
+        let off = Deformation { enabled: true, shape: true, shape_degree: 0.0, ..Default::default() };
+        assert_eq!(off.apply(&dense(), true, 1.0, &mut Rng::new(1)), dense());
+    }
+
+    /// Effects must stay cheap: < 50 µs per glyph (release builds; debug is far slower).
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn deforming_a_glyph_takes_under_50_us() {
+        let d = Deformation { enabled: true, base: true, shape: true, ..Default::default() };
+        let glyph = dense();
+        let t0 = std::time::Instant::now();
+        let mut n = 0;
+        for k in 0..10_000u64 {
+            n += d.apply(&glyph, true, 0.37, &mut Rng::new(k)).len();
+        }
+        let per = t0.elapsed() / 10_000;
+        assert!(n > 0 && per < std::time::Duration::from_micros(50), "{per:?} per glyph");
     }
 
     #[test]
