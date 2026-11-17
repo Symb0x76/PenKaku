@@ -38,6 +38,12 @@ pub struct FontSettings {
     pub library_dir: Option<PathBuf>,
     /// Extra folders scanned for fonts (shared drives, USB sticks).
     pub extra_dirs: Vec<PathBuf>,
+    /// 主线 / 英文 / 符号 / 数字字体.
+    pub roles: crate::font::fontset::FontRoles,
+    /// 字体混用: fonts and weights for Chinese characters; empty = off.
+    pub mix: Vec<crate::font::fontset::MixEntry>,
+    /// 换一组: changes which character gets which mixed font.
+    pub mix_salt: u64,
 }
 
 impl FontSettings {

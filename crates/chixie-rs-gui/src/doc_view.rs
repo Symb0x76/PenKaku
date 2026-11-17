@@ -279,7 +279,7 @@ impl DocView {
         self.has_font = has_font;
         let joins = self.doc.joins();
         let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins };
-        self.layout = Arc::new(layout::layout_flow(&flow, &font, &params));
+        self.layout = Arc::new(layout::layout_flow(&flow, &*font, &params));
         cx.notify();
     }
 

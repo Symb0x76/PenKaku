@@ -1,6 +1,7 @@
 //! Line and page bookkeeping while laying out.
 
 use super::{Align, CharBox, Document, Guide, LineInfo, Page, PageBox, PageParams, Ruling};
+use crate::font::fontset::Glyphs;
 use crate::font::{Font, Glyph};
 use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, is_cjk, rng_for};
 
@@ -273,8 +274,8 @@ fn draw_scaled(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, sx
 /// line's text top, plus its jitter and deformation as configured. A char the font lacks is
 /// listed as missing and draws nothing.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn draw_char(pen: &mut Pen, font: &Font, jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32) {
-    let Some(glyph) = glyph_for(font, ch) else {
+pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32) {
+    let Some(glyph) = font.glyph(ch, id) else {
         if !pen.doc.missing.contains(&ch) {
             pen.doc.missing.push(ch);
         }
