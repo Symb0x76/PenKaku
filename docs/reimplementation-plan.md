@@ -101,7 +101,7 @@ milestone that needs it, never as a big-bang move.
 | `chixie-rs-font` | font parsing/decrypt, local store, roles + mixing + fallback, glyph clean-ups | M4 (moves `font.rs`, `font_store.rs`) |
 | `chixie-rs-layout` | typesetting (kinsoku, alignment, indent, width classes, grid, cells, overflow), handwriting effects, deformation | M3 (moves `layout.rs`, `handwriting.rs`, `deformation.rs`) |
 | `chixie-rs-template` | template kinds (ruled, grid, table), editor ops, `.cx` / table import, data sources | M7 (moves `template.rs`, `chixie3_templates.rs`) |
-| `chixie-rs-output` | stroke pipeline: transform → order/plan → pen/colour segments → G-code dialects; job description | M6 (moves `gcode.rs`, `calibration.rs`) |
+| `chixie-rs-output` | stroke pipeline: transform → order/plan → pen/colour segments → G-code dialects; job description | M6 (moved the emitter out of `gcode.rs`; the device settings stay in core as `profile.rs` because `config.rs` stores them, and `calibration.rs` stays in core because it fits layout scale) |
 | `chixie-rs-device` | transports (serial, Telnet, ESP3D HTTP), Grbl streamer, device actor, discovery, firmware dialects (Grbl_ESP32, ChiXie N1) | M1 (moves `transport.rs`, `grbl.rs`, `device.rs`, `esp3d.rs`, `discovery.rs`) |
 | `chixie-rs-cloud` | API client, session, cloud fonts, cloud template library, parameter sync | M4 (moves `api.rs`, `session.rs`, `credentials.rs`) |
 | `chixie-rs-import` | txt/docx/pdf/xlsx, table-frame detection from PDF/images, later DXF/SVG/images | M7–M8 |
@@ -319,7 +319,13 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - effects add < 50 µs per glyph;
   - the seeded golden is stable.
 
-### M6 Output options (2–3 wk) — spec R5
+### M6 Output options (2–3 wk) — spec R5 — in progress on `m6-output`
+- Status: `chixie-rs-output` (`plan`: 弓字型 row order, 页面旋转 about the frame centre, 书写原点
+  纸张/框线/自定义 with a draggable marker; `emit`: pen stops, changer macros, `standalone` SD program,
+  笔锋). 多色绘制 pauses once per colour switch (`Event::AwaitingPen`, after a `G4 P0` sync);
+  上传SD卡书写 for 炽写 ESP32 boards. Defaults keep the goldens byte-identical. Still open: the ChiXie3
+  captures for 弓 and rotation (semantics are inferred until then), a GUI editor for automatic
+  changer slots (settings file only), BOSS hardware checklist #13d/#13e.
 - `chixie-rs-output` pipeline (§2.3): 之/弓 path planning, start-point modes (纸张/框线/自定义 with a
   marker on the page), and axis directions.
 - Page rotation 不旋转 / 奇数页 / 偶数页 / 全部 180°.

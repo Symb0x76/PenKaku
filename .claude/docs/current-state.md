@@ -216,5 +216,19 @@
     the shape level. Harness `tools/capture/capture.ps1` now maximizes ChiXie3, waits 30 s, `-Probe`,
     clicks measured at 3840×2160 150 % (tools/ is git-ignored).
   - Autotest `AUTOTEST_EFFECTS`; styled golden re-blessed once.
-- Next: BOSS hardware #13a/#13b/#13c; then M6 (output options) when BOSS asks.
+- Next: BOSS hardware #13a/#13b/#13c.
+- **M6 in progress (2026-11-17), branch `m6-output`:**
+  - New crate `chixie-rs-output`: `emit.rs` (moved from core `gcode.rs`; `PageCode.pens`, changer
+    macros, `standalone` SD program, 笔锋 `taper_points`) and `plan.rs` (`plan` / `write` / `plan_all`
+    → `Written { page, pens }`; 弓字型, 180° about the frame centre, origin shift, `Sheet::snap_origin`).
+    Goldens + legacy oracle moved to `crates/chixie-rs-output/tests/`.
+  - Core `profile.rs` (was `gcode.rs` types): `PathPlan`, `Origin`, `PageRotation`, `PenChange`/`PenSlot`,
+    `TipTaper`, `Rgb`/`colour_name`; `PageSettings.{origin, rotation, multicolour}`; `num` maps -0 to 0.
+    `Page::first_stroke_from` picks the character first (works on reordered pages).
+  - Device: `Job.pens`, `Event::AwaitingPen` (after `G4 P0`), continue with `NextSheet`; `stream_range`;
+    `esp3d::Board::upload_and_run`, `no_proxy`.
+  - GUI: `ChixieRsApp::written_pages` + `app::job_of` feed every job/export/patrol; 参数设置 rows (路径规划,
+    书写原点, 页面旋转, 多色绘制/换笔模式, 笔锋); draggable origin ring in `doc_view.rs`; 笔色 menu; coloured ink;
+    换笔提示 dialog; `app/sd.rs` 上传SD卡; autotest `AUTOTEST_OUTPUT`.
+  - Open: ChiXie3 captures for 弓 and rotation (need the screen); auto changer slot editor; hardware #13d/#13e.
 

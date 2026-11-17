@@ -135,7 +135,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Templates | 模板管理 UI | create / save / delete / export, validation | Partial (`templates_view.rs`) | P1 | S |
 | Templates | `.cx` import | note / composition pickles | Done (`chixie3_templates.rs`) | P1 | — |
 | Templates | 表格模板 import | Fernet + pickle table templates | Missing | P2 | M |
-| Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Partial (writable top-left only) | P1 | M |
+| Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Done (M6; no right-click menu) | P1 | M |
 | Templates | 模板库 (cloud) | online templates: 绘图/激光/写字 | Missing | P3 | M |
 | Fonts | 字体库 browse | 在线字体 / 我的收藏 / 我的录制, filter, sort, search, pager | Partial (no 录制, no filter/sort UI) | P1 | S |
 | Fonts | 收藏/取消收藏 | `font/collect_a_font`, 30-font cap | Dropped (BOSS, 2026-11-17) | — | — |
@@ -184,18 +184,18 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Jobs | 书写此页 | write a chosen page | Partial | P1 | S |
 | Jobs | 换纸 | sheet change between pages | Done | P0 | — |
 | Jobs | 断点续写 | resume from a chosen character | Partial (page/line toast) | P0 | M |
-| Jobs | 多色绘制 / 换笔 | manual / automatic pen change | Missing | P2 | M |
-| Jobs | 页面旋转 (奇偶页) | 180° rotation of odd/even pages | Missing | P2 | S |
+| Jobs | 多色绘制 / 换笔 | manual / automatic pen change | Done (M6; auto slots in settings file only) | P2 | M |
+| Jobs | 页面旋转 (奇偶页) | 180° rotation of odd/even pages | Done (M6; centre VERIFY) | P2 | S |
 | Jobs | 自动换纸设备 | Marlin sheet feeder, loops | Missing | P3 | M |
 | Jobs | 工作区巡边/绘制框架线 | trace bounds; draw template lines | Missing | P1 | S |
-| Jobs | 上传SD卡书写 | upload page to TF and run | Partial (core `esp3d.rs`) | P2 | S |
-| G-code | 书写 G-code | initial/body/end, signed coords | Done (`gcode.rs`) | P0 | — |
-| G-code | 路径规划 之/弓 | row order | Missing | P1 | S |
-| G-code | 起点模式 | 纸张/框线/自定义 origin | Missing | P1 | S |
+| Jobs | 上传SD卡书写 | upload page to TF and run | Done (M6; untested on a board) | P2 | S |
+| G-code | 书写 G-code | initial/body/end, signed coords | Done (`chixie-rs-output`) | P0 | — |
+| G-code | 路径规划 之/弓 | row order | Done (M6; semantics VERIFY) | P1 | S |
+| G-code | 起点模式 | 纸张/框线/自定义 origin | Done (M6) | P1 | S |
 | G-code | 写完位置 | 原点 / 原点左2cm / 任务结束点 | Partial (always X0 Y0) | P1 | S |
 | G-code | 抬落笔 per device type | stepper / servo / magnet / laser / 3D / custom | Partial (Z + custom) | P1 | S |
 | G-code | 导出 G-code | one file per page | Done (`file_ops.rs`) | P0 | — |
-| G-code | 笔锋测试 | Z lift along stroke tail | Missing | P3 | S |
+| G-code | 笔锋测试 | Z lift along stroke tail | Done (M6, experimental) | P3 | S |
 | G-code | 路径优化插件 | user Python RouteOptimizer | Not planned (replace) | P3 | M |
 | Plot | 绘图画布 | rulers, grid, snap, zoom, select/pan | Missing | P2 | L |
 | Plot | 纸型设置 | standard / custom paper, presets | Missing | P2 | S |
@@ -664,7 +664,9 @@ page key points; right-click: 移至纸张起点 (`StartPointOfPaper`), 移至�
 sample, encoding unknown); custom positions saved debounced, per page for table templates in
 frame/paper mode (C §书写原点) [high]. The N1 card text: "炽写页面中蓝色小圆圈即书写起点" (A) [high].
 Captured: origin = writable top-left for notes and the grid top-left for 作文格 (protocol.md [cap]).
-**chixie-rs today:** origin fixed at the writable top-left (`layout.rs`).
+**chixie-rs today:** Done (M6): `PageSettings.origin` (纸张起点 / 框线起点 / 自定义), a blue ring on every
+page that can be dragged (snaps to both corners, else whole mm), and a 书写原点 menu in 参数设置; the
+output subtracts the origin point (`output::plan`). Right-click menu not done.
 **Recommended implementation:** `Origin { Paper, Frame, Custom((f32, f32)) }` in
 `PageSettings`; G-code subtracts the origin point (§3.8). Draw the marker in `doc_view.rs`,
 draggable with 1 mm snapping plus key-point snapping (margins, paper corners). Show the "put the
@@ -1322,7 +1324,9 @@ to the uninterrupted tail.
 grouped by the item's colour (`getRgb`, default black); at a colour change the sender pauses with
 "换笔提示: 您已启用多色绘制，请更换笔颜色为：<colour>" and [换笔完成] (A §Pen change prompt) [high].
 Automatic mode implementation not found [med].
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M6): 笔色 menu on 开始 (run colour, coloured preview ink); 多色绘制 groups a page
+by colour (first-seen order) and the device pauses with 换笔提示 after a `G4 P0` sync, only when the pen
+changes; automatic mode writes per-pen pick/drop macros from the settings file (no slot editor yet).
 **Recommended implementation:** `layout` keeps per-stroke colour from `CharAttrs.color`; `gcode`
 orders a page by colour (all black strokes, then red, …; within a colour keep reading order) and
 inserts a `PenChange { color }` marker between groups. The actor turns markers into
@@ -1339,7 +1343,8 @@ one pause; colour order stable.
 point about the paper/frame centre for rotated pages (`calculate_symmetric_point`) and the origin
 marker moves accordingly (A, C) [high]; numeric mapping [med]. Purpose: writing both sides of a
 sheet or a feeder that returns sheets upside down (inferred).
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M6): `PageSettings.rotation`, mirrored about the writable frame's centre
+(VERIFY against a capture: paper vs frame centre).
 **Recommended implementation:** `PageRotation::{None, Odd180, Even180, All180}` in
 `PageSettings`; applied in `gcode::emit` as `p → (W − x, −H − y)` relative to the writable area
 (origin becomes the bottom-right corner, so the job start hint must say so). Test: All180 twice =
@@ -1366,7 +1371,9 @@ click, no dialog). Merge collinear segments and order lines boustrophedon to min
 **ChiXie3:** page menu 上传SD卡书写: uploads the page's G-code to `/chixie_task/` on the board
 (`POST /upload`, multipart `myfile[]`) and asks "是否立即开始书写页面：" then runs `[ESP220]<path>`
 (A §Upload page to SD; protocol.md) [high]. Only for 炽写 ESP32 firmware.
-**chixie-rs today:** core `esp3d.rs` (upload, run, hold/resume/reset) — untested.
+**chixie-rs today:** Done (M6): 设备 › 上传SD卡 (IP prompt, `standalone` program with G21/G90 and the
+写完位置 park, upload to `/chixie_task/p<n>.gcode`, `[ESP220]`); tested against a local HTTP mock, not yet
+on a board. Multicolour pages are refused (an SD program cannot pause for a pen).
 **Recommended implementation:** GUI action in the 设备 tab when an IP is known; progress polling via
 `?` over HTTP. Benefit: no streaming stalls. Test against a mock HTTP server (`tiny_http` dev-dep,
 or a hand-rolled `TcpListener`).
@@ -1395,7 +1402,7 @@ secondary `Target`. Marlin streaming (ok-per-line, no char counting) needed firs
 pen down `G1G90 Z2F19000`, writes, pen up after each stroke, end `G90G0 X0Y0`. Origin = pen
 position at start; Y negative going down. Consecutive repeated points are not sent. Static:
 `_handle_consecutive_negative` fixes `+-`/`--` ("导致N1鬼叫的问题") (A, C) [high].
-**chixie-rs today:** `gcode.rs` (`emit`, `emit_document`; travel `G0`, explicit feeds, optional
+**chixie-rs today:** `chixie-rs-output::emit` (`emit`, `emit_document`; travel `G0`, explicit feeds, optional
 dwell, axis map), golden tests.
 **Recommended implementation:** keep our cleaner format (no signs, `G0` travel with a travel
 feed, explicit `F`); add an optional "ChiXie3-compatible" emitter only if a user needs byte
@@ -1410,7 +1417,8 @@ behind a setting (some firmware echo comments; Grbl ignores `;`).
 弓 = alternate rows reversed (boustrophedon); C says the opposite and calls the second mode 工.
 The character shapes (之 = Z-scan, 弓 = serpentine) and the CNC meaning of 弓字形 favour A
 (inferred).
-**chixie-rs today:** missing (always left-to-right).
+**chixie-rs today:** Done (M6): `DeviceProfile.path_plan` (之字型 / 弓字型), output order only; 弓 writes
+every second row of a page right to left (VERIFY by capture).
 **Recommended implementation:** `PathPlan::{Raster, Serpentine}` in `DeviceProfile` (output
 order only; the layout is unchanged). Serpentine writes odd rows' characters right-to-left (each
 character's own strokes keep their order). Default Raster until VERIFY. Also add a greedy
@@ -1422,7 +1430,7 @@ nearest-neighbour stroke order option within a character for fonts with bad stro
 **ChiXie3:** `StartPointOfPaper` (paper top-left), `StartPointOfFrame` (frame/margin start; uses
 `origin_point_of_frame`, `end_point_of_frame` and cos/sin for flips), `StartPointOfCustom` (the
 dragged marker); offsets by `get_offset_value`; units px → mm via `PXScale` (A, C) [high].
-**chixie-rs today:** origin = writable top-left (matches ChiXie3's captured note default).
+**chixie-rs today:** Done (M6), see 书写原点 (§3.2).
 **Recommended implementation:** see 书写原点 (§3.2); emitter subtracts `origin_mm` from every
 point. Test per mode.
 
@@ -1446,7 +1454,8 @@ pen at the origin, updating live (ChiXie3 uses two drop-downs).
 #### Pen-tip ("笔锋") test
 **ChiXie3:** `enable_route_tip`: lifts Z gradually along the last segment of each stroke to imitate
 a brush tip (`route_tip_test_gcode`, `route_tip_last_z_value`) (A) [high]; labelled 笔锋简单测试.
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M6, experimental): 参数设置 › 笔锋(实验) for stepper lift, Z rises linearly over
+the last 1/2/4 mm to halfway up.
 **Recommended implementation:** P3; only meaningful with a Z stepper. `gcode` option
 `tip_taper: Option<(len_mm, z_end)>` interpolating Z on the last `len_mm` of each stroke.
 
