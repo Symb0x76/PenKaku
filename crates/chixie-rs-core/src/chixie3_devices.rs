@@ -4,7 +4,7 @@
 //! `{device name: {key: value}}`, with the bytes escaped ini-style (`\0`, `\xHH`, `\b`, …). Only
 //! the QVariant types ChiXie3 writes are decoded (map, string, int, bool, double).
 
-use crate::gcode::{AxisMap, DeviceProfile, DeviceType, Firmware};
+use crate::profile::{AxisMap, DeviceProfile, DeviceType, Firmware};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]

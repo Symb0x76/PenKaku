@@ -227,6 +227,26 @@ and scales it linearly with the level (VERIFY with typed text if it ever matters
 - The paste-vs-typed scale anomaly above did not reproduce here, where all sx = sy = 1.000. Treat it
   as an artifact of that one paste.
 
+## Output options (captured 2026-11-17, `captures/m6/`)
+Fake-Grbl captures, 艾玛体 100, deformation off, text `一二` ⏎ `三十` (typed Enter), each option set in
+`config.ini` for one run (`tools/capture/capture.ps1 -Config`, `-Text2`, `-StartX 805` for 我的笔记).
+
+| Setting | Template | Result |
+|---|---|---|
+| `path_planning_type=1` (之字型) | 我的笔记1 | 一 二 三 十: every row left to right |
+| `path_planning_type=2` (弓字型) | 我的笔记1 | 一 二 十 三: row 2 right to left, each character's strokes in font order |
+| `path_planning_type=1` / `2` | 作文格1 | 一 二 三 十 in both: 弓 does not reverse grid rows |
+| `ParityPageDirectionMode=1` (奇数页旋转180°) | 作文格1, 1 page | page 1 turned: `(x, y) → (159.8 − x, −214.9 − y)` ± 0.4 mm, stroke order unchanged |
+| `ParityPageDirectionMode=2` (偶数页旋转180°) | 作文格1, 1 page | page 1 as written unturned |
+
+- The rotation centre is the grid frame's: 20 cells × 8 mm = 160 mm wide; 20 rows × 8 mm + 19 gaps ×
+  2.9 mm = 215.1 mm tall (the measured 159.8 × 214.9 is within the per-layout jitter). The pen's start
+  point stays the frame's top-left, so a turned page starts at the far corner.
+- chixie-rs: `output::plan` does the same (`serpentine` skips `Document.grid`; rotation
+  `(w − x, −h − y)` about the writable frame). Not captured: `ParityPageDirectionMode=3` (the run
+  stalled; 3 = all pages by the form order), 起点模式, 多色绘制 (ChiXie3's pause is in the app, not
+  the G-code).
+
 ## Page templates (`%USERPROFILE%\ChiXie3\conf\*.cx`, decoded 2026-11-07)
 Python pickles (protocol 4) of `{name: object}`; the objects come from `core.DataModel.*` and carry
 their state as a plain `__dict__`. They are read by `chixie_rs_core::chixie3_templates`, a small pickle

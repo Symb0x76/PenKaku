@@ -168,6 +168,8 @@ pub struct DocView {
     selecting: bool,
     caret_visible: bool,
     reveal_caret: bool,
+    /// 书写原点 marker being dragged: its layout point (mm).
+    origin_drag: Option<(f32, f32)>,
     /// What the current layout was computed from, to skip needless relayouts.
     /// What the layout was made from: font set generation, page and style settings, template.
     layout_key: Option<(u64, PageSettings, StyleFile, Option<Template>)>,
@@ -204,6 +206,7 @@ impl DocView {
             selecting: false,
             caret_visible: true,
             reveal_caret: false,
+            origin_drag: None,
             layout_key: None,
             dirty_draft: false,
             _tasks: vec![blink],
@@ -417,6 +420,12 @@ impl DocView {
         self.type_text(&layout::HALF_SPACE.to_string(), cx);
     }
     /// 字符微调 on the selection (or, with `same`, on every equal character).
+    /// 笔色 of the selection (`None` = default black). One undo step.
+    pub fn set_colour(&mut self, c: Option<chixie_rs_core::profile::Rgb>, cx: &mut Context<Self>) {
+        self.doc.set_attrs(|a| a.colour = c);
+        self.edited(cx);
+    }
+
     pub fn tune(&mut self, f: fn(&mut layout::Tuning), same: bool, cx: &mut Context<Self>) {
         if same {
             self.doc.tune_same_chars(f);
@@ -513,8 +522,23 @@ impl DocView {
         Some(self.layout.index_at(k, x, y))
     }
 
+    /// Layout point of the 书写原点 marker.
+    fn origin_point(&self, cx: &App) -> (f32, f32) {
+        self.origin_drag.unwrap_or_else(|| sheet(&cx.global::<AppState>().settings.page).origin_point(cx.global::<AppState>().settings.page.origin))
+    }
+
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        // Grab the 书写原点 marker (drawn on every page; drag it on any).
+        if let Some(g) = self.geom.get() {
+            let (_, x, y) = g.unproject(e.position, self.layout.pages.len().max(1));
+            let o = self.origin_point(cx);
+            if (x - o.0).hypot(y - o.1) <= ORIGIN_GRAB_MM.max(8.0 / g.zoom) {
+                self.origin_drag = Some(o);
+                cx.notify();
+                return;
+            }
+        }
         let Some(i) = self.index_at_point(e.position) else { return };
         if e.click_count >= 2 {
             let r = self.doc.word_at(i);
@@ -526,6 +550,14 @@ impl DocView {
         self.after_move(cx);
     }
     fn mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.origin_drag.is_some()
+            && let Some(g) = self.geom.get()
+        {
+            let (_, x, y) = g.unproject(e.position, self.layout.pages.len().max(1));
+            self.origin_drag = Some((x, y));
+            cx.notify();
+            return;
+        }
         if self.selecting
             && let Some(i) = self.index_at_point(e.position)
         {
@@ -533,8 +565,14 @@ impl DocView {
             self.after_move(cx);
         }
     }
-    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.selecting = false;
+        if let Some(p) = self.origin_drag.take() {
+            let st = cx.global_mut::<AppState>();
+            st.settings.page.origin = sheet(&st.settings.page).snap_origin(p, ORIGIN_SNAP_MM);
+            st.save_settings();
+            cx.notify();
+        }
     }
     fn scroll_zoom(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         if e.modifiers.secondary(cx) {
@@ -647,12 +685,17 @@ impl Render for DocView {
         let focus = self.focus.clone();
         let focused = focus.is_focused(window);
         let layout_doc = self.layout.clone();
+        let ink_of: Vec<Option<chixie_rs_core::profile::Rgb>> = {
+            let d = self.doc.document();
+            (0..self.doc.len()).map(|i| d.attrs(i).colour).collect()
+        };
         let sel = self.doc.selection();
         let caret = self.doc.caret();
         let marked = self.doc.marked();
         let show_caret = focused && self.caret_visible && sel.is_empty();
         let zoom = self.zoom;
         let show_guides = cx.global::<AppState>().settings.ui.show_guides;
+        let origin_pt = self.origin_point(cx);
         let geom_out = self.geom.clone();
         let reveal = std::mem::take(&mut self.reveal_caret);
         let scroll = self.scroll.clone();
@@ -765,23 +808,42 @@ impl Render for DocView {
                             if p.strokes.is_empty() {
                                 continue;
                             }
-                            let mut path = PathBuilder::stroke(stroke_w);
-                            for s in &p.strokes {
-                                let mut pts = s.iter().map(|&(x, y)| g.screen(k, x, y));
-                                let Some(first) = pts.next() else { continue };
-                                path.move_to(first);
-                                let mut drew = false;
-                                for q in pts {
-                                    path.line_to(q);
-                                    drew = true;
-                                }
-                                if !drew {
-                                    path.line_to(first + point(px(0.6), px(0.6)));
+                            let colour_at = |i: usize| p.stroke_chars.get(i).and_then(|&c| ink_of.get(c).copied().flatten());
+                            let mut inks: Vec<Option<chixie_rs_core::profile::Rgb>> = vec![None];
+                            for i in 0..p.strokes.len() {
+                                if let Some(c) = colour_at(i)
+                                    && !inks.contains(&Some(c))
+                                {
+                                    inks.push(Some(c));
                                 }
                             }
-                            if let Ok(path) = path.build() {
-                                window.paint_path(path, gpui_kit::black());
+                            for ink in inks {
+                                let mut path = PathBuilder::stroke(stroke_w);
+                                for s in p.strokes.iter().enumerate().filter(|(i, _)| colour_at(*i) == ink).map(|(_, s)| s) {
+                                    let mut pts = s.iter().map(|&(x, y)| g.screen(k, x, y));
+                                    let Some(first) = pts.next() else { continue };
+                                    path.move_to(first);
+                                    let mut drew = false;
+                                    for q in pts {
+                                        path.line_to(q);
+                                        drew = true;
+                                    }
+                                    if !drew {
+                                        path.line_to(first + point(px(0.6), px(0.6)));
+                                    }
+                                }
+                                if let Ok(path) = path.build() {
+                                    let colour = ink.map_or(gpui_kit::black(), |[r, g, b]| Hsla::from(Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }));
+                                    window.paint_path(path, colour);
+                                }
                             }
+                        }
+                        // 书写原点: a blue ring where the pen tip must stand at job start.
+                        let ring = px((1.6 * g.zoom).max(5.0));
+                        for k in 0..pages {
+                            let c = g.screen(k, origin_pt.0, origin_pt.1);
+                            let b = Bounds::new(c - point(ring, ring), size(ring * 2.0, ring * 2.0));
+                            window.paint_quad(quad(b, ring, transparent_black(), px(2.0), ORIGIN_BLUE, BorderStyle::Solid));
                         }
                         // IME composition underline.
                         if let Some(m) = marked.clone() {
@@ -810,6 +872,15 @@ impl Render for DocView {
                 .h(px(total_h)),
             )
     }
+}
+
+/// The 书写原点 marker: grab radius and corner snap (mm).
+const ORIGIN_GRAB_MM: f32 = 2.5;
+const ORIGIN_SNAP_MM: f32 = 2.0;
+const ORIGIN_BLUE: Hsla = Hsla { h: 0.58, s: 0.85, l: 0.5, a: 0.9 };
+
+fn sheet(p: &PageSettings) -> chixie_rs_output::Sheet {
+    chixie_rs_output::Sheet { paper: p.paper, margins: p.margins }
 }
 
 /// Light-blue ruling lines; dashed ones are cut into 1.2 mm dashes.

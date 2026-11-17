@@ -3,7 +3,8 @@ mod fake_grbl;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use chixie_rs_core::{api, calibration, config, gcode, handwriting, layout};
+use chixie_rs_core::{api, calibration, config, handwriting, layout};
+use chixie_rs_output as gcode;
 use chixie_rs_device::{discovery, esp3d, grbl, transport};
 use clap::{Parser, Subcommand};
 
@@ -451,7 +452,7 @@ fn main() -> chixie_rs_core::Result<()> {
             if !doc.missing.is_empty() {
                 eprintln!("missing glyphs (skipped): {}", doc.missing.iter().collect::<String>());
             }
-            let mut gcode = gcode::emit_document(&doc, &gcode::DeviceProfile::default());
+            let mut gcode = gcode::emit_document(&doc, &chixie_rs_core::profile::DeviceProfile::default());
             if zero {
                 // Zero work coords at the pen's current position so absolute moves are local.
                 gcode.insert_str(0, "G92 X0 Y0\n");

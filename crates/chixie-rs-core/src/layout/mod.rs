@@ -1,12 +1,12 @@
 //! Text → positioned pen strokes in machine mm (`Document`).
 //!
-//! The preview and the G-code emitter (`gcode.rs`) both consume the same `Document`, so what is
+//! The preview and the G-code emitter (`chixie-rs-output`) both consume the same `Document`, so what is
 //! shown is what is drawn. Glyph units are scaled to mm and Y is flipped (glyph y-down → machine
 //! y-up). The page origin is the top-left corner, in machine mm.
 //!
 //! With every effect off, the arithmetic here keeps the exact float expressions and operation
 //! order of the original `writing::text_to_gcode`, so its output stays byte-identical. The golden
-//! test and the `legacy` oracle below check this; don't reorder the math.
+//! test and the `legacy_oracle` test (both in `chixie-rs-output`) check this; don't reorder the math.
 
 use crate::deformation::Deformation;
 use crate::font::Glyph;
@@ -19,7 +19,6 @@ pub mod kinsoku;
 mod pen;
 mod segment;
 #[cfg(test)]
-pub(crate) mod legacy;
 #[cfg(test)]
 mod tests;
 
@@ -90,9 +89,12 @@ pub struct Page {
 }
 
 impl Page {
-    /// First stroke drawn for character `i` or any later one; `strokes.len()` if none.
+    /// First stroke (in writing order) of the first character at or after `i` in text order that
+    /// has strokes; `strokes.len()` if none. Strokes may be reordered (弓字型), so this picks the
+    /// character first, then its earliest stroke.
     pub fn first_stroke_from(&self, i: usize) -> usize {
-        self.stroke_chars.iter().position(|&c| c >= i).unwrap_or(self.strokes.len())
+        let Some(c) = self.stroke_chars.iter().copied().filter(|&c| c >= i).min() else { return self.strokes.len() };
+        self.stroke_chars.iter().position(|&x| x == c).unwrap_or(self.strokes.len())
     }
 }
 
@@ -139,6 +141,8 @@ pub struct Document {
     /// Lines that still start with a closing mark or end with an opening mark after a wrap
     /// (避头尾 off, or nothing could be moved): the 位置合理性检测 badge.
     pub punct_issues: Vec<usize>,
+    /// Laid out on a composition grid (one character per cell).
+    pub grid: bool,
 }
 
 /// Where one input character sits (machine mm; y up, so `top > bottom`).
@@ -370,7 +374,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
         align: para(0).align,
         line_stroke: 0,
         pitch: grid.map(|(_, cw, cg)| cw + cg),
-        doc: Document { origin: p.origin, ..Default::default() },
+        doc: Document { origin: p.origin, grid: grid.is_some(), ..Default::default() },
         page: Page::default(),
         page_ix: 0,
         cx: 0.0,

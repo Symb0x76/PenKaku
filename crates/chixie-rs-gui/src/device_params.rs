@@ -4,7 +4,7 @@
 
 use chixie_rs_core::chixie3_devices;
 use chixie_rs_device::device::{Command, DeviceHandle, Pen};
-use chixie_rs_core::gcode::{DeviceProfile, DeviceType, EndPosition, Firmware};
+use chixie_rs_core::profile::{DeviceProfile, DeviceType, EndPosition, Firmware, Origin, PageRotation, PathPlan};
 use chixie_rs_device::grbl::MachineSettings;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -229,6 +229,127 @@ impl DeviceParams {
         h_flex().gap_2().child(div().flex_1().child(mode)).children(strength).into_any_element()
     }
 
+    /// Change the page's output settings (页面旋转, 书写原点). They don't move the layout.
+    fn edit_page(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut chixie_rs_core::config::PageSettings)) {
+        let st = cx.global_mut::<AppState>();
+        f(&mut st.settings.page);
+        st.save_settings();
+        cx.notify();
+    }
+
+    #[inline(never)]
+    /// 路径规划, 页面旋转 and 书写原点 as dropdowns.
+    fn output_menus(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> [AnyElement; 3] {
+        let page = &cx.global::<AppState>().settings.page;
+        let (rotation, origin, plan) = (page.rotation, page.origin, p.path_plan);
+        let this = cx.entity().downgrade();
+        let w1 = this.clone();
+        let plan_el = Button::new("path-plan").small().outline().w_full().label(plan.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            PathPlan::ALL.iter().fold(m, |m, &k| {
+                let this = w1.clone();
+                m.item(PopupMenuItem::new(k.label()).checked(k == plan).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.path_plan = k));
+                }))
+            })
+        });
+        let w2 = this.clone();
+        let rot_el = Button::new("rotation").small().outline().w_full().label(rotation.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            PageRotation::ALL.iter().fold(m, |m, &r| {
+                let this = w2.clone();
+                m.item(PopupMenuItem::new(r.label()).checked(r == rotation).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit_page(cx, |s| s.rotation = r));
+                }))
+            })
+        });
+        let w3 = this.clone();
+        let mut choices = vec![Origin::Paper, Origin::Frame];
+        if matches!(origin, Origin::Custom { .. }) {
+            choices.push(origin);
+        }
+        let origin_el = Button::new("origin").small().outline().w_full().label(origin.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            choices.iter().fold(m, |m, &o| {
+                let this = w3.clone();
+                m.item(PopupMenuItem::new(o.label()).checked(o == origin).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |v, cx| v.edit_page(cx, |s| s.origin = o));
+                }))
+            })
+        });
+        [plan_el.into_any_element(), rot_el.into_any_element(), origin_el.into_any_element()]
+    }
+
+    #[inline(never)]
+    /// 笔锋 (experimental): tail length; the pen rises halfway to its up height.
+    fn taper_menu(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> AnyElement {
+        use chixie_rs_core::profile::TipTaper;
+        let cur = p.tip_taper.map(|t| t.len_mm);
+        let this = cx.entity().downgrade();
+        let label = cur.map_or("关闭".to_string(), |l| format!("末端 {} mm 渐抬", fmt_num(l)));
+        Button::new("taper")
+            .small()
+            .outline()
+            .w_full()
+            .label(label)
+            .dropdown_caret(true)
+            .dropdown_menu(move |m, _w, _cx| {
+                [None, Some(1.0), Some(2.0), Some(4.0)].into_iter().fold(m, |m, len: Option<f32>| {
+                    let this = this.clone();
+                    let name = len.map_or("关闭".to_string(), |l| format!("末端 {} mm 渐抬", fmt_num(l)));
+                    m.item(PopupMenuItem::new(name).checked(len == cur).on_click(move |_, _w, cx| {
+                        let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.tip_taper = len.map(|len_mm| TipTaper { len_mm, z_end: (p.pen_up_z + p.pen_down_z) / 2.0 })));
+                    }))
+                })
+            })
+            .into_any_element()
+    }
+
+    #[inline(never)]
+    /// 多色绘制 on/off and 换笔模式. The automatic changer's pens (macros) live in the settings
+    /// file; the form shows how many there are.
+    fn multicolour_rows(&self, p: &DeviceProfile, cx: &mut Context<Self>) -> AnyElement {
+        use chixie_rs_core::profile::PenChange;
+        let muted = cx.theme().muted_foreground;
+        let on = cx.global::<AppState>().settings.page.multicolour;
+        let mode = p.pen_change.clone();
+        let auto = matches!(mode, PenChange::Auto { .. });
+        let slots = match &mode {
+            PenChange::Auto { slots } => slots.len(),
+            PenChange::Manual => 0,
+        };
+        let this = cx.entity().downgrade();
+        let mode_el = Button::new("pen-change").small().outline().w_full().label(if auto { "自动换笔（需设备支持）" } else { "手动换笔（弹窗提示）" }).dropdown_caret(true).dropdown_menu(
+            move |m, _w, _cx| {
+                let (a, b) = (this.clone(), this.clone());
+                m.item(PopupMenuItem::new("手动换笔（弹窗提示）").checked(!auto).on_click(move |_, _w, cx| {
+                    let _ = a.update(cx, |v, cx| v.edit(cx, |p| p.pen_change = PenChange::Manual));
+                }))
+                .item(PopupMenuItem::new("自动换笔（需设备支持）").checked(auto).on_click(move |_, _w, cx| {
+                    let _ = b.update(cx, |v, cx| {
+                        v.edit(cx, |p| {
+                            if !matches!(p.pen_change, PenChange::Auto { .. }) {
+                                p.pen_change = PenChange::Auto { slots: Vec::new() };
+                            }
+                        })
+                    });
+                }))
+            },
+        );
+        v_flex()
+            .gap_1p5()
+            .child(Checkbox::new("multicolour").small().label("多色绘制（按笔色分组书写，换色时换笔）").checked(on).on_click(cx.listener(|v, on: &bool, _w, cx| {
+                let on = *on;
+                v.edit_page(cx, |s| s.multicolour = on)
+            })))
+            .when(on, |el| {
+                el.child(h_flex().gap_2().child(div().w(px(76.)).flex_none().text_sm().text_color(muted).child("换笔模式")).child(div().flex_1().child(mode_el)))
+                    .when(auto, |el| {
+                        el.child(div().text_xs().text_color(muted).child(format!(
+                            "自动换笔配置：共{slots}支笔（在设置文件 [device.profile.pen_change] 的 slots 里填写各笔颜色与取笔/放笔 G-code；没有配置的颜色会弹窗提示手动换笔）"
+                        )))
+                    })
+            })
+            .into_any_element()
+    }
+
     fn form(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.profile(cx).clone();
         let theme = cx.theme();
@@ -279,6 +400,8 @@ impl DeviceParams {
         let too_fast = max_feed.filter(|m| p.write_speed > *m || p.travel_speed > *m);
         let custom = p.device_type == DeviceType::CustomZ;
         let am = p.axis_map;
+        let [plan_el, rot_el, origin_el] = self.output_menus(&p, cx);
+        let turned = cx.global::<AppState>().settings.page.rotation != PageRotation::None;
 
         v_flex()
             .gap_1p5()
@@ -300,6 +423,12 @@ impl DeviceParams {
             .child(div().text_xs().text_color(muted).child(format!("抬笔：{}　落笔：{}", p.pen_up_cmd(), p.pen_down_cmd())))
             .child(row("写完位置", end.into_any_element()))
             .child(row("书写优化", self.route_menu(&p, cx)))
+            .when(p.device_type == DeviceType::StepperPenUp, |el| el.child(row("笔锋(实验)", self.taper_menu(&p, cx))))
+            .child(row("路径规划", plan_el))
+            .child(row("书写原点", origin_el))
+            .child(row("页面旋转", rot_el))
+            .when(turned, |el| el.child(div().text_xs().text_color(muted).child("页面预览不旋转，只旋转书写输出；转过的页面原点仍在纸张左上角。")))
+            .child(self.multicolour_rows(&p, cx))
             .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("坐标方向"))
             .child(
                 h_flex()

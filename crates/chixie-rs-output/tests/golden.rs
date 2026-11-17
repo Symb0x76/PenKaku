@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use chixie_rs_core::font::Font;
-use chixie_rs_core::gcode::{DeviceProfile, emit_document};
+use chixie_rs_core::profile::DeviceProfile;
+use chixie_rs_output::emit_document;
 use chixie_rs_core::layout::{PageParams, layout};
 
 const TEXT: &str = "你好 A.\n好你";
@@ -16,7 +17,7 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn writing_matches_pre_refactor_golden() {
-    let font = Font::from_json(&std::fs::read(fixture("font_fixture.json")).unwrap()).unwrap();
+    let font = Font::from_json(&std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../chixie-rs-core/tests/fixtures/font_fixture.json")).unwrap()).unwrap();
     // Same knobs as `chixie write --scale 3` (origin defaults 0,24; zero not applied here).
     let p = PageParams { mm_per_unit: 3.0, origin: (0.0, 24.0), ..Default::default() };
     let out = emit_document(&layout(TEXT, &font, &p), &DeviceProfile::default());
@@ -38,7 +39,7 @@ fn styled_output_is_stable() {
     use chixie_rs_core::deformation::Deformation;
     use chixie_rs_core::handwriting::HandwritingStyle;
 
-    let font = Font::from_json(&std::fs::read(fixture("font_fixture.json")).unwrap()).unwrap();
+    let font = Font::from_json(&std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../chixie-rs-core/tests/fixtures/font_fixture.json")).unwrap()).unwrap();
     let p = PageParams {
         mm_per_unit: 1.0,
         origin: (0.0, 0.0),

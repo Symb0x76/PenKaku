@@ -32,6 +32,8 @@ pub struct JobState {
     pub paused: bool,
     /// Waiting for the user to put sheet `n` (0-based) in place.
     pub awaiting: Option<usize>,
+    /// 多色绘制: waiting for the user to put in this pen.
+    pub pen: Option<chixie_rs_core::profile::Rgb>,
     /// The link dropped; the actor is on reconnect attempt `n`.
     pub reconnecting: Option<u32>,
     /// Back after a drop, waiting for 继续书写: resume line, and whether the board rebooted.
@@ -51,6 +53,8 @@ pub enum Notice {
     Warn(String),
     Error(String),
     AwaitingSheet(usize),
+    /// 换笔提示: put in this pen.
+    AwaitingPen(chixie_rs_core::profile::Rgb),
     /// The board entered an alarm: toast with a 解锁 action.
     Alarm(String),
 }
@@ -196,7 +200,7 @@ impl DevicePanel {
     }
     pub fn run(&mut self, job: Job, cx: &mut Context<Self>) {
         let (page, pages) = (job.first_page, job.first_page + job.pages.len());
-        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, awaiting: None, reconnecting: None, recovered: None });
+        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, awaiting: None, pen: None, reconnecting: None, recovered: None });
         self.handle.send(Command::Run(job));
         cx.notify();
     }
@@ -226,7 +230,7 @@ impl DevicePanel {
     }
     pub fn next_sheet(&mut self, cx: &mut Context<Self>) {
         if let Some(j) = &mut self.job {
-            j.awaiting = None;
+            (j.awaiting, j.pen) = (None, None);
         }
         self.handle.send(Command::NextSheet);
         cx.notify();
@@ -327,6 +331,12 @@ impl DevicePanel {
                     j.awaiting = Some(next);
                 }
                 Notice::AwaitingSheet(next)
+            }
+            Event::AwaitingPen { colour, .. } => {
+                if let Some(j) = &mut self.job {
+                    j.pen = Some(colour);
+                }
+                Notice::AwaitingPen(colour)
             }
             Event::JobEnded { outcome, page, line } => {
                 self.job = None;
@@ -484,6 +494,7 @@ impl DevicePanel {
             (_, Some((_, true)), _) => "控制板重启过：请把笔移回纸张原点，点「设为原点」后继续".into(),
             (_, Some((line, false)), _) => format!("已重新连接：将从第 {} 页第 {line} 行附近继续", j.page + 1),
             (_, _, Some(n)) => format!("等待换纸：第 {} 页", n + 1),
+            _ if j.pen.is_some() => format!("等待换笔：{}", j.pen.map(chixie_rs_core::profile::colour_name).unwrap_or_default()),
             _ => format!("第 {}/{} 页 · {}/{} 行 · {pct:.0}%{}", j.page + 1, j.pages, j.done, j.total, if j.paused { " · 已暂停" } else { "" }),
         };
         let interrupted = j.reconnecting.is_some() || j.recovered.is_some();
@@ -504,7 +515,10 @@ impl DevicePanel {
                     .when(j.awaiting.is_some() && !interrupted, |el| {
                         el.child(Button::new("next-sheet").small().primary().label("已换纸，继续").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.next_sheet(cx))))
                     })
-                    .when(j.awaiting.is_none() && !interrupted, |el| {
+                    .when(j.pen.is_some() && !interrupted, |el| {
+                        el.child(Button::new("next-pen").small().primary().label("换笔完成").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.next_sheet(cx))))
+                    })
+                    .when(j.awaiting.is_none() && j.pen.is_none() && !interrupted, |el| {
                         el.child(Button::new("pause").small().label(if j.paused { "继续" } else { "暂停" }).on_click(cx.listener(
                             |t, _: &ClickEvent, _w, cx| t.toggle_pause(cx),
                         )))

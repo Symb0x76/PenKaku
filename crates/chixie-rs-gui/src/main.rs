@@ -229,7 +229,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             let d = app.read(cx).doc.read(cx);
             let doc = d.document();
             let export = std::env::temp_dir().join("chixie-autotest.gcode");
-            let files = file_ops::export_files(&doc, &st.settings.device.profile, &export).map(|f| f.len()).unwrap_or(0);
+            let files = file_ops::export_files(&app.read(cx).written_pages(cx), &st.settings.device.profile, &export).map(|f| f.len()).unwrap_or(0);
             println!(
                 "AUTOTEST user={:?} active_font={:?} {} chars={} caret={} caret_page={} pages={} strokes={} missing={:?} bounds={:?} exported_files={}",
                 st.user.as_ref().map(|u| u.name.clone()),
@@ -287,12 +287,8 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let connected = cx.update(|cx| device.read(cx).connected.clone());
         cx.update(|cx| {
             let profile = cx.global::<AppState>().settings.device.profile.clone();
-            let codes: Vec<_> = app.read(cx).doc.read(cx).document().pages.iter().map(|p| chixie_rs_core::gcode::emit_mapped(p, &profile)).collect();
-            let job = chixie_rs_device::device::Job {
-                pages: codes.iter().map(|c| c.text.clone()).collect(),
-                maps: codes.into_iter().map(|c| c.stroke_lines).collect(),
-                ..Default::default()
-            };
+            let codes: Vec<_> = app.read(cx).written_pages(cx).iter().map(|w| chixie_rs_output::emit_written(w, &profile)).collect();
+            let job = app::job_of(0, codes);
             device.update(cx, |d, cx| d.run(job, cx));
         });
         let (mut sheet_prompts, mut recoveries) = (0, 0);
@@ -397,7 +393,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             let machine = device.read(cx).params.read(cx).machine.clone();
             let st = cx.global::<AppState>();
             let doc = app.read(cx).doc.read(cx).document();
-            let g = chixie_rs_core::gcode::emit(&doc.pages[0], &st.settings.device.profile);
+            let g = chixie_rs_output::emit(&doc.pages[0], &st.settings.device.profile);
             println!(
                 "AUTOTEST_PARAMS travel={:?} max_feed={:?} dwell={} feed5000={} pen_down_z2_5={}",
                 machine.as_ref().and_then(|m| m.travel),
@@ -432,7 +428,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 let st = cx.global::<AppState>();
                 let doc = app.read(cx).doc.read(cx).document();
                 let profile = &st.settings.device.profile;
-                let gcode: String = doc.pages.iter().map(|p| chixie_rs_core::gcode::emit(p, profile)).collect();
+                let gcode: String = doc.pages.iter().map(|p| chixie_rs_output::emit(p, profile)).collect();
                 let guides_in_gcode = doc.pages[0].guides.iter().any(|g| gcode.contains(&format!("X{:.3} Y{:.3}", g.a.0, g.a.1)));
                 println!(
                     "AUTOTEST_TEMPLATE name={name:?} active={:?} paper={:?} pages={} lines_p0={} guides_p0={} strokes={} guides_in_gcode={guides_in_gcode}",
@@ -491,12 +487,48 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let route_ok = cx.update(|cx| {
             let d = app.read(cx).doc.read(cx).document();
             let mut prof = cx.global::<AppState>().settings.device.profile.clone();
-            let plain = d.pages.first().map(|p| chixie_rs_core::gcode::emit(p, &prof).lines().count()).unwrap_or(0);
+            let plain = d.pages.first().map(|p| chixie_rs_output::emit(p, &prof).lines().count()).unwrap_or(0);
             prof.route = chixie_rs_core::path::RouteImprove { mode: chixie_rs_core::path::RouteMode::Simplify, value: 0.02 };
-            let simplified = d.pages.first().map(|p| chixie_rs_core::gcode::emit(p, &prof).lines().count()).unwrap_or(0);
+            let simplified = d.pages.first().map(|p| chixie_rs_output::emit(p, &prof).lines().count()).unwrap_or(0);
             plain > 0 && simplified <= plain
         });
         println!("AUTOTEST_EFFECTS tuned={tuned} undo={undone} route={route_ok}");
+        // Output: the selected character in red → two pen runs with 多色绘制; 弓字型 reverses the
+        // second row (ruled paper: ChiXie3 leaves 作文格 rows alone); 旋转180° mirrors about the
+        // frame centre. Settings and text are put back.
+        cx.update(|cx| app.update(cx, |a, cx| a.apply_template(Some("信纸 22 行".to_string()), cx)));
+        cx.background_executor().timer(pause(400)).await;
+        cx.update(|cx| app.read(cx).doc.clone().update(cx, |d, cx| d.set_colour(Some([255, 0, 0]), cx)));
+        cx.background_executor().timer(pause(300)).await;
+        let saved = cx.update(|cx| cx.global::<AppState>().settings.clone());
+        let output = cx.update(|cx| {
+            let st = cx.global_mut::<AppState>();
+            st.settings.page.multicolour = true;
+            let a = app.read(cx);
+            let layout = a.doc.read(cx).document();
+            let pens = a.written_pages(cx).first().map_or(0, |w| w.pens.len());
+            let st = cx.global_mut::<AppState>();
+            (st.settings.page.multicolour, st.settings.device.profile.path_plan) = (false, chixie_rs_core::profile::PathPlan::Serpentine);
+            // Row 2 of page 0 (the second line with ink): written right to left.
+            let w = app.read(cx).written_pages(cx).remove(0).page;
+            let mut rows: Vec<usize> = layout.pages[0].stroke_chars.iter().map(|&c| layout.boxes[c].line).collect();
+            rows.dedup();
+            let row = rows.get(1).copied();
+            let inked: Vec<usize> = row.map(|r| layout.pages[0].stroke_chars.iter().copied().filter(|&c| layout.boxes[c].line == r).collect()).unwrap_or_default();
+            let mut order: Vec<usize> = w.stroke_chars.iter().copied().filter(|c| inked.contains(c)).collect();
+            order.dedup();
+            let serpentine = order.len() > 1 && order.windows(2).all(|p| p[0] > p[1]);
+            let st = cx.global_mut::<AppState>();
+            (st.settings.device.profile.path_plan, st.settings.page.rotation) = (chixie_rs_core::profile::PathPlan::Raster, chixie_rs_core::profile::PageRotation::All180);
+            let (fw, fh) = cx.global::<AppState>().settings.page.writable();
+            let turned = app.read(cx).written_pages(cx).remove(0).page;
+            let (a0, b0) = (layout.pages[0].strokes[0][0], turned.strokes[0][0]);
+            let rotated = (b0.0 - (fw - a0.0)).abs() < 1e-3 && (b0.1 - (-fh - a0.1)).abs() < 1e-3;
+            (pens, serpentine, rotated)
+        });
+        cx.update(|cx| cx.global_mut::<AppState>().settings = saved);
+        dispatch(cx, vec![Box::new(doc_view::Undo)]);
+        println!("AUTOTEST_OUTPUT pens={} serpentine={} rotated={}", output.0, output.1, output.2);
         // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
         // 英文字体 role, and survives export + import.
         use chixie_rs_core::font::svg::{self, FontMeta, FontSource};

@@ -18,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chixie_rs_core::gcode::DeviceProfile;
+use chixie_rs_core::profile::{BLACK, DeviceProfile, Rgb, colour_name};
 use crate::grbl::{self, Control, GrblStatus, MachineSettings, StreamEvent, realtime};
 use crate::transport::{self, Link};
 use chixie_rs_core::{Error, Result};
@@ -57,6 +57,9 @@ pub struct Job {
     /// Resume map per page: line index of each stroke's travel `G0` (`gcode::PageCode::
     /// stroke_lines`). Missing or empty → resume falls back to [`resume_point`].
     pub maps: Vec<Vec<usize>>,
+    /// 多色绘制 per page: (line, colour) where each colour run starts (`PageCode::pens`). The
+    /// actor pauses there with `AwaitingPen` unless that pen is already in the holder.
+    pub pens: Vec<Vec<(usize, Rgb)>>,
 }
 
 #[derive(Debug)]
@@ -76,7 +79,7 @@ pub enum Command {
     /// Read the machine's `$$` settings; answered with `Event::Machine`.
     QueryMachine,
     Run(Job),
-    /// Next sheet is in place; continue after `AwaitingSheet`.
+    /// Next sheet (or pen) is in place; continue after `AwaitingSheet` / `AwaitingPen`.
     NextSheet,
     /// After `Event::Recovered`: continue the interrupted job.
     ResumeJob,
@@ -109,6 +112,8 @@ pub enum Event {
     Progress { page: usize, pages: usize, done: usize, total: usize },
     /// Page `next` (0-based) is ready; swap the sheet, then send `NextSheet`.
     AwaitingSheet { next: usize },
+    /// 换笔提示: the board is idle, pen up; put in the `colour` pen, then send `NextSheet`.
+    AwaitingPen { page: usize, colour: Rgb, name: String },
     JobEnded { outcome: JobOutcome, page: usize, line: usize },
     Error(String),
     /// `$$` settings (reply to `Command::QueryMachine`).
@@ -289,7 +294,7 @@ pub fn spawn(opener: Opener) -> (DeviceHandle, async_channel::Receiver<Event>, J
     let (tx, rx) = mpsc::channel();
     let (ev_tx, ev_rx) = async_channel::unbounded();
     let ctl = Arc::new(Control::default());
-    let actor = Actor { opener, rx, ev: ev_tx, ctl: ctl.clone(), link: None, profile: DeviceProfile::default(), target: None, last_mpos: None, last_wco: [0.0; 3], last_at: None, quit: false };
+    let actor = Actor { opener, rx, ev: ev_tx, ctl: ctl.clone(), link: None, profile: DeviceProfile::default(), target: None, last_mpos: None, last_wco: [0.0; 3], last_at: None, pen_held: BLACK, quit: false };
     let join = std::thread::Builder::new()
         .name("chixie-device".into())
         .spawn(move || actor.run())
@@ -312,6 +317,8 @@ struct Actor {
     last_wco: [f32; 3],
     /// Last work XY seen during a job (resume: where the head was).
     last_at: Option<(f32, f32)>,
+    /// 多色绘制: the pen in the holder (black at job start).
+    pen_held: Rgb,
     /// Shutdown arrived while a job was recovering.
     quit: bool,
 }
@@ -451,6 +458,7 @@ impl Actor {
         while let Ok(Command::Stop | Command::NextSheet | Command::ResumeJob) = self.rx.try_recv() {}
         self.last_mpos = None;
         self.last_at = None;
+        self.pen_held = BLACK;
         self.run_pages(&job, 0, None);
     }
 
@@ -471,42 +479,41 @@ impl Actor {
             let lines: Vec<String> = job.pages[i].lines().filter_map(grbl::clean_line).collect();
             let total = lines.len();
             // A resumed page restates absolute mode (custom pen-up commands may not carry G90).
-            let (skip, prelude): (usize, &[&str]) = match resume {
+            let (skip, mut prelude): (usize, &[&str]) = match resume {
                 Some(s) if i == from => (s.min(total), &["G90"]),
                 _ => (0, &[]),
             };
-            let mut acked = skip;
-            let mut mpos = None;
-            let (mut wco, mut at) = (self.last_wco, self.last_at);
-            let ev = self.ev.clone();
-            let feed = prelude.iter().copied().chain(lines[skip..].iter().map(String::as_str));
-            let link = self.link.as_mut().expect("checked by require_link").as_mut();
-            let r = grbl::stream(link, feed, &self.ctl, |e| {
-                let out = match e {
-                    StreamEvent::Progress { done, .. } => {
-                        acked = (skip + done).saturating_sub(prelude.len()).max(skip);
-                        Event::Progress { page, pages, done: acked, total }
+            // 多色绘制: pen stops at or after the start line (the map holds only if cleaning
+            // dropped no line, like the resume map).
+            let stops: Vec<(usize, Rgb)> = match job.pens.get(i) {
+                Some(p) if job.pages[i].lines().count() == total => p.iter().copied().filter(|s| s.0 >= skip && s.0 < total).collect(),
+                _ => Vec::new(),
+            };
+            let mut start = skip;
+            // The page end closes the last segment (no colour, no pause).
+            for (line, colour) in stops.into_iter().map(|(l, c)| (l, Some(c))).chain([(total, None)]) {
+                let change = colour.filter(|&c| c != self.pen_held);
+                if line < total && change.is_none() {
+                    continue;
+                }
+                // Before a pen change the board must be idle: `G4 P0` is acknowledged only once
+                // the planner has run empty.
+                let acked = match self.stream_range(page, pages, total, &lines[start..line], start, prelude, change.is_some()) {
+                    Ok(a) => a,
+                    Err((acked, Error::Cancelled)) => return self.end_stopped(page, acked),
+                    Err((acked, e @ (Error::Io(_) | Error::Serial(_)))) => return self.recover(job, i, acked, false, e),
+                    Err((acked, e)) => {
+                        return self.emit(Event::JobEnded { outcome: JobOutcome::Failed(describe(&e)), page, line: acked + 1 });
                     }
-                    StreamEvent::Status(st) => {
-                        mpos = st.mpos.or(mpos);
-                        wco = st.wco.unwrap_or(wco);
-                        at = work_xy(&st, wco).or(at);
-                        Event::Status(st)
-                    }
-                    StreamEvent::Message(line) => Event::Log { dir: Dir::Rx, line },
-                    StreamEvent::Resynced { lost } => Event::Resynced { page, lost },
                 };
-                let _ = ev.send_blocking(out);
-            });
-            self.last_mpos = mpos.or(self.last_mpos);
-            (self.last_wco, self.last_at) = (wco, at);
-            match r {
-                Ok(()) => {}
-                Err(Error::Cancelled) => return self.end_stopped(page, acked),
-                Err(e @ (Error::Io(_) | Error::Serial(_))) => return self.recover(job, i, acked, false, e),
-                Err(e) => {
-                    let line = acked + 1;
-                    return self.emit(Event::JobEnded { outcome: JobOutcome::Failed(describe(&e)), page, line });
+                (start, prelude) = (line, &[]);
+                if let Some(colour) = change {
+                    self.emit(Event::AwaitingPen { page, colour, name: colour_name(colour) });
+                    match self.wait_for_sheet() {
+                        Ok(true) => self.pen_held = colour,
+                        Ok(false) => return self.end_stopped(page, acked),
+                        Err(e) => return self.recover(job, i, acked, false, e),
+                    }
                 }
             }
         }
@@ -516,6 +523,39 @@ impl Actor {
             return self.fail(e, Some(last), None);
         }
         self.emit(Event::JobEnded { outcome: JobOutcome::Done, page: last, line: 0 });
+    }
+
+    /// Stream `lines` (page lines `base..` of `page_lines`) after `prelude`, plus `G4 P0` when
+    /// `sync`. Returns the page line count acknowledged so far, also on error.
+    #[allow(clippy::too_many_arguments)]
+    fn stream_range(&mut self, page: usize, pages: usize, page_lines: usize, lines: &[String], base: usize, prelude: &[&str], sync: bool) -> std::result::Result<usize, (usize, Error)> {
+        let end = base + lines.len();
+        let mut acked = base;
+        let mut mpos = None;
+        let (mut wco, mut at) = (self.last_wco, self.last_at);
+        let ev = self.ev.clone();
+        let feed = prelude.iter().copied().chain(lines.iter().map(String::as_str)).chain(sync.then_some("G4 P0"));
+        let link = self.link.as_mut().expect("checked by require_link").as_mut();
+        let r = grbl::stream(link, feed, &self.ctl, |e| {
+            let out = match e {
+                StreamEvent::Progress { done, .. } => {
+                    acked = (base + done).saturating_sub(prelude.len()).clamp(base, end);
+                    Event::Progress { page, pages, done: acked, total: page_lines }
+                }
+                StreamEvent::Status(st) => {
+                    mpos = st.mpos.or(mpos);
+                    wco = st.wco.unwrap_or(wco);
+                    at = work_xy(&st, wco).or(at);
+                    Event::Status(st)
+                }
+                StreamEvent::Message(line) => Event::Log { dir: Dir::Rx, line },
+                StreamEvent::Resynced { lost } => Event::Resynced { page, lost },
+            };
+            let _ = ev.send_blocking(out);
+        });
+        self.last_mpos = mpos.or(self.last_mpos);
+        (self.last_wco, self.last_at) = (wco, at);
+        r.map(|()| acked).map_err(|e| (acked, e))
     }
 
     /// The link died mid-job (USB brown-out: the CH340 board drops and comes back, often on a
@@ -814,6 +854,34 @@ mod tests {
     }
 
     #[test]
+    fn two_colour_page_pauses_once_per_switch() {
+        const RED: Rgb = [255, 0, 0];
+        let (h, ev, fake) = start(Fake::default());
+        wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
+        // Black run (already in the holder: no pause), red from line 4, black again from line 7.
+        let pens = vec![vec![(0, BLACK), (4, RED), (7, BLACK)]];
+        h.send(Command::Run(Job { pages: vec![page(10)], pens, ..Default::default() }));
+        let pause = wait_for(&ev, |e| matches!(e, Event::AwaitingPen { .. }));
+        assert_eq!(pause, Event::AwaitingPen { page: 0, colour: RED, name: "红色".into() });
+        {
+            let f = fake.lock().unwrap();
+            // $I, lines 0..4, then the planner sync before the prompt.
+            assert_eq!(f.lines.len(), 1 + 4 + 1);
+            assert_eq!(f.lines.last().map(String::as_str), Some("G4 P0"));
+        }
+        h.send(Command::NextSheet);
+        assert!(matches!(wait_for(&ev, |e| matches!(e, Event::AwaitingPen { .. })), Event::AwaitingPen { colour: BLACK, .. }));
+        h.send(Command::NextSheet);
+        assert_eq!(wait_for(&ev, |e| matches!(e, Event::JobEnded { .. })), Event::JobEnded { outcome: JobOutcome::Done, page: 0, line: 0 });
+        let f = fake.lock().unwrap();
+        let body: Vec<&String> = f.lines.iter().filter(|l| l.starts_with("G1 X")).collect();
+        assert_eq!(body.len(), 10, "every line sent once");
+        assert_eq!(f.lines.iter().filter(|l| *l == "G4 P0").count(), 2);
+        drop(f);
+        h.send(Command::Shutdown);
+    }
+
+    #[test]
     fn stop_holds_resets_and_lifts_pen() {
         let (h, ev, fake) = start(Fake { status: "<Hold:0|MPos:0,0,0>".into(), ..Default::default() });
         wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
@@ -1033,7 +1101,7 @@ mod tests {
 
     #[test]
     fn end_position_controls_park() {
-        use chixie_rs_core::gcode::{AxisMap, DeviceProfile, EndPosition};
+        use chixie_rs_core::profile::{AxisMap, DeviceProfile, EndPosition};
         let cases = [
             (EndPosition::OriginLeft { mm: 20.0 }, AxisMap::default(), Some("G90G0 X-20Y0")),
             (EndPosition::OriginLeft { mm: 20.0 }, AxisMap { swap_xy: true, invert_x: false, invert_y: true }, Some("G90G0 X0Y20")),

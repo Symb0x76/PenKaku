@@ -972,6 +972,7 @@ version = "0.1.0"
 dependencies = [
  "chixie-rs-core",
  "chixie-rs-device",
+ "chixie-rs-output",
  "clap",
  "env_logger",
 ]
@@ -1008,6 +1009,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "chixie-rs-core",
+ "chixie-rs-output",
  "log",
  "reqwest",
  "serialport",
@@ -1018,6 +1020,7 @@ name = "chixie-rs-doc"
 version = "0.1.0"
 dependencies = [
  "chixie-rs-core",
+ "chixie-rs-output",
  "proptest",
  "quick-xml",
  "serde",
@@ -1033,12 +1036,21 @@ dependencies = [
  "chixie-rs-core",
  "chixie-rs-device",
  "chixie-rs-doc",
+ "chixie-rs-output",
  "env_logger",
  "gpui-kit",
  "image",
  "log",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "chixie-rs-output"
+version = "0.1.0"
+dependencies = [
+ "chixie-rs-core",
+ "serde",
 ]
 
 [[package]]

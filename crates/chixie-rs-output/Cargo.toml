@@ -1,0 +1,10 @@
+[package]
+name = "chixie-rs-output"
+description = "chixie-rs output pipeline: stroke order, page transforms, pen colours, G-code"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chixie-rs-core.workspace = true
+serde.workspace = true

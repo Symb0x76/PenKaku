@@ -1,4 +1,4 @@
-//! chixie-rs core: documents, layout, G-code, fonts, backend API and settings.
+//! chixie-rs core: documents, layout, device settings, fonts, backend API and settings.
 //! Protocol notes: `docs/protocol.md`.
 
 pub mod api;
@@ -10,10 +10,10 @@ pub mod credentials;
 pub mod deformation;
 pub mod font;
 pub mod font_store;
-pub mod gcode;
 pub mod handwriting;
 pub mod layout;
 pub mod path;
+pub mod profile;
 pub mod session;
 pub mod template;
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/chixie-rs-core", "crates/chixie-rs-device", "crates/chixie-rs-doc", "crates/chixie-rs-cli", "crates/chixie-rs-gui"]
+members = ["crates/chixie-rs-core", "crates/chixie-rs-device", "crates/chixie-rs-doc", "crates/chixie-rs-output", "crates/chixie-rs-cli", "crates/chixie-rs-gui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ rust-version = "1.98"
 chixie-rs-core = { path = "crates/chixie-rs-core" }
 chixie-rs-device = { path = "crates/chixie-rs-device" }
 chixie-rs-doc = { path = "crates/chixie-rs-doc" }
+chixie-rs-output = { path = "crates/chixie-rs-output" }
 aes = "0.8"
 base64 = "0.23.1"
 cbc = "0.1"
