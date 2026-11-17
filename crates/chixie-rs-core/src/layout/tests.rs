@@ -343,6 +343,18 @@ fn combined_chars_share_one_cell_squeezed() {
     assert!((st[1].0 - st[0].0 - 2.0 / 3.0).abs() < 1e-4);
 }
 
+#[cfg(feature = "segment")]
+#[test]
+fn keep_words_moves_a_word_to_the_next_row() {
+    let g = Glyph { advance: 2.0, strokes: vec![vec![(0.0, 0.0)]] };
+    let font = Font { glyphs: "。我们".chars().map(|c| (c, g.clone())).collect() };
+    let text = "。。。。我们";
+    let mut p = grid_params(false);
+    assert_eq!(line_texts(text, &layout(text, &font, &p)), ["。。。。我", "们"]);
+    p.grid_keep_words = true;
+    assert_eq!(line_texts(text, &layout(text, &font, &p)), ["。。。。", "我们"]);
+}
+
 #[test]
 fn half_space_is_half_a_space() {
     let font = Font::from_json(FIXTURE).unwrap();

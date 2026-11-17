@@ -14,6 +14,7 @@ use crate::handwriting::{HandwritingStyle, Jitter, SALT_DEFORM, is_cjk, rng_for}
 
 pub mod kinsoku;
 mod pen;
+mod segment;
 #[cfg(test)]
 pub(crate) mod legacy;
 #[cfg(test)]
@@ -242,6 +243,8 @@ pub struct PageParams {
     pub kinsoku: bool,
     /// Grid: two Latin letters share a cell like two digits do.
     pub grid_pair_letters: bool,
+    /// Grid: a word (jieba, feature `segment`) that would cross a row end starts the next row.
+    pub grid_keep_words: bool,
 }
 
 impl Default for PageParams {
@@ -258,6 +261,7 @@ impl Default for PageParams {
             ruling: Ruling::Free,
             kinsoku: false,
             grid_pair_letters: false,
+            grid_keep_words: false,
         }
     }
 }
@@ -354,6 +358,8 @@ pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
     let (mut fresh_line, mut fresh_paragraph) = (true, true);
     // Grid: closing marks hung past the row's last cell so far.
     let mut hung = 0u32;
+    // Grid with 作文格分词: where each word starting at a char ends.
+    let words = if grid.is_some() && p.grid_keep_words { segment::word_ends(chars) } else { Vec::new() };
     // Grid: the open shared cell (x, next slot, slots, squeezed 合并内容 run vs half-width pair).
     let mut shared: Option<(f32, usize, usize, bool)> = None;
     // Scales for a char in a shared cell's slot `w` mm wide: a 合并内容 run is squeezed across;
@@ -422,6 +428,14 @@ pub fn layout_flow(f: &Flow, font: &Font, p: &PageParams) -> Document {
                 pen.newline(i, i);
             } else if p.kinsoku && pen.col + 1 == cols && pen.col > 0 && kinsoku::is_opening(ch) && chars.get(i + 1).is_some_and(|&c| c != '\n') {
                 // An opening mark never takes a row's last cell; it starts the next row.
+                pen.newline(i, i);
+            }
+            // 作文格分词: a word that fits a row but not the rest of this one starts the next.
+            if let Some(&Some(end)) = words.get(i)
+                && pen.col > 0
+                && ((end - i) as u32) <= cols
+                && pen.col + (end - i) as u32 > cols
+            {
                 pen.newline(i, i);
             }
             hung = 0;
