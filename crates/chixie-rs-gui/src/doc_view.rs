@@ -271,7 +271,7 @@ impl DocView {
             None => (Arc::new(empty), false),
         };
         self.has_font = has_font;
-        self.layout = Arc::new(layout::layout_ids(self.doc.chars(), self.doc.ids(), &font, &params));
+        self.layout = Arc::new(layout::layout_doc(self.doc.chars(), self.doc.ids(), self.doc.document().paras(), &font, &params));
         cx.notify();
     }
 

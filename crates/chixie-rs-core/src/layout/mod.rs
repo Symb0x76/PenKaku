@@ -23,6 +23,27 @@ use pen::{Pen, draw_glyph};
 /// One pen-down polyline in machine mm.
 pub type Stroke = Vec<(f32, f32)>;
 
+/// Paragraph alignment. Justify stretches wrapped lines only; in a grid, centre and right move
+/// by whole cells and justify does nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Align {
+    #[default]
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+/// Paragraph formatting (one per `'\n'`-separated paragraph).
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Para {
+    pub align: Align,
+    /// First-line indent, mm (two cells in a grid); `None` = the handwriting default.
+    pub first_indent: Option<f32>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Page {
     pub strokes: Vec<Stroke>,
@@ -244,15 +265,31 @@ pub fn layout(text: &str, font: &Font, p: &PageParams) -> Document {
 /// With jitter and deformation off, every coordinate uses the original expressions (see module
 /// docs), so the output stays byte-identical to the pre-refactor pipeline.
 pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> Document {
+    layout_doc(chars, ids, &[], font, p)
+}
+
+/// [`layout_ids`] with paragraph formatting: `paras[k]` applies to the k-th `'\n'`-separated
+/// paragraph (missing entries are left-aligned with the default indent).
+pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &Font, p: &PageParams) -> Document {
     assert_eq!(chars.len(), ids.len(), "one id per character");
+    let para = |k: usize| paras.get(k).copied().unwrap_or_default();
+    let mut para_ix = 0;
     let s = p.mm_per_unit;
     let (ox, oy) = p.origin;
     let jitter_on = p.style.enabled;
     let deform_on = p.deformation.is_active();
     let mut jit = Jitter::new(&p.style);
 
+    let grid = match p.ruling {
+        Ruling::Grid { cols, cell, gap, .. } if p.page.is_some() => Some((cols.max(1), cell.0, gap.0)),
+        _ => None,
+    };
     let mut pen = Pen {
         p,
+        chars,
+        align: para(0).align,
+        line_stroke: 0,
+        pitch: grid.map(|(_, cw, cg)| cw + cg),
         doc: Document { origin: p.origin, ..Default::default() },
         page: Page::default(),
         page_ix: 0,
@@ -272,10 +309,6 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
     pen.rows = pen.rows_for(0);
     pen.enter_slot();
     pen.page_guides();
-    let grid = match p.ruling {
-        Ruling::Grid { cols, cell, gap, .. } if p.page.is_some() => Some((cols.max(1), cell.0, gap.0)),
-        _ => None,
-    };
     let mut prev: Option<char> = None;
     // Jitter: the next placed character starts a line (and maybe a paragraph).
     let (mut fresh_line, mut fresh_paragraph) = (true, true);
@@ -285,10 +318,15 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
         if i > 0 {
             pen.tag_strokes(i - 1);
         }
-        if jitter_on && fresh_line && ch != '\n' {
-            pen.cx = jit.line_start(id);
-            if fresh_paragraph && let Some(indent) = jit.indent(id) {
-                pen.cx += indent;
+        if fresh_line && ch != '\n' {
+            if jitter_on {
+                pen.cx = jit.line_start(id);
+            }
+            let indent = if fresh_paragraph { para(para_ix).first_indent.or_else(|| if jitter_on { jit.indent(id) } else { None }) } else { None };
+            match (indent, grid) {
+                (Some(_), Some((cols, ..))) => pen.col = 2.min(cols - 1),
+                (Some(w), None) => pen.cx += w,
+                (None, _) => {}
             }
             fresh_line = false;
             fresh_paragraph = false;
@@ -329,6 +367,8 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
             '\n' => {
                 pen.push_box(x0);
                 pen.newline(i, i + 1);
+                para_ix += 1;
+                pen.align = para(para_ix).align;
                 (fresh_line, fresh_paragraph) = (true, true);
                 prev = None;
                 continue;
@@ -395,8 +435,8 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &Font, p: &PageParams) -> D
         pen.push_box(x0);
         prev = Some(ch);
     }
-    pen.close_line(chars.len());
     pen.tag_strokes(chars.len().saturating_sub(1));
+    pen.close_line(chars.len(), false);
     let mut doc = pen.doc;
     doc.pages.push(pen.page);
     doc

@@ -20,24 +20,8 @@ pub struct Attrs {
     pub v_offset: Option<f32>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Align {
-    #[default]
-    Left,
-    Center,
-    Right,
-    Justify,
-}
-
-/// Paragraph formatting.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Para {
-    pub align: Align,
-    /// First-line indent, mm; `None` = the handwriting default.
-    pub first_indent: Option<f32>,
-}
+/// Paragraph formatting lives in core so layout reads it directly.
+pub use chixie_rs_core::layout::{Align, Para};
 
 /// One character as stored: the glyph, its stable id (keys the handwriting randomness) and its
 /// formatting.
@@ -176,7 +160,7 @@ impl Document {
         let gone = removed.iter().filter(|c| c.ch == '\n').count();
         let removed_paras = self.paras[p + 1..p + 1 + gone].to_vec();
         let born = inserted.iter().filter(|c| c.ch == '\n').count();
-        let inserted_paras = vec![self.paras[p].clone(); born];
+        let inserted_paras = vec![self.paras[p]; born];
         Command::Splice { at: range.start, removed, inserted, removed_paras, inserted_paras }
     }
 

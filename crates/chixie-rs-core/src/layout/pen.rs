@@ -1,11 +1,18 @@
 //! Line and page bookkeeping while laying out.
 
-use super::{Document, Guide, Page, PageBox, PageParams, Ruling, LineInfo, CharBox};
+use super::{Align, CharBox, Document, Guide, LineInfo, Page, PageBox, PageParams, Ruling};
 use crate::handwriting::{SALT_ROWS, rng_for};
 
 /// Pen state while laying out; owns the line/page bookkeeping.
 pub(super) struct Pen<'p> {
     pub(super) p: &'p PageParams,
+    pub(super) chars: &'p [char],
+    /// Alignment of the paragraph the current line belongs to.
+    pub(super) align: Align,
+    /// Index into `page.strokes` of the current line's first stroke.
+    pub(super) line_stroke: usize,
+    /// Grid cell pitch (mm): aligned grid lines move by whole cells.
+    pub(super) pitch: Option<f32>,
     pub(super) doc: Document,
     pub(super) page: Page,
     pub(super) page_ix: usize,
@@ -141,7 +148,52 @@ impl Pen<'_> {
         self.page_guides();
     }
 
-    pub(super) fn close_line(&mut self, end: usize) {
+    /// Shift the finished line for its paragraph's alignment. Boxes pushed since the line started
+    /// and strokes since `line_stroke` (all tagged by now) belong to this line. `wrapped`: the
+    /// line ended by wrapping (justify only stretches those).
+    fn align_line(&mut self, wrapped: bool) {
+        if self.align == Align::Left {
+            return;
+        }
+        let start = self.line_start;
+        let n = self.doc.boxes.len();
+        // Content ends at the last char that is not whitespace; trailing spaces hang.
+        let Some(last) = (start..n).rev().find(|&k| !self.chars[k].is_whitespace()) else {
+            return;
+        };
+        let left = self.p.origin.0 + self.line_x;
+        let right = left + self.line_w;
+        if !right.is_finite() {
+            return;
+        }
+        let (x0, x1) = (self.doc.boxes[start].x0, self.doc.boxes[last].x1);
+        let snap = |dx: f32| match self.pitch {
+            Some(p) => (dx / p).floor() * p,
+            None => dx,
+        };
+        let (base, per_gap) = match self.align {
+            Align::Left => return,
+            Align::Center => (snap((left + right - x0 - x1) / 2.0), 0.0),
+            Align::Right => (snap(right - x1), 0.0),
+            Align::Justify if wrapped && last > start && self.pitch.is_none() => (0.0, (right - x1) / (last - start) as f32),
+            Align::Justify => return,
+        };
+        if base <= 0.0 && per_gap <= 0.0 {
+            return;
+        }
+        let shift = |k: usize| base + per_gap * (k.min(last) - start) as f32;
+        for (k, b) in self.doc.boxes.iter_mut().enumerate().skip(start) {
+            let dx = shift(k);
+            (b.x0, b.x1) = (b.x0 + dx, b.x1 + dx);
+        }
+        for (s, &c) in self.page.strokes[self.line_stroke..].iter_mut().zip(&self.page.stroke_chars[self.line_stroke..]) {
+            let dx = shift(c);
+            s.iter_mut().for_each(|pt| pt.0 += dx);
+        }
+    }
+
+    pub(super) fn close_line(&mut self, end: usize, wrapped: bool) {
+        self.align_line(wrapped);
         let (_, oy) = self.p.origin;
         self.doc.lines.push(LineInfo {
             page: self.page_ix,
@@ -154,7 +206,7 @@ impl Pen<'_> {
 
     /// Finish the line at caret index `end`; the next line starts at char `next`.
     pub(super) fn newline(&mut self, end: usize, next: usize) {
-        self.close_line(end);
+        self.close_line(end, next == end);
         self.cx = 0.0;
         self.col = 0;
         match self.p.ruling {
@@ -181,6 +233,7 @@ impl Pen<'_> {
         }
         self.enter_slot();
         self.line_start = next;
+        self.line_stroke = self.page.strokes.len();
     }
 
     /// Attribute every untagged stroke on the current page to character `i`.

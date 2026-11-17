@@ -247,3 +247,88 @@ fn wraps_at_width_and_breaks_pages() {
         vec![vec![(0.0, 0.0), (4.0, 0.0), (0.0, -10.0), (4.0, -10.0)], vec![(0.0, 0.0)]]
     );
 }
+
+fn paras(v: &[(Align, Option<f32>)]) -> Vec<Para> {
+    v.iter().map(|&(align, first_indent)| Para { align, first_indent }).collect()
+}
+
+fn lay(text: &str, ps: &[Para], p: &PageParams) -> Document {
+    let chars: Vec<char> = text.chars().collect();
+    let ids: Vec<u64> = (0..chars.len() as u64).collect();
+    layout_doc(&chars, &ids, ps, &dot_font(), p)
+}
+
+fn starts(doc: &Document) -> Vec<f32> {
+    doc.pages[0].strokes.iter().map(|s| s[0].0).collect()
+}
+
+fn page(width: f32) -> PageParams {
+    PageParams { page: Some(PageBox { width, height: 100.0 }), ..Default::default() }
+}
+
+#[test]
+fn right_and_centre_shift_the_line() {
+    let right = lay("..", &paras(&[(Align::Right, None)]), &page(10.0));
+    assert_eq!(starts(&right), vec![6.0, 8.0]);
+    assert_eq!(right.boxes[1].x1, 10.0);
+    let centre = lay("..", &paras(&[(Align::Center, None)]), &page(10.0));
+    assert_eq!(starts(&centre), vec![3.0, 5.0]);
+    // Trailing spaces hang past the margin instead of pushing the text left.
+    let spaced = lay(". ", &paras(&[(Align::Right, None)]), &PageParams { space_width: 1.0, ..page(10.0) });
+    assert_eq!(starts(&spaced), vec![8.0]);
+}
+
+#[test]
+fn justify_stretches_wrapped_lines_only() {
+    // Four dots fit in 9 mm (8 mm used), the fifth wraps; the last line stays left.
+    let doc = lay(".....", &paras(&[(Align::Justify, None)]), &page(9.0));
+    let xs = starts(&doc);
+    let want = [0.0, 2.0 + 1.0 / 3.0, 4.0 + 2.0 / 3.0, 7.0, 0.0];
+    assert!(xs.iter().zip(want).all(|(x, w)| (x - w).abs() < 1e-4), "{xs:?}");
+    assert!((doc.boxes[3].x1 - 9.0).abs() < 1e-4);
+    // A line ended by '\n' is not stretched.
+    let doc = lay("..\n.", &paras(&[(Align::Justify, None)]), &page(9.0));
+    assert_eq!(starts(&doc), vec![0.0, 2.0, 0.0]);
+}
+
+#[test]
+fn alignment_is_per_paragraph() {
+    let doc = lay(".\n.\n.", &paras(&[(Align::Right, None), (Align::Left, None), (Align::Center, None)]), &page(10.0));
+    assert_eq!(starts(&doc), vec![8.0, 0.0, 4.0]);
+}
+
+#[test]
+fn right_aligned_jittered_line_ends_at_the_margin() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let mut p = jitter_params(9);
+    p.page = Some(PageBox { width: 100.0, height: 100.0 });
+    let chars: Vec<char> = "你好你好".chars().collect();
+    let ids: Vec<u64> = (0..4).collect();
+    let doc = layout_doc(&chars, &ids, &paras(&[(Align::Right, None)]), &font, &p);
+    assert!((doc.boxes[3].x1 - 100.0).abs() < 1e-3, "{}", doc.boxes[3].x1);
+    let max_x = doc.pages[0].strokes.iter().flatten().map(|pt| pt.0).fold(f32::MIN, f32::max);
+    assert!(max_x <= 100.0 && max_x > 100.0 - 3.0, "{max_x}");
+}
+
+#[test]
+fn explicit_indent_applies_to_the_first_line_only() {
+    // Jitter off: 5 mm indent on paragraph 0; width 8 → one dot fits after the indent.
+    let doc = lay("..\n.", &paras(&[(Align::Left, Some(5.0)), (Align::Left, None)]), &page(8.0));
+    assert_eq!(starts(&doc), vec![5.0, 0.0, 0.0]);
+}
+
+#[test]
+fn grid_aligns_by_whole_cells_and_indents_two_cells() {
+    let grid = |align, indent| {
+        let p = PageParams {
+            page: Some(PageBox { width: 25.0, height: 100.0 }),
+            ruling: Ruling::Grid { rows: 4, cols: 5, cell: (4.0, 4.0), gap: (1.0, 1.0) },
+            ..Default::default()
+        };
+        lay(".", &paras(&[(align, indent)]), &p)
+    };
+    assert_eq!(grid(Align::Right, None).boxes[0].x0, 20.0);
+    assert_eq!(grid(Align::Center, None).boxes[0].x0, 10.0);
+    assert_eq!(grid(Align::Justify, None).boxes[0].x0, 0.0);
+    assert_eq!(grid(Align::Left, Some(16.0)).boxes[0].x0, 10.0);
+}

@@ -288,7 +288,7 @@ impl EditDoc {
         let paras = self.doc.paras()[a..=b]
             .iter()
             .map(|p| {
-                let mut p = p.clone();
+                let mut p = *p;
                 f(&mut p);
                 p
             })
