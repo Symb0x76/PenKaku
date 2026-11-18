@@ -11,3 +11,9 @@ serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 calamine = "0.38"
+base64.workspace = true
+quick-xml.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+image.workspace = true

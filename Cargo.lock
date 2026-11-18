@@ -1120,11 +1120,15 @@ dependencies = [
 name = "chixie-rs-template"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "calamine",
  "chixie-rs-core",
+ "image",
+ "quick-xml 0.41.0",
  "serde",
  "thiserror 2.0.21",
  "toml 1.2.0+spec-1.1.0",
+ "zip",
 ]
 
 [[package]]
