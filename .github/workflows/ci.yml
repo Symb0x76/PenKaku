@@ -64,6 +64,7 @@ jobs:
           grep -q 'AUTOTEST_OUTPUT pens=2 serpentine=true rotated=true' autotest.log
           grep -q 'AUTOTEST_TABLE tab=true cells=4 overflow_fixed=true batch_pages=30 docx=true' autotest.log
           grep -qF 'AUTOTEST_DETECT pdf_cells=Some([10]) photo_cells=Some([14]) background=true' autotest.log
+          grep -q 'AUTOTEST_LIBRARY roundtrip=true background=true gallery=true' autotest.log
 
       - name: Upload build
         uses: actions/upload-artifact@v4
