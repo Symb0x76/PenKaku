@@ -22,6 +22,28 @@ pub struct TablePage {
     /// Excel导入配置: the sheet range this page reads on import.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excel_range: Option<CellRange>,
+    /// The scanned / photographed form this page was made from, shown under the table in the
+    /// editor (never written) and used by 内边距识别.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<Background>,
+}
+
+/// A page background image: a PNG in the template assets folder, placed on the paper (mm).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Background {
+    /// File name inside the template assets folder.
+    pub file: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    /// 透明度 (0 = hidden, 1 = opaque).
+    #[serde(default = "default_opacity")]
+    pub opacity: f32,
+}
+
+fn default_opacity() -> f32 {
+    0.5
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

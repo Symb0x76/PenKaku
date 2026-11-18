@@ -54,6 +54,24 @@ pub fn detect(bytes: &[u8]) -> Result<Vec<DetectedPage>, String> {
     Ok(vec![DetectedPage::from_image(&img, None, None)])
 }
 
+/// 内边距识别: how far (px) the first ink lies from the left edge of a cell's inside
+/// `(x0, y0, x1, y1)` in `img`. The cell's own border lines (within `border` px of the edges) and
+/// isolated specks are ignored; `None` when the cell is empty.
+pub fn left_padding(img: &GrayImage, rect: (u32, u32, u32, u32), border: u32) -> Option<u32> {
+    let (x0, y0, x1, y1) = rect;
+    let (x1, y1) = (x1.min(img.width()), y1.min(img.height()));
+    let (ya, yb) = (y0 + border, y1.saturating_sub(border));
+    if x0 + border >= x1 || ya >= yb {
+        return None;
+    }
+    // Paper level: the cell's brightest tenth.
+    let mut px: Vec<u8> = (ya..yb).flat_map(|y| (x0 + border..x1.saturating_sub(border)).map(move |x| (x, y))).map(|(x, y)| img.get_pixel(x, y).0[0]).collect();
+    px.sort_unstable();
+    let paper = px[px.len() * 9 / 10] as i32;
+    let dark = |x: u32, y: u32| (img.get_pixel(x, y).0[0] as i32) < paper - 70;
+    (x0 + border..x1.saturating_sub(border)).find(|&x| (ya..yb).filter(|&y| dark(x, y)).count() >= 2).map(|x| x - x0)
+}
+
 /// ChiXie3's message for pages where no table was found (1-based page numbers).
 pub fn failed_pages_message(pages: &[DetectedPage]) -> Option<String> {
     let bad: Vec<String> = pages.iter().enumerate().filter(|(_, p)| p.tables.is_empty()).map(|(k, _)| (k + 1).to_string()).collect();

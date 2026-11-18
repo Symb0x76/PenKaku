@@ -1089,6 +1089,7 @@ dependencies = [
  "chixie-rs-core",
  "chixie-rs-device",
  "chixie-rs-doc",
+ "chixie-rs-import",
  "chixie-rs-output",
  "chixie-rs-template",
  "env_logger",

@@ -64,6 +64,25 @@ fn ten_forms() {
 }
 
 #[test]
+fn left_padding_finds_the_first_ink() {
+    // A 100 × 40 px cell with its border, a speck, and text starting 23 px in.
+    let mut img = image::GrayImage::from_pixel(100, 40, image::Luma([240]));
+    for x in 0..100 {
+        img.put_pixel(x, 0, image::Luma([10]));
+        img.put_pixel(x, 39, image::Luma([10]));
+    }
+    for y in 0..40 {
+        img.put_pixel(0, y, image::Luma([10]));
+    }
+    img.put_pixel(12, 20, image::Luma([10]));
+    for y in 15..25 {
+        img.put_pixel(23, y, image::Luma([30]));
+    }
+    assert_eq!(chixie_rs_import::left_padding(&img, (0, 0, 100, 40), 3), Some(23));
+    assert_eq!(chixie_rs_import::left_padding(&image::GrayImage::from_pixel(50, 20, image::Luma([250])), (0, 0, 50, 20), 2), None);
+}
+
+#[test]
 fn real_forms_dropped_in() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/forms-real");
     let Ok(entries) = std::fs::read_dir(&dir) else { return };

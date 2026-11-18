@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 chixie-rs-core = { workspace = true, features = ["segment"] }
 chixie-rs-template.workspace = true
+chixie-rs-import.workspace = true
 chixie-rs-device.workspace = true
 chixie-rs-doc.workspace = true
 chixie-rs-output.workspace = true
