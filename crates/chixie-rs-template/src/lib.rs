@@ -7,6 +7,7 @@ pub mod svg;
 pub mod table;
 pub mod template;
 pub mod xlsx;
+pub mod xlsx_template;
 
 pub use table::TableTemplate;
 pub use template::{Template, TemplateError, TemplateKind, TemplateStore};
