@@ -253,3 +253,12 @@
     rule), 1 mm padding + ChiXie3's random 首字不对齐; test `table_cells_match_chixie3_capture`. The capture left a
     template 新建表格 in BOSS's ChiXie3.
   - Open: 绘制表格 drag, 同型 sync, 异栏同型, data-source prompt on new pages.
+- **M7a merged 2026-11-18** (`bcbc50f`).
+- **M7b in progress (2026-11-18), branch `m7b-detector`:**
+  - New crate `chixie-rs-import`: `grid.rs` (segments → tables, weighted line positions, lines drawn along no span
+    dropped), `pdf.rs` (lopdf 0.47 content walk, scans), `raster.rs` (Sauvola, components, corner refine by line
+    fits, homography unwarp, ink runs; table frame vs sheet edge), `synth.rs` (test forms: PDFs, rendered photos /
+    scans), `detect()`, `left_padding()`. Tests: `tests/forms.rs` (10 forms) + git-ignored `tests/forms-real/`.
+  - CLI `detect-table [--json]`. GUI: `templates_view/import.rs` (import dialog, drop, backgrounds in
+    `template_assets/`, 内边距识别, 透明度); `TablePage.background`. Autotest `AUTOTEST_DETECT` (CI uses grep -F).
+  - Open: real forms from BOSS (photos with strong perspective are the risk), thumbnails, 截图生成, 占位符识别.

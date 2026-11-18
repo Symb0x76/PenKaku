@@ -179,7 +179,7 @@ impl TemplatesView {
 
     /// Put the detected pages into the form from the current page on: the first table's width
     /// becomes `width` mm with its corner at (`x`, `y`); everything else keeps its proportions.
-    fn apply_import(&mut self, pages: &[DetectedPage], width: f32, x: f32, y: f32, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn apply_import(&mut self, pages: &[DetectedPage], width: f32, x: f32, y: f32, window: &mut Window, cx: &mut Context<Self>) {
         let Some(t0) = pages.iter().find_map(|p| p.tables.first().cloned()) else { return };
         let k = width / t0.width().max(1e-3);
         let dir = assets_dir(cx);
@@ -218,6 +218,20 @@ impl TemplatesView {
         }
         self.tbl.sel.clear();
         *self.tbl.bg_cache.borrow_mut() = None;
+    }
+
+    /// Autotest: move on to a new blank page (the next import goes there).
+    pub(crate) fn add_page_for_test(&mut self, cx: &mut Context<Self>) {
+        self.edit_tt(cx, |tt| tt.add_page());
+        self.tbl.page = self.draft_tables().0.len().saturating_sub(1);
+    }
+
+    /// Autotest: the cell count of each table on each page of the draft, and the background files.
+    pub(crate) fn draft_tables(&self) -> (Vec<Vec<usize>>, Vec<String>) {
+        let Some(TemplateKind::Table(tt)) = self.draft.as_ref().map(|t| &t.kind) else { return Default::default() };
+        let cells = tt.pages.iter().map(|p| p.tables.iter().map(|t| t.cells.len()).collect()).collect();
+        let files = tt.pages.iter().filter_map(|p| p.background.as_ref().map(|b| b.file.clone())).collect();
+        (cells, files)
     }
 
     /// 内边距识别: each selected cell's left padding = where its first ink is in the background.

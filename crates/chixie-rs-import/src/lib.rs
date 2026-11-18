@@ -34,7 +34,8 @@ impl DetectedPage {
         let r = raster::detect(img);
         // An unwarped page has lost the page's own scale.
         let mm = if r.warped { None } else { mm_per_px };
-        let (w, h) = r.image.dimensions();
+        // The source's shape, not the unwarped crop (which may be just the table).
+        let (w, h) = size_mm.unwrap_or((img.width() as f32, img.height() as f32));
         Self { size_mm, mm_per_unit: mm, landscape: w > h, tables: r.tables, background: Some(r.image) }
     }
 }

@@ -587,6 +587,46 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             });
             println!("AUTOTEST_TABLE tab={tab} cells={cells} overflow_fixed={fixed} batch_pages={pages} docx={docx}");
         }
+        // 导入 PDF/图片: a generated PDF form (exact, in mm) and a tilted photo of another form
+        // become pages of a new table template; the photo also leaves a background image.
+        {
+            use chixie_rs_import::synth::{self, Form, Shot, Style};
+            let pdf = chixie_rs_import::detect(&synth::pdf(&[(Form::merged_header(), Style::Lines, false)])).unwrap_or_default();
+            let photo = {
+                let img = synth::render(&Form::mixed(), &Shot::photo(4.0, 0.06, 2));
+                let mut png = std::io::Cursor::new(Vec::new());
+                let _ = img.write_to(&mut png, image::ImageFormat::Png);
+                chixie_rs_import::detect(png.get_ref()).unwrap_or_default()
+            };
+            let templates = cx.update(|cx| app.read(cx).templates.clone());
+            let mut result = (Vec::new(), Vec::new());
+            let _ = cx.update_window(handle, |_, window, cx| {
+                let ix = {
+                    let st = cx.global_mut::<AppState>();
+                    st.templates.upsert(chixie_rs_template::Template::table("自测导入", (210.0, 297.0)))
+                };
+                templates.update(cx, |v, cx| {
+                    v.select(ix, window, cx);
+                    v.apply_import(&pdf, 160.0, 25.0, 40.0, window, cx);
+                    v.add_page_for_test(cx);
+                    v.apply_import(&photo, 170.0, 20.0, 30.0, window, cx);
+                    result = v.draft_tables();
+                });
+            });
+            let (cells, files) = result;
+            let dir = cx.update(|cx| cx.global::<AppState>().templates_path.parent().map(|p| p.join("template_assets")));
+            let background = files.len() == 1 && dir.as_ref().is_some_and(|d| d.join(&files[0]).exists());
+            for f in &files {
+                if let Some(d) = &dir {
+                    let _ = std::fs::remove_file(d.join(f));
+                }
+            }
+            cx.update(|cx| {
+                cx.global_mut::<AppState>().templates.remove("自测导入");
+            });
+            let _ = cx.update_window(handle, |_, window, cx| templates.update(cx, |v, cx| v.select(0, window, cx)));
+            println!("AUTOTEST_DETECT pdf_cells={:?} photo_cells={:?} background={background}", cells.first(), cells.get(1));
+        }
         // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
         // 英文字体 role, and survives export + import.
         use chixie_rs_core::font::svg::{self, FontMeta, FontSource};
