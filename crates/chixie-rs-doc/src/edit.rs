@@ -10,6 +10,7 @@
 use std::ops::Range;
 
 use chixie_rs_core::handwriting::is_cjk;
+use chixie_rs_core::layout::CELL_BREAK;
 
 use crate::model::{Tuning, Align, Attrs, Command, Document, Para};
 
@@ -234,6 +235,30 @@ impl EditDoc {
         let sel = self.selection();
         self.splice(sel, text);
         self.marked = None;
+    }
+
+    /// Table forms (Tab): the caret goes to the start of the next cell. In the last cell a cell
+    /// break is added at the end of the text, starting a new cell.
+    pub fn next_cell(&mut self) {
+        let next = self.doc.chars()[self.caret..].iter().position(|&c| c == CELL_BREAK).map(|k| self.caret + k + 1);
+        match next {
+            Some(i) => self.move_to(i, false),
+            None => {
+                self.move_to(self.len(), false);
+                self.insert(&CELL_BREAK.to_string());
+            }
+        }
+    }
+
+    /// Shift+Tab: the start of the caret's cell, or of the previous cell when already there.
+    pub fn prev_cell(&mut self) {
+        let to = {
+            let c = self.doc.chars();
+            let start = |i: usize| c[..i].iter().rposition(|&x| x == CELL_BREAK).map_or(0, |k| k + 1);
+            let here = start(self.caret);
+            if self.caret > here { here } else if here > 0 { start(here - 1) } else { 0 }
+        };
+        self.move_to(to, false);
     }
 
     /// Delete the selection, or `range` when nothing is selected. Returns true if anything changed.
@@ -659,5 +684,24 @@ mod tests {
         }
         assert_eq!(d.from_utf16(3), 2, "inside a surrogate pair rounds down");
         assert_eq!(d.range_to_utf16(&(2..3)), 2..4);
+    }
+
+    #[test]
+    fn tab_walks_cells_and_adds_one_at_the_end() {
+        let b = CELL_BREAK;
+        let mut d = EditDoc::from_text(&format!("ab{b}cd"));
+        d.move_to(1, false);
+        d.next_cell();
+        assert_eq!(d.caret(), 3);
+        d.next_cell();
+        assert_eq!(d.text(), format!("ab{b}cd{b}"));
+        assert_eq!(d.caret(), 6);
+        assert!(d.undo());
+        assert_eq!(d.text(), format!("ab{b}cd"));
+        d.move_to(4, false);
+        d.prev_cell();
+        assert_eq!(d.caret(), 3, "start of this cell");
+        d.prev_cell();
+        assert_eq!(d.caret(), 0, "then the previous one");
     }
 }

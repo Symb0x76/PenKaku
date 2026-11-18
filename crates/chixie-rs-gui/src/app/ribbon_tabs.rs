@@ -58,7 +58,10 @@ impl ChixieRsApp {
         let has_fonts = !self.font_ids.is_empty();
         let font_size = cx.global::<AppState>().settings.page.font_size;
         let pen_menu = self.pen_colour_menu();
-        let grid = matches!(cx.global::<AppState>().active_template().map(|t| t.ruling()), Some(Ruling::Grid { .. }));
+        let ruling = cx.global::<AppState>().active_template().map(|t| t.ruling());
+        let grid = matches!(ruling, Some(Ruling::Grid { .. }));
+        let table = matches!(ruling, Some(Ruling::Table { .. }));
+        let overflowing = self.doc.read(cx).layout_doc().overflowing().count();
         let (align, indented) = {
             let d = self.doc.read(cx).doc();
             (d.align(), d.indented())
@@ -150,6 +153,22 @@ impl ChixieRsApp {
                     ),
                 None,
             ))
+            .when(table, |el| {
+                let view = self.doc.clone();
+                el.child(group(
+                    cx,
+                    "table",
+                    "表格功能",
+                    stack([
+                        small("next-cell", "下一格 (Tab)", IconName::ArrowRight).on_click(act(Box::new(doc_view::ToggleIndent))).into_any_element(),
+                        small("prev-cell", "上一格 (Shift+Tab)", IconName::ArrowLeft).on_click(act(Box::new(doc_view::PrevCell))).into_any_element(),
+                        small("overflow", if overflowing > 0 { format!("批量溢出 ({overflowing})") } else { "批量溢出".to_string() }, IconName::TriangleAlert)
+                            .on_click(move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_overflow(view.clone(), w, cx))
+                            .into_any_element(),
+                    ]),
+                    None,
+                ))
+            })
             .child(group(
                 cx,
                 "edit",

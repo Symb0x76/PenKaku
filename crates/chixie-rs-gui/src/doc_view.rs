@@ -40,7 +40,7 @@ actions!(
         WordLeft, WordRight, SelectWordLeft, SelectWordRight, LineStart, LineEnd, SelectLineStart,
         SelectLineEnd, DocStart, DocEnd, Backspace, Delete, BackspaceWord, DeleteWord, Newline,
         SelectAll, Copy, Cut, Paste, Undo, Redo, Save, AlignLeft, AlignCenter, AlignRight,
-        AlignJustify, ToggleIndent, HalfSpace, Combine, NextPunctIssue,
+        AlignJustify, ToggleIndent, HalfSpace, Combine, NextPunctIssue, PrevCell,
     ]
 );
 
@@ -51,7 +51,8 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new(if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" }, Save, None)]);
     // Tab toggles the paragraph indent; Shift+Space types a half space (Ctrl+Space is the IME
     // toggle on Windows).
-    cx.bind_keys([KeyBinding::new("tab", ToggleIndent, c), KeyBinding::new("shift-space", HalfSpace, c)]);
+    // On a table form Tab goes to the next cell and Shift+Tab back.
+    cx.bind_keys([KeyBinding::new("tab", ToggleIndent, c), KeyBinding::new("shift-tab", PrevCell, c), KeyBinding::new("shift-space", HalfSpace, c)]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("left", MoveLeft, c),
@@ -466,7 +467,46 @@ impl DocView {
         self.edited(cx);
     }
     fn toggle_indent_action(&mut self, _: &ToggleIndent, _: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_indent(cx);
+        if table_mode(cx) {
+            self.doc.next_cell();
+            self.edited(cx);
+        } else {
+            self.toggle_indent(cx);
+        }
+    }
+    fn prev_cell(&mut self, _: &PrevCell, _: &mut Window, cx: &mut Context<Self>) {
+        if table_mode(cx) {
+            self.doc.prev_cell();
+            self.after_move(cx);
+        }
+    }
+
+    // ---- table forms (see `table_ui`) ----
+
+    /// Relayout now (the template changed under the document).
+    pub fn relayout_now(&mut self, cx: &mut Context<Self>) {
+        self.layout_key = None;
+        self.relayout_if_changed(cx);
+    }
+    pub fn layout_doc(&self) -> &Document {
+        &self.layout
+    }
+    pub fn doc_chars(&self) -> &[char] {
+        self.doc.chars()
+    }
+    /// Delete chars `r` (one undo step).
+    pub fn delete_range(&mut self, r: Range<usize>, cx: &mut Context<Self>) {
+        self.doc.select_range(r);
+        self.doc.insert("");
+        self.edited(cx);
+    }
+    /// How segment `seg` would be set on template `t` (a trial layout; nothing changes).
+    pub fn trial_cell(&self, t: &Template, seg: usize, cx: &App) -> Option<layout::CellInfo> {
+        let st = cx.global::<AppState>();
+        let params = st.settings.page_params_with(t.ruling());
+        let (joins, tuning) = (self.doc.joins(), self.doc.tunings());
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning };
+        layout::layout_flow(&flow, &*st.font_set, &params).cells.into_iter().find(|c| c.seg == seg)
     }
     fn combine(&mut self, _: &Combine, window: &mut Window, cx: &mut Context<Self>) {
         match self.doc.toggle_combine() {
@@ -501,6 +541,8 @@ impl DocView {
     }
     pub fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|i| i.text()) {
+            // Tab-separated text (from a spreadsheet) fills cells on a table form.
+            let text = if table_mode(cx) { text.replace('\t', &layout::CELL_BREAK.to_string()) } else { text };
             self.type_text(&text, cx);
         }
     }
@@ -530,6 +572,15 @@ impl DocView {
 
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        // An overflowing cell's warning badge opens the 内容溢出 dialog.
+        if let Some(g) = self.geom.get() {
+            let (k, x, y) = g.unproject(e.position, self.layout.pages.len().max(1));
+            let hit = self.layout.overflowing().find(|c| c.page == k && x >= c.rect.0 && x <= c.rect.0 + BADGE_MM && y <= c.rect.1 && y >= c.rect.1 - BADGE_MM).copied();
+            if let Some(info) = hit {
+                crate::table_ui::open_overflow(cx.entity(), info, window, cx);
+                return;
+            }
+        }
         // Grab the 书写原点 marker (drawn on every page; drag it on any).
         if let Some(g) = self.geom.get() {
             let (_, x, y) = g.unproject(e.position, self.layout.pages.len().max(1));
@@ -740,6 +791,7 @@ impl Render for DocView {
             .on_action(cx.listener(Self::align_right))
             .on_action(cx.listener(Self::align_justify))
             .on_action(cx.listener(Self::toggle_indent_action))
+            .on_action(cx.listener(Self::prev_cell))
             .on_action(cx.listener(Self::combine))
             .on_action(cx.listener(Self::next_punct_issue))
             .on_action(cx.listener(Self::select_all))
@@ -840,6 +892,14 @@ impl Render for DocView {
                                 }
                             }
                         }
+                        // 内容溢出: a warning badge in each overflowing cell's top-left corner.
+                        for c in layout_doc.overflowing() {
+                            let a = g.screen(c.page, c.rect.0, c.rect.1);
+                            let side = px(BADGE_MM * g.zoom);
+                            window.paint_quad(fill(Bounds::new(a, size(side, side)), missing_color));
+                            window.paint_quad(fill(Bounds::new(a + point(side * 0.42, side * 0.18), size(side * 0.16, side * 0.45)), gpui_kit::white()));
+                            window.paint_quad(fill(Bounds::new(a + point(side * 0.42, side * 0.7), size(side * 0.16, side * 0.14)), gpui_kit::white()));
+                        }
                         // 书写原点: a blue ring where the pen tip must stand at job start.
                         let ring = px((1.6 * g.zoom).max(5.0));
                         for k in 0..pages {
@@ -903,6 +963,13 @@ impl Render for DocView {
 
 /// The 书写原点 marker: grab radius and corner snap (mm).
 const ORIGIN_GRAB_MM: f32 = 2.5;
+/// Side of the 内容溢出 badge (mm).
+const BADGE_MM: f32 = 3.0;
+
+/// The active template is a table form.
+fn table_mode(cx: &App) -> bool {
+    matches!(cx.global::<AppState>().active_template().map(|t| t.kind), Some(chixie_rs_template::TemplateKind::Table(_)))
+}
 const ORIGIN_SNAP_MM: f32 = 2.0;
 const ORIGIN_BLUE: Hsla = Hsla { h: 0.58, s: 0.85, l: 0.5, a: 0.9 };
 

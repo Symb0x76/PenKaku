@@ -28,6 +28,7 @@ mod ribbon;
 mod sim;
 mod state;
 mod style_dialog;
+mod table_ui;
 mod templates_view;
 
 use std::path::{Path, PathBuf};
@@ -249,7 +250,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         cx.update(|cx| {
             let d = app.read(cx).doc.read(cx).doc().clone();
             let p = std::env::temp_dir().join("chixie-autotest.docx");
-            let back = file_ops::save(&p, &d, 4242).and_then(|()| file_ops::open(&p));
+            let back = file_ops::save(&p, &d, 4242, &[]).and_then(|()| file_ops::open(&p));
             let same = back.as_ref().is_ok_and(|l| l.doc.text() == d.text() && l.doc.ids() == d.ids() && l.seed == Some(4242));
             println!("AUTOTEST_DOCX round_trip={same}");
         });
