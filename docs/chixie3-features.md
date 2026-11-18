@@ -132,11 +132,11 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Templates | 合并/拆分单元格 | merge, full split, split handles | Done (M7a; drag lines to resize) | P2 | M |
 | Templates | 内边距识别 | detect left padding from background image | Done (M7b) | P3 | S |
 | Templates | 页面缩略图面板 | page list, background preview, opacity | Done (M7a page list, M7b background + 透明度; no thumbnails) | P2 | S |
-| Templates | 模板管理 UI | create / save / delete / export, validation | Partial (M7a: ChiXie3 validation, delete confirm; export in M7c) | P1 | S |
+| Templates | 模板管理 UI | create / save / delete / export, validation | Done (M7a validation; M7c 导入 / 导出 SVG, ZIP, XLSX) | P1 | S |
 | Templates | `.cx` import | note / composition pickles | Done (`chixie3_templates.rs`) | P1 | — |
 | Templates | 表格模板 import | Fernet + pickle table templates | Missing | P2 | M |
 | Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Done (M6; right-click menu M7a) | P1 | M |
-| Templates | 模板库 (cloud) | online templates: 绘图/激光/写字 | Missing | P3 | M |
+| Templates | 模板库 (cloud) | online templates: 绘图/激光/写字 | Partial (M7c local library + gallery; online needs a backend, M10) | P3 | M |
 | Fonts | 字体库 browse | 在线字体 / 我的收藏 / 我的录制, filter, sort, search, pager | Partial (no 录制, no filter/sort UI) | P1 | S |
 | Fonts | 收藏/取消收藏 | `font/collect_a_font`, 30-font cap | Dropped (BOSS, 2026-11-17) | — | — |
 | Fonts | 主字体 slots | 主线/主英文/主符号/主数字 font | Done (M4, local) | P1 | M |
@@ -461,9 +461,10 @@ name 作文格1).
 `composition_template.cx`, table templates through `TemplateAccessUtil`, Fernet-encrypted with a
 hard-coded key. Old formats are converted on load (`convert_old_template_to_new`). Table template
 autosave is debounced by `SaveTableTemplateTimer` (C) [high].
-**chixie-rs today:** `template.rs` (`Template`, `TemplateKind::{Blank, Ruled, Grid}`,
-`TemplateStore` → `templates.toml`), `templates_view.rs` (backstage page: list, edit form, live
-preview, draft until 保存, 应用), `chixie3_templates.rs` (safe pickle reader for `.cx`).
+**chixie-rs today:** `chixie-rs-template` (M7a/M7c): templates in a library folder, one SVG
+each (`library.rs`, `svg.rs`; the old `templates.toml` migrates once and is kept as `.bak`);
+`templates_view.rs` (list, edit form, live preview, draft until 保存, 应用, 导入 / 导出 / 导出 Excel /
+导出全部, 标签, 收藏); ChiXie3's save checks with its messages (`Template::validate`).
 **Recommended implementation:** keep TOML (human-readable, diffable). Add ChiXie3's validation
 messages verbatim to `Template::validate() -> Result<(), TemplateError>` with the Chinese
 `Display`. Add 导出 / 导入 of a single template as a `.chxt` TOML file (share between users).
@@ -692,7 +693,15 @@ pen tip here" hint once per job start. Test: Paper origin shifts every coordinat
 order 标签 → 排序 → 分类, 写字模板 last among the radio categories). File menu 从炽写模板库新建 (C) [high]. Static
 slice A calls the home template widget a placeholder shell [high] — the live UI shows it
 populated, so it is server-driven (conflict; live wins).
-**chixie-rs today:** missing.
+**chixie-rs today:** Partial (M7c), local only (ChiXie3 has no template backend):
+- library folder `Documents/chixie-rs/Templates` (movable, 选项 › 模板) plus read-only extra folders,
+  watched; one SVG per template: the paper drawn at real size (opens in any image viewer), the
+  template as TOML in `<metadata id="chixie-template">` (TOML rather than `data-*` attributes:
+  nested table data stays readable), page backgrounds embedded as PNG;
+- 文件 › 新建 is the gallery: 在线模板 (shows that it needs a server) / 我的模板 / 我的收藏, ChiXie3's
+  标签, 排序 (时间最新 / 收藏优先 / 名称), search, live previews, ☆ 收藏;
+- 导入 / 导出 per template (SVG; XLSX for table templates via `rust_xlsxwriter`) or all as a ZIP.
+Online templates, 点赞 / 收藏 counts and the 绘图 / 激光 categories wait for a backend (M10) and P6.
 **Recommended implementation:** P3. Needs the listing endpoint (not in the static endpoint list;
 capture it). Reuse the 3×3 card grid of `fonts.rs`.
 **Open questions / VERIFY:** endpoint and template payload format.

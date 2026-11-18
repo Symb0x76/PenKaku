@@ -262,3 +262,13 @@
   - CLI `detect-table [--json]`. GUI: `templates_view/import.rs` (import dialog, drop, backgrounds in
     `template_assets/`, 内边距识别, 透明度); `TablePage.background`. Autotest `AUTOTEST_DETECT` (CI uses grep -F).
   - Open: real forms from BOSS (photos with strong perspective are the risk), thumbnails, 截图生成, 占位符识别.
+- **M7b merged 2026-11-18** (`fc2076d`).
+- **M7c in progress (2026-11-18), branch `m7c-library`:**
+  - Template crate: `svg.rs` (template ↔ SVG; TOML in `<metadata id="chixie-template">`, backgrounds as data URIs
+    restored into the assets folder by FNV hash), `library.rs` (TemplateLibrary: scan / save / remove / sync /
+    import SVG-ZIP-XLSX-cx / export SVG-XLSX-ZIP / move_default / migrate_toml / load_store), `xlsx_template.rs`
+    (rust_xlsxwriter export; import reads sheet XML for widths / heights / merges); `Template.tags`, `.favourite`.
+  - Core `Settings.templates` (`library_dir`, `extra_dirs`). GUI: `AppState.template_lib`, `save_templates` = sync,
+    `app/templates_ctl.rs` (watch, folders, gallery `bs_gallery`, `gallery_list`), templates_view import / export /
+    tags; 选项 › 模板. Demo / autotest use `<temp>/chixie-rs-demo/Templates`. `AUTOTEST_LIBRARY`.
+  - Open: cloud library (M10), thumbnails, 同型 sync, 绘制表格 drag.
