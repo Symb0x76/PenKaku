@@ -42,20 +42,22 @@ impl DetectedTable {
     }
 }
 
-/// Positions within `tol` of each other, merged to their mean (sorted).
-fn cluster(mut v: Vec<f32>, tol: f32) -> Vec<f32> {
-    v.sort_by(f32::total_cmp);
-    let mut out: Vec<(f32, u32)> = Vec::new();
-    for x in v {
+/// Positions within `tol` of each other, merged to their weighted mean (sorted); each is
+/// weighted by its segment's length.
+fn cluster_weighted(mut v: Vec<(f32, f32)>, tol: f32) -> Vec<f32> {
+    v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    for (x, w) in v {
+        let w = w.max(1e-3);
         match out.last_mut() {
-            Some((sum, n)) if x - *sum / *n as f32 <= tol => {
-                *sum += x;
-                *n += 1;
+            Some((sum, tw)) if x - *sum / *tw <= tol => {
+                *sum += x * w;
+                *tw += w;
             }
-            _ => out.push((x, 1)),
+            _ => out.push((x * w, w)),
         }
     }
-    out.into_iter().map(|(s, n)| s / n as f32).collect()
+    out.into_iter().map(|(s, w)| s / w).collect()
 }
 
 /// Join collinear pieces: same line within `tol`, overlapping or with gaps ≤ `tol`.
@@ -165,28 +167,44 @@ pub fn build(h: &[HSeg], v: &[VSeg], tol: f32) -> Vec<DetectedTable> {
     tables
 }
 
+/// Pieces lying on each line (within `tol`), as intervals along the line.
+fn on_lines(lines: &[f32], segs: &[(f32, f32, f32)], tol: f32) -> Vec<Vec<(f32, f32)>> {
+    let mut on: Vec<Vec<(f32, f32)>> = vec![Vec::new(); lines.len()];
+    for &(pos, a, b) in segs {
+        if let Some(k) = lines.iter().position(|&l| (l - pos).abs() <= tol) {
+            on[k].push((a, b));
+        }
+    }
+    on
+}
+
+fn present(a: f32, b: f32, ivs: &[(f32, f32)]) -> bool {
+    covered(a, b, ivs) >= 0.5 * (b - a)
+}
+
 fn table(hs: &[HSeg], vs: &[VSeg], tol: f32) -> Option<DetectedTable> {
-    let xs = cluster(vs.iter().map(|v| v.x).collect(), tol);
-    let ys = cluster(hs.iter().map(|h| h.y).collect(), tol);
-    if xs.len() < 2 || ys.len() < 2 {
-        return None;
-    }
+    let v3: Vec<(f32, f32, f32)> = vs.iter().map(|v| (v.x, v.y0, v.y1)).collect();
+    let h3: Vec<(f32, f32, f32)> = hs.iter().map(|h| (h.y, h.x0, h.x1)).collect();
+    // Line positions weighted by length: long rules dominate short strokes near them.
+    let mut xs = cluster_weighted(v3.iter().map(|s| (s.0, s.2 - s.1)).collect(), tol);
+    let mut ys = cluster_weighted(h3.iter().map(|s| (s.0, s.2 - s.1)).collect(), tol);
+    // Drop lines that are drawn along no row / column span (strokes inside cells), until stable.
+    let (on_x, on_y) = loop {
+        if xs.len() < 2 || ys.len() < 2 {
+            return None;
+        }
+        let (on_x, on_y) = (on_lines(&xs, &v3, tol), on_lines(&ys, &h3, tol));
+        let kx: Vec<bool> = on_x.iter().map(|ivs| ys.windows(2).any(|w| present(w[0], w[1], ivs))).collect();
+        let ky: Vec<bool> = on_y.iter().map(|ivs| xs.windows(2).any(|w| present(w[0], w[1], ivs))).collect();
+        if kx.iter().all(|&k| k) && ky.iter().all(|&k| k) {
+            break (on_x, on_y);
+        }
+        let mut it = kx.iter();
+        xs.retain(|_| *it.next().unwrap_or(&true));
+        let mut it = ky.iter();
+        ys.retain(|_| *it.next().unwrap_or(&true));
+    };
     let (nr, nc) = (ys.len() - 1, xs.len() - 1);
-    // Segments on each grid line (by nearest line).
-    let near = |p: f32, lines: &[f32]| lines.iter().position(|&l| (l - p).abs() <= tol);
-    let mut on_x: Vec<Vec<(f32, f32)>> = vec![Vec::new(); xs.len()];
-    for v in vs {
-        if let Some(k) = near(v.x, &xs) {
-            on_x[k].push((v.y0, v.y1));
-        }
-    }
-    let mut on_y: Vec<Vec<(f32, f32)>> = vec![Vec::new(); ys.len()];
-    for h in hs {
-        if let Some(k) = near(h.y, &ys) {
-            on_y[k].push((h.x0, h.x1));
-        }
-    }
-    let present = |a: f32, b: f32, ivs: &[(f32, f32)]| covered(a, b, ivs) >= 0.5 * (b - a);
     // Squares that a missing line joins.
     let sq = |r: usize, c: usize| r * nc + c;
     let mut parent: Vec<usize> = (0..nr * nc).collect();

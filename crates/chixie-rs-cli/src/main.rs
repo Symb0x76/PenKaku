@@ -166,6 +166,14 @@ enum Cmd {
         #[arg(long, default_value_t = 5)]
         ack_delay_ms: u64,
     },
+    /// Detect table frames in a PDF or an image (PNG / JPEG) and print each table: position, column
+    /// widths, row heights and cell spans. `--json` prints the cell spans in the format of
+    /// crates/chixie-rs-import/tests/forms-real/<name>.cells.json
+    DetectTable {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Compare two G-code captures stroke by stroke: count, points per stroke and shape. Exit 1 if
     /// they differ more than --tol (absolute positions are not compared: spacing is random)
     CaptureDiff {
@@ -386,6 +394,39 @@ fn main() -> chixie_rs_core::Result<()> {
             eprintln!("fake-grbl: {lines} lines, stopped: {why:?}");
             if why != fake_grbl::End::Marker {
                 std::process::exit(2);
+            }
+        }
+        Cmd::DetectTable { file, json } => {
+            let pages = chixie_rs_import::detect(&std::fs::read(&file)?).map_err(|e| chixie_rs_core::Error::Config(format!("{}: {e}", file.display())))?;
+            if json {
+                let tables: Vec<String> = pages
+                    .iter()
+                    .flat_map(|p| &p.tables)
+                    .map(|t| format!("[{}]", t.cells.iter().map(|c| format!("[{}, {}, {}, {}]", c.0, c.1, c.2, c.3)).collect::<Vec<_>>().join(", ")))
+                    .collect();
+                println!("[{}]", tables.join(",\n "));
+                return Ok(());
+            }
+            let f = |v: &[f32]| v.iter().map(|x| format!("{x:.1}")).collect::<Vec<_>>().join(" ");
+            for (k, p) in pages.iter().enumerate() {
+                let unit = match p.mm_per_unit {
+                    Some(m) if (m - 1.0).abs() < 1e-6 => "mm".to_string(),
+                    Some(m) => format!("px ({m:.4} mm/px)"),
+                    None => "px (scale unknown)".to_string(),
+                };
+                println!("page {}: {} table(s), units {unit}", k + 1, p.tables.len());
+                for (i, t) in p.tables.iter().enumerate() {
+                    println!("  table {}: at ({:.1}, {:.1}), {} cells", i + 1, t.x, t.y, t.cells.len());
+                    println!("    cols {}", f(&t.cols));
+                    println!("    rows {}", f(&t.rows));
+                    let merged: Vec<String> = t.cells.iter().filter(|c| c.2 - c.0 > 1 || c.3 - c.1 > 1).map(|c| format!("r{}-{} c{}-{}", c.0, c.2 - 1, c.1, c.3 - 1)).collect();
+                    if !merged.is_empty() {
+                        println!("    merged {}", merged.join(", "));
+                    }
+                }
+            }
+            if let Some(msg) = chixie_rs_import::failed_pages_message(&pages) {
+                eprintln!("{msg}");
             }
         }
         Cmd::CaptureDiff { a, b, tol, pen_down_z } => {

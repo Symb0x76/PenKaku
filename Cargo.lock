@@ -1024,6 +1024,7 @@ version = "0.1.0"
 dependencies = [
  "chixie-rs-core",
  "chixie-rs-device",
+ "chixie-rs-import",
  "chixie-rs-output",
  "clap",
  "env_logger",
