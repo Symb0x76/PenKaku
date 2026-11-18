@@ -123,7 +123,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Templates | 双线文档 | dual-line rows, dashed partition | Done (M7a: upper / lower band; placement VERIFY) | P2 | S |
 | Templates | 笔记分栏 | columns, widths, dividers, 异栏同型 | Partial (M7a: per-column widths; 异栏同型 missing) | P2 | S |
 | Templates | 作文格 | composition grid | Done (`template.rs` Grid) | P0 | — |
-| Templates | 表格模板 | parent cells, internal rows, margins, flags | Done (M7a; 2×2 capture VERIFY) | P1 | L |
+| Templates | 表格模板 | parent cells, internal rows, margins, flags | Done (M7a; matches 2×2 capture) | P1 | L |
 | Templates | 插入表格 / 绘制表格 / 截图生成 | build table frames | Partial (M7a: 插入表格; 截图生成 P3) | P2 | M |
 | Templates | PDF/图片 → 表格框架 | cloud table recognition | Missing | P2 | M |
 | Templates | Excel导入配置 | per-page Excel range | Done (M7a) | P2 | S |
@@ -551,7 +551,7 @@ cell): 单元格宽：, 单元格高：, 接受导入：, 内部行数：. 表�
 接受导入：(switch), 内部行数, 提示标识：(hint label text), 左内边距, 上内边距, 下内边距, 右内边距, 排版内边距 (heading for the four margins; so they are "typesetting padding"),
 单元格字体属性 (heading) with 默认字体, 字体加载模式 (combo; 指定字体优先 is one entry, cf. §3.3), 字符宽度比, 默认字号. The main
 window also has ribbon entries 表格功能, 批量溢出 and 作文格功能 (contextual groups).
-**chixie-rs today:** Done (M7a): `chixie-rs-template` `table.rs` (tables as column / row grids, cells as a partition with rows, padding, size, alignment, overflow, data source, 接受导入, hint), `TemplateKind::Table`, the frame = the first page's tables; layout `Ruling::Table` fills cells in reading order with the note row rule (2×2 capture VERIFY).
+**chixie-rs today:** Done (M7a): `chixie-rs-template` `table.rs` (tables as column / row grids, cells as a partition with rows, padding, size, alignment, overflow, data source, 接受导入, hint), `TemplateKind::Table`, the frame = the first page's tables; layout `Ruling::Table` fills cells in reading order, each row's text centred in the row (matches the 2026-11-18 2×2 capture, docs/protocol.md).
 **Recommended implementation:** core module `table.rs`:
 ```rust
 pub struct TableTemplate { pages: Vec<TablePage>, same_type: Vec<SameTypeRecord> }

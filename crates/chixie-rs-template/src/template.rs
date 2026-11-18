@@ -518,6 +518,41 @@ mod tests {
         assert_eq!(toml::from_str::<TemplateStore>(&text).unwrap(), store);
     }
 
+    /// ChiXie3 capture 2026-11-18 (captures/m7/table22.gcode): 插入表格 2×2 on A4 (x 21, y 30,
+    /// cells 84 × 12 mm, 内部行数 1), 艾玛体 100, deformation off; cells 你 | 好 / 你好 | 好你好.
+    /// Ink of each cell's first char (origin = the table's corner):
+    /// 你 x 3.04, y −3.35..−9.78; 好 x 85.94, y −3.04..−8.68; 你 x 2.07, y −14.69..−21.76;
+    /// 好 x 86.02, y −15.25..−21.10. ChiXie3 starts each row 0–2 mm in at random (首字不对齐, on in
+    /// its config) and varies glyph shapes per layout, so: tops within 0.6 mm, and the left edge
+    /// between our padding and padding + 2 mm.
+    #[test]
+    fn table_cells_match_chixie3_capture() {
+        use crate::table::ColWidth;
+        let mut t = Template::table("新建表格", A4);
+        if let TemplateKind::Table(tt) = &mut t.kind {
+            tt.insert_table(0, 2, 2, ColWidth::Fixed(84.0), A4.0, 21.0).unwrap();
+            for r in &mut tt.pages[0].tables[0].rows {
+                *r = 12.0;
+            }
+            tt.pages[0].tables[0].y = 30.0;
+        }
+        let b = chixie_rs_core::layout::CELL_BREAK;
+        let doc = layout(&format!("你{b}好{b}你好{b}好你好"), &fixture_font(), &params(&t));
+        let p = &doc.pages[0];
+        let ink = |ch: usize| {
+            let s: Vec<Vec<(f32, f32)>> = p.strokes.iter().zip(&p.stroke_chars).filter(|(_, k)| **k == ch).map(|(s, _)| s.clone()).collect();
+            (s.iter().flatten().map(|q| q.0).fold(f32::MAX, f32::min), ink_y(&s).0)
+        };
+        // (char index, cell left, captured left, captured top)
+        for (ch, cell_x, left, top) in [(0, 0.0, 3.04, -3.35), (2, 84.0, 85.94, -3.04), (4, 0.0, 2.07, -14.69), (7, 84.0, 86.02, -15.25)] {
+            let (x0, t0) = ink(ch);
+            assert!((t0 - top).abs() < 0.6, "char {ch}: top {t0} vs captured {top}");
+            // Our ink starts at padding (1 mm) + the glyph's own bearing; ChiXie3 adds 0..2 mm.
+            let bearing = x0 - (cell_x + 1.0);
+            assert!(left >= x0 - 0.3 && left <= x0 + 2.0 + 0.3, "char {ch}: left {x0} (bearing {bearing}) vs captured {left}");
+        }
+    }
+
     #[test]
     fn validation_uses_chixie3_messages() {
         let ok = Template::ruled("n", A4, (20.0, 20.0, 20.0, 20.0), 20);

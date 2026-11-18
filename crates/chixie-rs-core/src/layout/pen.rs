@@ -219,8 +219,9 @@ impl Pen<'_> {
                 // Rows past the last are the overflow (laid out, never written).
                 self.row_top = c.y + pt + self.slot as f32 * pitch;
                 self.row_h = pitch;
-                // The note rule inside each row: glyph box ends 0.2 em above the row's bottom.
-                self.text_top = (self.row_top + pitch - self.em - 0.2 * self.em).max(self.row_top);
+                // Centred in each writing row, like a grid cell. ChiXie3 capture 2026-11-18 (2×2
+                // form, 12 mm rows, size 100): glyph tops 2.3–3.0 mm into the row (centred: 2.5).
+                self.text_top = self.row_top + (pitch - self.em) / 2.0;
             }
             Ruling::Grid { cols, cell: (cw, ch), gap: (cg, rg), .. } => {
                 self.line_x = 0.0;

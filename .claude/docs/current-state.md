@@ -249,4 +249,7 @@
   - GUI: `templates_view/table.rs` (table editor), `table_ui.rs` (内容溢出, 批量溢出, 刷新数据, 批量导入), Tab / Shift+Tab,
     overflow badge, ribbon 表格功能, origin right-click menu, template save checks, per-column widths, upper band.
   - Autotest `AUTOTEST_TABLE` (grepped in CI). Not run locally (BOSS at the screen); CI runs it.
-  - Open: ChiXie3 2×2 form capture (needs BOSS AFK), 绘制表格 drag, 同型 sync, 异栏同型, data-source prompt on new pages.
+  - ChiXie3 2×2 form captured 2026-11-18 (`captures/m7/table22.gcode`): text centred in each cell row (was the note
+    rule), 1 mm padding + ChiXie3's random 首字不对齐; test `table_cells_match_chixie3_capture`. The capture left a
+    template 新建表格 in BOSS's ChiXie3.
+  - Open: 绘制表格 drag, 同型 sync, 异栏同型, data-source prompt on new pages.

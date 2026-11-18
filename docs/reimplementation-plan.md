@@ -397,8 +397,8 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   via `calamine`); cell text is one flow with `CELL_BREAK` segments (BOSS); per-cell layout with
   shrink / add rows / clip fitting; Tab / Shift+Tab; Word tables in DOCX; table editor; 刷新数据;
   批量导入 (list, xlsx); ChiXie3 save checks; per-column widths; upper dual-line band; origin
-  right-click menu. Open: the ChiXie3 2×2 form capture (cell placement VERIFY), 绘制表格 by
-  dragging, 同型 sync, 异栏同型, the prompt to load data sources when pages are added.
+  right-click menu. The 2×2 form capture (2026-11-18) set the cell rule: text centred in each row,
+  1 mm padding. Open: 绘制表格 by dragging, 同型 sync, 异栏同型, the prompt to load data sources when pages are added.
 
 ### M8 Files and editor UX (3–4 wk) — spec R3 (UX part)
 - Find/replace with options; Word-style context menu.
