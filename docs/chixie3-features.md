@@ -125,13 +125,13 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Templates | 作文格 | composition grid | Done (`template.rs` Grid) | P0 | — |
 | Templates | 表格模板 | parent cells, internal rows, margins, flags | Done (M7a; matches 2×2 capture) | P1 | L |
 | Templates | 插入表格 / 绘制表格 / 截图生成 | build table frames | Partial (M7a: 插入表格; 截图生成 P3) | P2 | M |
-| Templates | PDF/图片 → 表格框架 | cloud table recognition | Missing | P2 | M |
+| Templates | PDF/图片 → 表格框架 | cloud table recognition | Done (M7b, local detector) | P2 | M |
 | Templates | Excel导入配置 | per-page Excel range | Done (M7a) | P2 | S |
 | Templates | 同型标记 | linked cells across pages | Partial (M7a: records only; sync VERIFY) | P3 | M |
 | Templates | 数据源配置 | default / random / custom cell data | Done (M7a) | P2 | M |
 | Templates | 合并/拆分单元格 | merge, full split, split handles | Done (M7a; drag lines to resize) | P2 | M |
-| Templates | 内边距识别 | detect left padding from background image | Missing | P3 | S |
-| Templates | 页面缩略图面板 | page list, background preview, opacity | Partial (M7a: page list; background with M7b) | P2 | S |
+| Templates | 内边距识别 | detect left padding from background image | Done (M7b) | P3 | S |
+| Templates | 页面缩略图面板 | page list, background preview, opacity | Done (M7a page list, M7b background + 透明度; no thumbnails) | P2 | S |
 | Templates | 模板管理 UI | create / save / delete / export, validation | Partial (M7a: ChiXie3 validation, delete confirm; export in M7c) | P1 | S |
 | Templates | `.cx` import | note / composition pickles | Done (`chixie3_templates.rs`) | P1 | — |
 | Templates | 表格模板 import | Fernet + pickle table templates | Missing | P2 | M |
@@ -589,7 +589,16 @@ filter "PDF或图片(*.pdf *.jpg *.png)". Pages are rendered (PyMuPDF), base64-P
 backend (`file_parsing/image-to-table-template`, `-2`; A endpoints) which returns cell corner
 points; the image becomes the page background. Orientation auto-switch
 "检测到导入的模板与页面方向不同，已为您切换" (undoable). Errors "<n> 页表格解析异常，请手动创建该页面表格" (B) [high].
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M7b), local instead of the cloud endpoint: crate `chixie-rs-import`.
+- Vector PDFs (`lopdf`): stroked lines, `re` borders and thin filled bars, through `q`/`Q`/`cm` and
+  form XObjects; exact mm.
+- Images and scanned PDFs: Sauvola threshold, perspective fix (the table's frame, or the sheet's
+  edge on a darker desk; corners from a line fit per side; 4-point homography), ink runs.
+- Both: segments → grid → cells, merged cells where a line is missing.
+- Table editor › 导入 PDF/图片… or a file dropped on the page; a result dialog with the grid over
+  the image and 表格宽度 / position; ChiXie3's orientation and failed-page messages.
+- 10 synthetic forms (5 PDFs, 3 photos / screenshots, 2 scans) in `tests/forms.rs`; real forms go in
+  the git-ignored `tests/forms-real/`; `chixie-rs-cli detect-table`.
 **Recommended implementation:** two paths. (a) Cloud: call the same endpoint (capture the
 request/response shape with mitmproxy first). (b) Local fallback (better, offline): detect
 ruling lines with a morphological filter on the binarised image (horizontal/vertical runs ≥ 40%
@@ -648,14 +657,14 @@ underlying grid lines. Handles in the template editor canvas only.
 **ChiXie3:** from the page background image, crop each selected cell, find the leftmost ink
 pixel per row and set `margin_left`; errors "请先选中表格单元格再识别", "所在页面没有背景图，无法识别".
 占位符识别 is a stub (B) [high].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M7b): 内边距识别 / 重置内边距 in the table editor with ChiXie3's messages; the first ink column of each selected cell in the page background (`chixie_rs_import::left_padding`). 占位符识别: not done (no OCR).
 **Recommended implementation:** P3; implement with `image` (luma threshold, column histogram).
 
 #### Page thumbnail panel (页面缩略图面板)
 **ChiXie3:** buttons 预览原始背景, 上移选中页面, 下移选中页面, 删除选中页面, 增加空白页面, slider 透明度;
 messages "请先选中页面缩略图再使用此功能", "当前已经是第一页，无法上移", "请至少保留一个页面", confirms
 "确认要删除页面 <n> 吗？", "确认复制模板页面的第 <n> 页吗？（默认会复制为最后一页）" (B) [high].
-**chixie-rs today:** Partial (M7a): a page list in the table editor with 增加 / 复制 / 上移 / 下移 / 删除 and ChiXie3's confirms; thumbnails of a background image come with M7b.
+**chixie-rs today:** Done in part: the table editor's page list (M7a) with 增加 / 复制 / 上移 / 下移 / 删除; the page background (M7b, a PNG in `template_assets/`) with 预览原始背景 and 透明度. No thumbnail images.
 **Recommended implementation:** part of the table template editor; a vertical list of page
 thumbnails rendered from the same layout code.
 

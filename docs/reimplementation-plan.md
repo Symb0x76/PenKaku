@@ -104,7 +104,7 @@ milestone that needs it, never as a big-bang move.
 | `chixie-rs-output` | stroke pipeline: transform → order/plan → pen/colour segments → G-code dialects; job description | M6 (moved the emitter out of `gcode.rs`; the device settings stay in core as `profile.rs` because `config.rs` stores them, and `calibration.rs` stays in core because it fits layout scale) |
 | `chixie-rs-device` | transports (serial, Telnet, ESP3D HTTP), Grbl streamer, device actor, discovery, firmware dialects (Grbl_ESP32, ChiXie N1) | M1 (moves `transport.rs`, `grbl.rs`, `device.rs`, `esp3d.rs`, `discovery.rs`) |
 | `chixie-rs-cloud` | API client, session, cloud fonts, cloud template library, parameter sync | M4 (moves `api.rs`, `session.rs`, `credentials.rs`) |
-| `chixie-rs-import` | txt/docx/pdf/xlsx, table-frame detection from PDF/images, later DXF/SVG/images | M7–M8 |
+| `chixie-rs-import` | table-frame detection from PDFs, scans and photos (`lopdf`, own raster code); later txt/DXF/SVG/images | M7b |
 | `chixie-rs-fontgen` | Phase 4: raster → stroke vectoriser, handwriting capture, import of model-generated glyphs | F1 |
 | `chixie-rs-plot` | Phase 2 vector document and tools | P1 |
 | `chixie-rs-gui`, `chixie-rs-cli` | apps | existing |
@@ -399,6 +399,10 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   批量导入 (list, xlsx); ChiXie3 save checks; per-column widths; upper dual-line band; origin
   right-click menu. The 2×2 form capture (2026-11-18) set the cell rule: text centred in each row,
   1 mm padding. Open: 绘制表格 by dragging, 同型 sync, 异栏同型, the prompt to load data sources when pages are added.
+- **M7b (branch `m7b-detector`):** `chixie-rs-import`: vector PDFs (`lopdf` 0.47) and images / scanned
+  PDFs (threshold, perspective fix, line runs; no `imageproc`) → one grid builder with merged cells.
+  Import into the table editor (dialog, drop, backgrounds in `template_assets/`, 内边距识别). Done-when
+  met on 10 synthetic forms; real forms: `tests/forms-real/` + `chixie-rs-cli detect-table`.
 
 ### M8 Files and editor UX (3–4 wk) — spec R3 (UX part)
 - Find/replace with options; Word-style context menu.

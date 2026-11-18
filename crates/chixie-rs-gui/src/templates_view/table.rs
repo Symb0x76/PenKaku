@@ -36,6 +36,10 @@ pub(super) struct TableEdit {
     drag: Option<Drag>,
     /// 为新表格记忆此尺寸: rows, cols, fixed width.
     remembered: Option<(u32, u32, Option<f32>)>,
+    /// 预览原始背景 off hides the page background.
+    pub hide_bg: bool,
+    /// The page background as loaded (file, opacity step) → its grey pixels and gpui image.
+    pub bg_cache: std::cell::RefCell<Option<super::import::BgImage>>,
 }
 
 #[derive(Clone, Copy)]
@@ -80,7 +84,7 @@ impl TemplatesView {
         }
     }
 
-    fn edit_tt(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TableTemplate)) {
+    pub(super) fn edit_tt(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TableTemplate)) {
         self.edit_kind(cx, |k| {
             if let TemplateKind::Table(tt) = k {
                 f(tt);
@@ -211,8 +215,15 @@ impl TemplatesView {
         let (accent, line, faint, mark) = (theme.primary, gpui_kit::black().opacity(0.75), theme.border, theme.warning);
         let t = self.draft.clone();
         let (page, sel, geom) = (self.tbl.page, self.tbl.sel.clone(), self.tbl.geom.clone());
+        let bg = self.background(cx);
         div()
             .size_full()
+            // A PDF or image dropped on the page is imported (导入 PDF/图片).
+            .on_drop(cx.listener(|v, paths: &ExternalPaths, w, cx| {
+                if let Some(p) = paths.paths().first() {
+                    v.import_path(p.clone(), w, cx);
+                }
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::tbl_down))
             .on_mouse_move(cx.listener(Self::tbl_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::tbl_up))
@@ -231,6 +242,11 @@ impl TemplatesView {
                         window.paint_quad(outline(paper, faint, BorderStyle::Solid));
                         let Some(p) = tt.pages.get(page) else { return };
                         let at = |x: f32, y: f32| o + point(px(x * z), px(y * z));
+                        // The scanned form under the table (原始背景).
+                        if let Some((b, image)) = &bg {
+                            let r = Bounds::from_corners(at(b.x, b.y), at(b.x + b.w, b.y + b.h));
+                            let _ = window.paint_image(paper, r, Corners::default(), image.clone(), 0, false);
+                        }
                         for (ti, tb) in p.tables.iter().enumerate() {
                             for (ci, c) in tb.cells.iter().enumerate() {
                                 let (x, y, w, h) = tb.rect(c.span);
@@ -268,6 +284,7 @@ impl TemplatesView {
         let page = self.tbl.page.min(pages - 1);
         let has_sel = !self.tbl.sel.is_empty();
         let range = tt.pages[page].excel_range.map_or("未设置".to_string(), |r| r.to_string());
+        let (empty, has_bg) = (tt.pages[page].tables.is_empty(), tt.pages[page].background.is_some());
         let section = |title: &'static str| div().pt_2().text_sm().font_weight(FontWeight::SEMIBOLD).child(title);
         let chips = (0..pages).map(|k| {
             Button::new(("tpage", k)).xsmall().label(format!("第{}页", k + 1)).when(k == page, |b| b.primary()).when(k != page, |b| b.outline()).on_click(cx.listener(move |v, _: &ClickEvent, _w, cx| {
@@ -294,10 +311,12 @@ impl TemplatesView {
                     .child(ribbon::small("tp-del", "删除", IconName::Trash).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.confirm_delete_page(w, cx)))),
             )
             .child(section("表格"))
+            .when(empty, |el| el.child(div().text_xs().text_color(muted).child("将文件拖到此处，或点击导入本地文件（PDF或图片表格）")))
             .child(
                 h_flex()
                     .gap_1()
                     .flex_wrap()
+                    .child(ribbon::small("t-import", "导入 PDF/图片…", IconName::Import).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.import_dialog(w, cx))))
                     .child(ribbon::small("t-ins", "插入表格…", IconName::Plus).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.insert_table_dialog(w, cx))))
                     .child(ribbon::small("t-pos", "表格位置…", IconName::Move).disabled(!has_sel).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.table_pos_dialog(w, cx))))
                     .child(ribbon::small("t-del", "删除表格", IconName::Trash).disabled(!has_sel).on_click(cx.listener(|v, _: &ClickEvent, _w, cx| v.delete_table(cx)))),
@@ -311,8 +330,23 @@ impl TemplatesView {
                     .child(ribbon::small("c-split", "拆分", IconName::Grid3x3).disabled(!has_sel).on_click(cx.listener(|v, _: &ClickEvent, _w, cx| v.split(cx))))
                     .child(ribbon::small("c-attr", "单元格属性…", IconName::Settings).disabled(!has_sel).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.cell_attrs_dialog(w, cx))))
                     .child(ribbon::small("c-data", "数据源…", IconName::Shuffle).disabled(!has_sel).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.data_source_dialog(w, cx))))
-                    .child(ribbon::small("c-same", "同型标记…", IconName::Copy).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.same_type_dialog(w, cx)))),
+                    .child(ribbon::small("c-same", "同型标记…", IconName::Copy).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.same_type_dialog(w, cx))))
+                    .child(ribbon::small("c-pad", "内边距识别", IconName::Search).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.detect_padding(w, cx))))
+                    .child(ribbon::small("c-pad0", "重置内边距", IconName::Undo2).disabled(!has_sel).on_click(cx.listener(|v, _: &ClickEvent, _w, cx| v.reset_padding(cx)))),
             )
+            .when(has_bg, |el| {
+                el.child(section("背景")).child(
+                    h_flex()
+                        .gap_1()
+                        .child(ribbon::small("bg-show", if self.tbl.hide_bg { "预览原始背景" } else { "隐藏原始背景" }, IconName::File).on_click(cx.listener(|v, _: &ClickEvent, _w, cx| {
+                            v.tbl.hide_bg = !v.tbl.hide_bg;
+                            cx.notify();
+                        })))
+                        .child(div().text_sm().text_color(muted).child("透明度"))
+                        .child(ribbon::icon_btn("bg-less", IconName::Minus, "更透明").on_click(cx.listener(|v, _: &ClickEvent, _w, cx| v.bump_opacity(-0.1, cx))))
+                        .child(ribbon::icon_btn("bg-more", IconName::Plus, "更不透明").on_click(cx.listener(|v, _: &ClickEvent, _w, cx| v.bump_opacity(0.1, cx)))),
+                )
+            })
             .child(div().text_xs().text_color(muted).child("点击选择单元格，Shift / Ctrl 多选，拖动选择一块；拖动表格线调整列宽和行高。"))
             .child(section("Excel导入配置"))
             .child(

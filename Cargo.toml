@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/chixie-rs-core", "crates/chixie-rs-template", "crates/chixie-rs-device", "crates/chixie-rs-doc", "crates/chixie-rs-output", "crates/chixie-rs-cli", "crates/chixie-rs-gui"]
+members = ["crates/chixie-rs-core", "crates/chixie-rs-template", "crates/chixie-rs-import", "crates/chixie-rs-device", "crates/chixie-rs-doc", "crates/chixie-rs-output", "crates/chixie-rs-cli", "crates/chixie-rs-gui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ chixie-rs-device = { path = "crates/chixie-rs-device" }
 chixie-rs-doc = { path = "crates/chixie-rs-doc" }
 chixie-rs-output = { path = "crates/chixie-rs-output" }
 chixie-rs-template = { path = "crates/chixie-rs-template" }
+chixie-rs-import = { path = "crates/chixie-rs-import" }
 aes = "0.8"
 base64 = "0.23.1"
 cbc = "0.1"

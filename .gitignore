@@ -4,3 +4,4 @@
 /docs/chixie3-analysis/tools
 /docs/HANDOFF.md
 *.code-workspace
+/crates/chixie-rs-import/tests/forms-real

@@ -18,6 +18,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+mod import;
 mod table;
 
 use crate::doc_view::paint_guides;
