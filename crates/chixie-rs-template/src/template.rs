@@ -40,8 +40,14 @@ pub enum TemplateKind {
         dashed: bool,
         columns: u32,
         column_gap: f32,
-        /// Vertical divider between columns.
+        /// Per-column widths (mm) when 栏宽相等 is off; empty = equal columns.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_widths: Vec<f32>,
+        /// Vertical divider between columns (分隔线).
         divider: bool,
+        /// Dual-line mode: write into the upper band instead of below it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        write_upper: bool,
     },
     Grid {
         rows: u32,
@@ -67,7 +73,9 @@ impl Template {
             dashed: true,
             columns: 1,
             column_gap: 6.0,
+            column_widths: Vec::new(),
             divider: true,
+            write_upper: false,
         };
         Self { name: name.into(), paper, margins, kind }
     }
@@ -96,17 +104,19 @@ impl Template {
 
     /// Layout ruling for this template.
     pub fn ruling(&self) -> Ruling {
-        match self.kind {
+        match &self.kind {
             TemplateKind::Blank => Ruling::Free,
-            TemplateKind::Ruled { rows_min, rows_max, dual_line, dashed, columns, column_gap, divider } => Ruling::Rows {
-                rows: (rows_min.max(1), rows_max.max(rows_min).max(1)),
-                columns: columns.max(1),
-                column_gap,
-                band: dual_line,
-                dashed,
-                divider,
+            TemplateKind::Ruled { rows_min, rows_max, dual_line, dashed, columns, column_gap, column_widths, divider, write_upper } => Ruling::Rows {
+                rows: ((*rows_min).max(1), (*rows_max).max(*rows_min).max(1)),
+                columns: (*columns).max(1),
+                column_gap: *column_gap,
+                widths: column_widths.clone(),
+                band: *dual_line,
+                upper: *write_upper,
+                dashed: *dashed,
+                divider: *divider,
             },
-            TemplateKind::Grid { rows, cols, cell_w, cell_h, row_gap, col_gap } => {
+            &TemplateKind::Grid { rows, cols, cell_w, cell_h, row_gap, col_gap } => {
                 Ruling::Grid { rows: rows.max(1), cols: cols.max(1), cell: (cell_w, cell_h), gap: (col_gap, row_gap) }
             }
         }
@@ -126,7 +136,79 @@ impl Template {
             TemplateKind::Grid { .. } => "作文格",
         }
     }
+
+    /// ChiXie3's word for this kind in its save messages (笔记 / 表格 / 作文).
+    fn family(&self) -> &'static str {
+        match self.kind {
+            TemplateKind::Blank | TemplateKind::Ruled { .. } => "笔记",
+            TemplateKind::Grid { .. } => "作文",
+        }
+    }
+
+    /// The checks ChiXie3 runs before saving a template (its messages, verbatim).
+    pub fn validate(&self) -> std::result::Result<(), TemplateError> {
+        if self.name.trim().is_empty() {
+            return Err(TemplateError::EmptyName);
+        }
+        let (w, h) = self.paper;
+        if !(w > 0.0 && h > 0.0) {
+            return Err(TemplateError::PaperSize);
+        }
+        let (l, t, r, b) = self.margins;
+        if [l, t, r, b].iter().any(|m| *m < 0.0 || !m.is_finite()) || l + r >= w || t + b >= h {
+            return Err(TemplateError::BadInput);
+        }
+        match &self.kind {
+            TemplateKind::Blank => {}
+            TemplateKind::Ruled { rows_min, rows_max, column_widths, .. } => {
+                if rows_min > rows_max {
+                    return Err(TemplateError::RowsRange);
+                }
+                if *rows_min == 0 || column_widths.iter().any(|w| *w <= 0.0) {
+                    return Err(TemplateError::BadInput);
+                }
+            }
+            &TemplateKind::Grid { rows, cols, cell_w, cell_h, row_gap, col_gap } => {
+                if rows == 0 || cols == 0 || cell_w <= 0.0 || cell_h <= 0.0 || row_gap < 0.0 || col_gap < 0.0 {
+                    return Err(TemplateError::BadInput);
+                }
+                let grid_h = t + rows as f32 * cell_h + rows.saturating_sub(1) as f32 * row_gap;
+                if grid_h > h + 1e-3 {
+                    return Err(TemplateError::GridTooTall);
+                }
+                let grid_w = l + cols as f32 * cell_w + cols.saturating_sub(1) as f32 * col_gap;
+                if grid_w > w + 1e-3 {
+                    return Err(TemplateError::GridTooWide);
+                }
+            }
+        }
+        Ok(())
+    }
 }
+
+/// Why a template can't be saved. `Display` is ChiXie3's message.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum TemplateError {
+    #[error("模板名称不可为空")]
+    EmptyName,
+    /// Another template already has the name; the field is 笔记 / 表格 / 作文.
+    #[error("{0}模板中已经存在该模板名，请修改模板名称")]
+    Duplicate(&'static str),
+    #[error("最小行数不能大于最大行数")]
+    RowsRange,
+    #[error("页面宽度高度必须大于0")]
+    PaperSize,
+    #[error("行数+行间距+上边距的数值超出页面高度，请检查")]
+    GridTooTall,
+    #[error("列数+列间距+左边距的数值超出页面宽度，请检查")]
+    GridTooWide,
+    #[error("数据输入异常")]
+    BadInput,
+}
+
+/// Paper sizes behind ChiXie3's 快捷尺寸 buttons (portrait, mm).
+pub const A4: (f32, f32) = (210.0, 297.0);
+pub const B5: (f32, f32) = (176.0, 250.0);
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TemplateStore {
@@ -195,6 +277,16 @@ impl TemplateStore {
                 self.templates.len() - 1
             }
         }
+    }
+
+    /// `t` may be saved: valid, and its name not taken by another template (`editing` is the name
+    /// it was opened under, so renaming to itself is fine).
+    pub fn check(&self, t: &Template, editing: Option<&str>) -> std::result::Result<(), TemplateError> {
+        t.validate()?;
+        if Some(t.name.as_str()) != editing && self.get(&t.name).is_some() {
+            return Err(TemplateError::Duplicate(t.family()));
+        }
+        Ok(())
     }
 
     pub fn remove(&mut self, name: &str) -> Option<Template> {
@@ -346,5 +438,71 @@ mod tests {
         s.save(&path).unwrap();
         assert_eq!(TemplateStore::load(&path).unwrap(), s);
         assert!(s.remove(&name).is_some());
+    }
+
+    #[test]
+    fn custom_column_widths_and_old_files_still_load() {
+        let mut t = Template::ruled("r", (120.0, 120.0), (10.0, 10.0, 10.0, 10.0), 5);
+        if let TemplateKind::Ruled { columns, column_gap, column_widths, .. } = &mut t.kind {
+            (*columns, *column_gap, *column_widths) = (2, 10.0, vec![60.0, 30.0]);
+        }
+        let doc = layout(&["x"; 7].join("\n"), &font(), &params(&t));
+        assert_eq!(doc.boxes[doc.lines[5].start].x0, 70.0); // 60 + gap 10
+        // Pre-M7 files have no `column_widths` / `write_upper`.
+        let old = "name = \"o\"\npaper = [160.0, 220.0]\nmargins = [1.0, 1.0, 1.0, 1.0]\n[kind]\ntype = \"ruled\"\nrows_min = 20\nrows_max = 20\ndashed = true\ncolumns = 1\ncolumn_gap = 6.0\ndivider = true\n";
+        let t: Template = toml::from_str(old).unwrap();
+        assert!(matches!(t.kind, TemplateKind::Ruled { ref column_widths, write_upper: false, .. } if column_widths.is_empty()));
+    }
+
+    #[test]
+    fn upper_band_puts_text_above_the_partition() {
+        let mut t = Template::ruled("r", (120.0, 120.0), (10.0, 10.0, 10.0, 10.0), 5);
+        if let TemplateKind::Ruled { dual_line, .. } = &mut t.kind {
+            *dual_line = Some(10.0);
+        }
+        let low = layout("x", &font(), &params(&t));
+        if let TemplateKind::Ruled { write_upper, .. } = &mut t.kind {
+            *write_upper = true;
+        }
+        let up = layout("x", &font(), &params(&t));
+        let top = |d: &chixie_rs_core::layout::Document| ink_y(&d.pages[0].strokes).0;
+        // Rows are 20 mm with a 10 mm band: lower text sits under it, upper text inside it.
+        assert!(top(&low) <= -10.0 + 1e-3, "lower {}", top(&low));
+        assert!(top(&up) > -10.0, "upper {}", top(&up));
+    }
+
+    #[test]
+    fn validation_uses_chixie3_messages() {
+        let ok = Template::ruled("n", A4, (20.0, 20.0, 20.0, 20.0), 20);
+        assert_eq!(ok.validate(), Ok(()));
+        let bad = |f: &dyn Fn(&mut Template)| {
+            let mut t = ok.clone();
+            f(&mut t);
+            t.validate().unwrap_err().to_string()
+        };
+        assert_eq!(bad(&|t| t.name = " ".into()), "模板名称不可为空");
+        assert_eq!(bad(&|t| t.paper = (0.0, 10.0)), "页面宽度高度必须大于0");
+        assert_eq!(bad(&|t| t.margins = (150.0, 0.0, 100.0, 0.0)), "数据输入异常");
+        assert_eq!(
+            bad(&|t| if let TemplateKind::Ruled { rows_min, .. } = &mut t.kind {
+                *rows_min = 30;
+            }),
+            "最小行数不能大于最大行数"
+        );
+        let grid = Template::grid("g", (190.0, 255.0), 15.0, 20.0, 20, 20, (8.0, 8.0), (0.0, 2.9));
+        assert_eq!(grid.validate(), Ok(()));
+        let mut tall = grid.clone();
+        tall.kind = TemplateKind::Grid { rows: 30, cols: 20, cell_w: 8.0, cell_h: 8.0, row_gap: 2.9, col_gap: 0.0 };
+        assert_eq!(tall.validate().unwrap_err().to_string(), "行数+行间距+上边距的数值超出页面高度，请检查");
+        let mut wide = grid.clone();
+        wide.kind = TemplateKind::Grid { rows: 20, cols: 30, cell_w: 8.0, cell_h: 8.0, row_gap: 2.9, col_gap: 0.0 };
+        assert_eq!(wide.validate().unwrap_err().to_string(), "列数+列间距+左边距的数值超出页面宽度，请检查");
+        let store = TemplateStore::builtins();
+        let dup = Template::ruled("信纸 22 行", A4, (20.0, 20.0, 20.0, 20.0), 20);
+        assert_eq!(store.check(&dup, None).unwrap_err().to_string(), "笔记模板中已经存在该模板名，请修改模板名称");
+        assert_eq!(store.check(&dup, Some("信纸 22 行")), Ok(()));
+        let mut g2 = grid;
+        g2.name = "作文格 20×20".into();
+        assert_eq!(store.check(&g2, None).unwrap_err().to_string(), "作文模板中已经存在该模板名，请修改模板名称");
     }
 }

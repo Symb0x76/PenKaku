@@ -19,6 +19,7 @@ use chixie_rs_template::Template;
 use chixie_rs_core::layout::{self, Document};
 use gpui_kit::*;
 use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::notification::Notification;
 
 use crate::state::AppState;
@@ -697,6 +698,7 @@ impl Render for DocView {
         let show_guides = cx.global::<AppState>().settings.ui.show_guides;
         let origin_pt = self.origin_point(cx);
         let geom_out = self.geom.clone();
+        let menu_geom = self.geom.clone();
         let reveal = std::mem::take(&mut self.reveal_caret);
         let scroll = self.scroll.clone();
         let this_reveal = entity.clone();
@@ -871,6 +873,31 @@ impl Render for DocView {
                 .min_w(px(total_w))
                 .h(px(total_h)),
             )
+            .context_menu(move |m, window, _cx| {
+                // On the 书写原点 marker: ChiXie3's origin menu; elsewhere the edit commands.
+                let near_origin = menu_geom.get().is_some_and(|g| {
+                    let (_, x, y) = g.unproject(window.mouse_position(), pages);
+                    (x - origin_pt.0).hypot(y - origin_pt.1) <= ORIGIN_GRAB_MM.max(8.0 / g.zoom)
+                });
+                if near_origin {
+                    let set = |o: chixie_rs_core::profile::Origin| {
+                        move |_: &ClickEvent, _w: &mut Window, cx: &mut App| {
+                            let st = cx.global_mut::<AppState>();
+                            st.settings.page.origin = o;
+                            st.save_settings();
+                            cx.refresh_windows();
+                        }
+                    };
+                    use chixie_rs_core::profile::Origin;
+                    use gpui_kit::component::menu::PopupMenuItem;
+                    m.label("书写原点：请确保笔尖在此位置处")
+                        .item(PopupMenuItem::new("移至纸张起点").on_click(set(Origin::Paper)))
+                        .item(PopupMenuItem::new("移至框线起点").on_click(set(Origin::Frame)))
+                        .item(PopupMenuItem::new("自定义原点位置：拖动蓝色圆圈").disabled(true))
+                } else {
+                    m.menu("剪切", Box::new(Cut)).menu("复制", Box::new(Copy)).menu("粘贴", Box::new(Paste)).separator().menu("全选", Box::new(SelectAll))
+                }
+            })
     }
 }
 

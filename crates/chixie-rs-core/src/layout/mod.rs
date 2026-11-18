@@ -118,8 +118,10 @@ pub enum Ruling {
     Free,
     /// Ruled paper: `rows` lines per page (a random count in the range, drawn per page),
     /// `columns` equal columns `column_gap` apart, filled top to bottom then left to right.
-    /// `band`: dual-line mode, an upper band (mm) kept free above the writing line.
-    Rows { rows: (u32, u32), columns: u32, column_gap: f32, band: Option<f32>, dashed: bool, divider: bool },
+    /// `widths`: per-column widths (mm) when they don't share the width equally (empty = equal).
+    /// `band`: dual-line mode, an upper band (mm) above the writing line; text goes below it, or
+    /// into it with `upper`.
+    Rows { rows: (u32, u32), columns: u32, column_gap: f32, widths: Vec<f32>, band: Option<f32>, upper: bool, dashed: bool, divider: bool },
     /// Composition grid: one character per `cell` (w, h), `gap` (col, row) between cells.
     Grid { rows: u32, cols: u32, cell: (f32, f32), gap: (f32, f32) },
 }

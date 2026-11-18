@@ -5,6 +5,28 @@ use crate::font::fontset::Glyphs;
 use crate::font::{Font, Glyph};
 use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, is_cjk, rng_for};
 
+/// Ruled columns as (left x, width) in mm: `widths` when it names every column (scaled down if
+/// they overrun the page), else `columns` equal columns `gap` apart.
+pub(crate) fn column_spans(page_w: f32, columns: u32, gap: f32, widths: &[f32]) -> Vec<(f32, f32)> {
+    let n = columns.max(1) as usize;
+    let room = page_w - gap * (n - 1) as f32;
+    let ws: Vec<f32> = if widths.len() == n && widths.iter().all(|w| *w > 0.0) {
+        let sum: f32 = widths.iter().sum();
+        let k = if sum > room { room / sum } else { 1.0 };
+        widths.iter().map(|w| w * k).collect()
+    } else {
+        vec![room / n as f32; n]
+    };
+    let mut x = 0.0;
+    ws.into_iter()
+        .map(|w| {
+            let span = (x, w);
+            x += w + gap;
+            span
+        })
+        .collect()
+}
+
 /// Pen state while laying out; owns the line/page bookkeeping.
 pub(super) struct Pen<'p> {
     pub(super) p: &'p PageParams,
@@ -66,14 +88,11 @@ impl Pen<'_> {
                 (self.line_x, self.line_w) = (0.0, b.width);
                 (self.row_top, self.row_h, self.text_top) = (self.line_top, self.p.line_height, self.line_top);
             }
-            Ruling::Rows { columns, column_gap, band, .. } => {
+            Ruling::Rows { columns, column_gap, ref widths, band, upper, .. } => {
                 let n = self.rows as usize;
-                let cols = columns.max(1) as f32;
                 let pitch = b.height / n as f32;
-                let col_w = (b.width - column_gap * (cols - 1.0)) / cols;
                 let (c, r) = (self.slot / n, self.slot % n);
-                self.line_x = c as f32 * (col_w + column_gap);
-                self.line_w = col_w;
+                (self.line_x, self.line_w) = column_spans(b.width, columns, column_gap, widths)[c];
                 self.row_top = r as f32 * pitch;
                 self.row_h = pitch;
                 // Sit on the rule: the glyph box (em) ends 0.2 em above the row's line. Captured
@@ -81,7 +100,12 @@ impl Pen<'_> {
                 // on average; ChiXie3 adds a per-row spread of ≈ ±0.35 mm we do not model.
                 let band = band.unwrap_or(0.0).min(pitch);
                 let gap = 0.2 * self.em;
-                self.text_top = (self.row_top + pitch - self.em - gap).max(self.row_top + band);
+                self.text_top = if upper && band > 0.0 {
+                    // Upper band: sit on the band's line the same way.
+                    (self.row_top + band - self.em - gap).max(self.row_top)
+                } else {
+                    (self.row_top + pitch - self.em - gap).max(self.row_top + band)
+                };
             }
             Ruling::Grid { cols, cell: (cw, ch), gap: (cg, rg), .. } => {
                 self.line_x = 0.0;
@@ -101,13 +125,12 @@ impl Pen<'_> {
         let mut g = Vec::new();
         match self.p.ruling {
             Ruling::Free => {}
-            Ruling::Rows { columns, column_gap, band, dashed, divider, .. } => {
+            Ruling::Rows { columns, column_gap, ref widths, band, dashed, divider, .. } => {
                 let n = self.rows;
-                let cols = columns.max(1);
                 let pitch = b.height / n as f32;
-                let col_w = (b.width - column_gap * (cols as f32 - 1.0)) / cols as f32;
-                for c in 0..cols {
-                    let x0 = c as f32 * (col_w + column_gap);
+                let spans = column_spans(b.width, columns, column_gap, widths);
+                let cols = spans.len();
+                for (c, &(x0, col_w)) in spans.iter().enumerate() {
                     for r in 0..=n {
                         let y = r as f32 * pitch;
                         g.push(seg(x0, y, x0 + col_w, y, false));
