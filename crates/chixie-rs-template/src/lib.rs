@@ -3,6 +3,7 @@
 
 pub mod chixie3_templates;
 pub mod fill;
+pub mod library;
 pub mod svg;
 pub mod table;
 pub mod template;

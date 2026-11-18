@@ -28,6 +28,17 @@ pub struct Settings {
     pub style: StyleFile,
     pub ui: UiSettings,
     pub fonts: FontSettings,
+    pub templates: TemplateLibrarySettings,
+}
+
+/// Template library folders (选项 › 模板).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TemplateLibrarySettings {
+    /// The default library folder; `None` = `Documents/chixie-rs/Templates`.
+    pub library_dir: Option<PathBuf>,
+    /// Extra folders scanned for templates (read-only: shared drives, USB sticks).
+    pub extra_dirs: Vec<PathBuf>,
 }
 
 /// Font library folders (选项 › 字体).

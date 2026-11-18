@@ -1123,6 +1123,7 @@ dependencies = [
  "base64 0.23.1",
  "calamine",
  "chixie-rs-core",
+ "directories",
  "image",
  "quick-xml 0.41.0",
  "rust_xlsxwriter",
