@@ -530,6 +530,63 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         cx.update(|cx| cx.global_mut::<AppState>().settings = saved);
         dispatch(cx, vec![Box::new(doc_view::Undo)]);
         println!("AUTOTEST_OUTPUT pens={} serpentine={} rotated={}", output.0, output.1, output.2);
+        // Table forms: a 2×2 form; Tab adds a cell; a clipped cell overflows and 批量溢出
+        // (shrink) fixes it; a 30-name list makes 30 pages; DOCX keeps the text through Word
+        // tables. Template, settings and text are put back.
+        {
+            use chixie_rs_core::layout::{CELL_BREAK, Overflow};
+            use chixie_rs_template::table::ColWidth;
+            let b = CELL_BREAK;
+            let (saved_doc, saved_settings) = cx.update(|cx| (app.read(cx).doc.read(cx).doc().clone(), cx.global::<AppState>().settings.clone()));
+            let view = cx.update(|cx| app.read(cx).doc.clone());
+            cx.update(|cx| {
+                let mut t = chixie_rs_template::Template::table("自测表格", (210.0, 297.0));
+                if let chixie_rs_template::TemplateKind::Table(tt) = &mut t.kind {
+                    tt.insert_table(0, 2, 2, ColWidth::Fixed(40.0), 210.0, 20.0).unwrap();
+                    tt.pages[0].tables[0].cells[3].overflow = Overflow::Clip;
+                }
+                cx.global_mut::<AppState>().templates.upsert(t);
+                app.update(cx, |a, cx| a.apply_template(Some("自测表格".into()), cx));
+                view.update(cx, |v, cx| v.replace_doc(EditDoc::from_text("你"), cx));
+            });
+            cx.background_executor().timer(pause(300)).await;
+            dispatch(cx, vec![Box::new(doc_view::DocEnd), Box::new(doc_view::ToggleIndent)]);
+            cx.background_executor().timer(pause(300)).await;
+            let tab = cx.update(|cx| {
+                let d = view.read(cx).doc();
+                d.text() == format!("你{b}") && d.caret() == 2
+            });
+            cx.update(|cx| view.update(cx, |v, cx| v.replace_doc(EditDoc::from_text(&format!("你{b}好{b}你好{b}{}", "你好".repeat(20))), cx)));
+            cx.background_executor().timer(pause(300)).await;
+            let (cells, over) = cx.update(|cx| {
+                let l = view.read(cx).layout_doc();
+                (l.cells.len(), l.overflowing().count())
+            });
+            cx.update(|cx| crate::table_ui::batch_overflow(&view, 0, cx));
+            cx.background_executor().timer(pause(300)).await;
+            let fixed = cx.update(|cx| over == 1 && view.read(cx).layout_doc().overflowing().count() == 0);
+            let pages = cx.update(|cx| {
+                let Some(chixie_rs_template::TemplateKind::Table(tt)) = cx.global::<AppState>().active_template().map(|t| t.kind) else { return 0 };
+                let names: Vec<String> = (1..=30).map(|i| format!("你{i}")).collect();
+                let chars = view.read(cx).doc_chars().to_vec();
+                let edits = tt.batch_pages(&chars, &names, 0, 1).unwrap_or_default();
+                view.update(cx, |v, cx| v.replace_many(edits, cx));
+                view.read(cx).layout_doc().pages.len()
+            });
+            let docx = cx.update(|cx| {
+                let st = cx.global::<AppState>();
+                let d = view.read(cx).doc().clone();
+                let p = std::env::temp_dir().join("chixie-autotest-table.docx");
+                file_ops::save(&p, &d, 7, &file_ops::table_shapes(st.active_template().as_ref())).and_then(|()| file_ops::open(&p)).is_ok_and(|l| l.doc.text() == d.text())
+            });
+            cx.update(|cx| {
+                let st = cx.global_mut::<AppState>();
+                st.templates.remove("自测表格");
+                st.settings = saved_settings;
+                view.update(cx, |v, cx| v.replace_doc(saved_doc, cx));
+            });
+            println!("AUTOTEST_TABLE tab={tab} cells={cells} overflow_fixed={fixed} batch_pages={pages} docx={docx}");
+        }
         // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
         // 英文字体 role, and survives export + import.
         use chixie_rs_core::font::svg::{self, FontMeta, FontSource};

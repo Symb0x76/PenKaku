@@ -120,22 +120,22 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Editor | 显示框线/行号/页码 | toggles | Partial (template grid toggle) | P2 | S |
 | Editor | 大文本模式 | visible-item culling for big docs | Not needed (native) | P3 | — |
 | Templates | 笔记 (信纸) | ruled rows, fixed/random count, margins | Done (`template.rs` Ruled) | P0 | — |
-| Templates | 双线文档 | dual-line rows, dashed partition | Partial (band; use VERIFY) | P2 | S |
-| Templates | 笔记分栏 | columns, widths, dividers, 异栏同型 | Partial (equal columns) | P2 | S |
+| Templates | 双线文档 | dual-line rows, dashed partition | Done (M7a: upper / lower band; placement VERIFY) | P2 | S |
+| Templates | 笔记分栏 | columns, widths, dividers, 异栏同型 | Partial (M7a: per-column widths; 异栏同型 missing) | P2 | S |
 | Templates | 作文格 | composition grid | Done (`template.rs` Grid) | P0 | — |
-| Templates | 表格模板 | parent cells, internal rows, margins, flags | Missing | P1 | L |
-| Templates | 插入表格 / 绘制表格 / 截图生成 | build table frames | Missing | P2 | M |
+| Templates | 表格模板 | parent cells, internal rows, margins, flags | Done (M7a; 2×2 capture VERIFY) | P1 | L |
+| Templates | 插入表格 / 绘制表格 / 截图生成 | build table frames | Partial (M7a: 插入表格; 截图生成 P3) | P2 | M |
 | Templates | PDF/图片 → 表格框架 | cloud table recognition | Missing | P2 | M |
-| Templates | Excel导入配置 | per-page Excel range | Missing | P2 | S |
-| Templates | 同型标记 | linked cells across pages | Missing | P3 | M |
-| Templates | 数据源配置 | default / random / custom cell data | Missing | P2 | M |
-| Templates | 合并/拆分单元格 | merge, full split, split handles | Missing | P2 | M |
+| Templates | Excel导入配置 | per-page Excel range | Done (M7a) | P2 | S |
+| Templates | 同型标记 | linked cells across pages | Partial (M7a: records only; sync VERIFY) | P3 | M |
+| Templates | 数据源配置 | default / random / custom cell data | Done (M7a) | P2 | M |
+| Templates | 合并/拆分单元格 | merge, full split, split handles | Done (M7a; drag lines to resize) | P2 | M |
 | Templates | 内边距识别 | detect left padding from background image | Missing | P3 | S |
-| Templates | 页面缩略图面板 | page list, background preview, opacity | Missing | P2 | S |
-| Templates | 模板管理 UI | create / save / delete / export, validation | Partial (`templates_view.rs`) | P1 | S |
+| Templates | 页面缩略图面板 | page list, background preview, opacity | Partial (M7a: page list; background with M7b) | P2 | S |
+| Templates | 模板管理 UI | create / save / delete / export, validation | Partial (M7a: ChiXie3 validation, delete confirm; export in M7c) | P1 | S |
 | Templates | `.cx` import | note / composition pickles | Done (`chixie3_templates.rs`) | P1 | — |
 | Templates | 表格模板 import | Fernet + pickle table templates | Missing | P2 | M |
-| Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Done (M6; no right-click menu) | P1 | M |
+| Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Done (M6; right-click menu M7a) | P1 | M |
 | Templates | 模板库 (cloud) | online templates: 绘图/激光/写字 | Missing | P3 | M |
 | Fonts | 字体库 browse | 在线字体 / 我的收藏 / 我的录制, filter, sort, search, pager | Partial (no 录制, no filter/sort UI) | P1 | S |
 | Fonts | 收藏/取消收藏 | `font/collect_a_font`, 30-font cap | Dropped (BOSS, 2026-11-17) | — | — |
@@ -160,7 +160,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Typeset | 全角/半角 | auto conversion | Missing | P2 | S |
 | Typeset | 位置合理性检测 | warn on bad line-start/end punctuation | Done (M3, status-bar badge) | P1 | S |
 | Typeset | 避头尾 | automatic kinsoku (ChiXie3 lacks it) | Done (M3) | P1 | S |
-| Typeset | 表格单元格排版 / 溢出 | rows in cells, 3 overflow plans, batch | Missing | P1 | L |
+| Typeset | 表格单元格排版 / 溢出 | rows in cells, 3 overflow plans, batch | Done (M7a) | P1 | L |
 | Device | 设备列表 / 参数 | named profiles, firmware, type, speed, pen, axis map | Done (`device_params.rs`) | P0 | — |
 | Device | `.cset` import/export | pickled device params | Partial (config.ini import) | P2 | S |
 | Device | USB 连接 / 自动检测 | CH340 / GD32, baud probe | Done (`transport.rs`) | P0 | — |
@@ -233,7 +233,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Settings | 设置 dialog (7 pages) | 常规 写字偏好 多色 绘图 变形 主题 页面旋转 | Partial (`style_dialog.rs`, options) | P1 | M |
 | Files | `.cdoc` | ChiXie document | Missing (`.chx` instead) | P2 | M |
 | Files | 导入 txt/docx/pdf/xlsx | parsers + overwrite/append | Partial (txt) | P1 | M |
-| Files | 批量导入 (批量建页) | one page per list line | Missing | P2 | S |
+| Files | 批量导入 (批量建页) | one page per list line | Done (M7a: list and xlsx) | P2 | S |
 | Files | 打印文字/打印背景图 | QPrinter | Missing | P3 | M |
 | Files | 草稿自动保存 | ChiXie3 has none | Done (better) | P1 | — |
 | Shell | ribbon / QAT / status bar | Word-like chrome | Done (`ribbon.rs`, `app.rs`) | P0 | — |
@@ -503,7 +503,8 @@ share the same cell type), per-column width and spacing spin boxes; exact form `
 help hint "(异栏同型？)" (a "what is this" hint next to 异栏同型; its text is only that label); editing one width splits the
 remaining width evenly with spacing 0 after it; region = page minus margins (B §笔记分栏) [high].
 Import into a multi-column note asks "当前为多栏笔记，请问导入第一列还是第二列？" (C) [high].
-**chixie-rs today:** equal columns with one gap and a divider (`TemplateKind::Ruled.columns`).
+**chixie-rs today:** Done (M7a) except 异栏同型: `TemplateKind::Ruled.column_widths` (empty = 栏宽相等)
+with one gap and a divider; the editor shows a width per column when 栏宽相等 is off.
 **Recommended implementation:** generalise to `columns: Vec<Column { width, gap_after }>` with an
 "equal" helper; text fills column 1 top-to-bottom then column 2 (VERIFY order by capture).
 Import target column becomes a choice in the import dialog.
@@ -515,7 +516,8 @@ double spin box), 虚线分割双行 (`enable_dashed_line_partition`; the form l
 `UI_NoteTemplateDualLineSettingDialog`]. Row position types `TopNoteRow`, `MiddleNoteRow`,
 `BottomNoteRow`, `IndependentRow`. Import asks "当前为双线模式笔记，请问导入至上侧行还是下侧行？"
 (B, C) [high].
-**chixie-rs today:** `dual_line: Option<f32>` band; text stays below the band (VERIFY).
+**chixie-rs today:** `dual_line: Option<f32>` band; text goes below it, or into it with
+`write_upper` (M7a, 文字写在上侧行). Default placement still VERIFY.
 **Recommended implementation:** add a per-row "target band" choice (upper / lower) as a template
 option and in import; capture one dual-line page to pin placement.
 **Open questions / VERIFY:** where ChiXie3 puts text in dual-line rows by default.
@@ -549,7 +551,7 @@ cell): 单元格宽：, 单元格高：, 接受导入：, 内部行数：. 表�
 接受导入：(switch), 内部行数, 提示标识：(hint label text), 左内边距, 上内边距, 下内边距, 右内边距, 排版内边距 (heading for the four margins; so they are "typesetting padding"),
 单元格字体属性 (heading) with 默认字体, 字体加载模式 (combo; 指定字体优先 is one entry, cf. §3.3), 字符宽度比, 默认字号. The main
 window also has ribbon entries 表格功能, 批量溢出 and 作文格功能 (contextual groups).
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M7a): `chixie-rs-template` `table.rs` (tables as column / row grids, cells as a partition with rows, padding, size, alignment, overflow, data source, 接受导入, hint), `TemplateKind::Table`, the frame = the first page's tables; layout `Ruling::Table` fills cells in reading order with the note row rule (2×2 capture VERIFY).
 **Recommended implementation:** core module `table.rs`:
 ```rust
 pub struct TableTemplate { pages: Vec<TablePage>, same_type: Vec<SameTypeRecord> }
@@ -577,7 +579,7 @@ rectangle (Esc/right-click cancel, double-click/Enter confirm), the image goes t
 table recognition like file import (B §插入表格, §截图生成) [high]. A confirmation dialog 截图导入表格
 (`UI_ImportTemplateByScreenShotDialog` [ui-form]) with the button 生成并导入 presumably shows the captured image before it
 is sent (inferred; the form has only a title and that button).
-**chixie-rs today:** missing.
+**chixie-rs today:** Partial (M7a): 插入表格 dialog (quick grid, rows / cols, 固定 / 自动列宽 with ChiXie3's width error, 为新表格记忆此尺寸). 绘制表格 by dragging and 截图生成 are not done.
 **Recommended implementation:** hover grid as a gpui popover (8×10 squares); custom dialog with
 the same validation. Skip screen capture (P3): users can save a screenshot and import the image.
 
@@ -600,7 +602,7 @@ prefer asking the user to export the page as PNG for now. Verify on 3 real forms
 **ChiXie3:** per page (group 范围配置 with sub-groups 左上角 and 右下角 [ui-form `UI_TableTemplateImportConfigOfExcel`]):
 左上列 (letters), 左上行 (digits), 右下列, 右下行; validation "行号输入框中只能输入数字",
 "列号输入框中只能输入字母", "如需保存请填写所有所有输入框数据", "暂存成功" (B) [high].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M7a): `TablePage.excel_range`, the four fields with ChiXie3's messages and 暂存成功.
 **Recommended implementation:** `excel_range: Option<CellRange>` on `TablePage`, parsed with an
 `A1` parser (`excel_column_to_number`). Used by xlsx import (§3.15).
 
@@ -612,7 +614,7 @@ one record only; "同型标记中，暂不支持前页单元格是后页单元�
 table document, cells of a record are re-keyed so they stay linked (B §同型标记; C §同型标记)
 [high]; exact user-visible effect [med] (inferred: equivalent cells across repeated pages
 receive the same content).
-**chixie-rs today:** Missing.
+**chixie-rs today:** Partial (M7a): records of ≥ 2 cells (one record per cell), kept in step when pages move or go; nothing is synced yet (VERIFY what ChiXie3 does with them).
 **Recommended implementation:** P3. Model as `SameTypeRecord { name, cells: Vec<CellId> }`; when
 the user types into one member, offer "同步到同型单元格". VERIFY intended behaviour with the vendor.
 
@@ -627,7 +629,7 @@ with 默认值：; 随机值模式 with two sub-modes 数值范围内随机 (取
 box, one choice per line); 指定单元格模式 with 绑定单元格（仅限于导入文件使用）, （Excel模式）, 行号：, 列号：; buttons save and close.
 Context menu 刷新数据(本页) / 刷新数据(所有页); offered when
 pages are added ("询问用户是否加载页面数据源数据源") (B §数据源配置; C §表格数据源) [high].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M7a): `DataSource` (无 / 默认值 / 随机值 range or choices / 指定单元格) with ChiXie3's dialog and messages; ribbon 表格功能 › 刷新数据(本页 / 所有页) fills them as one undo step, a new draw each time (换一组). Not done: the prompt when pages are added.
 **Recommended implementation:** `enum DataSource { None, Fixed(String), RandomNumber { min, max,
 decimals }, RandomChoice(Vec<String>), FromImport { row, col } }`; generation uses the document
 seed + cell id + page index (deterministic, re-rollable with 换一组). Typical use: forms such as
@@ -637,7 +639,7 @@ temperature logs. Test: same seed → same values; different page → different 
 **ChiXie3:** merge selected cells; split is a full split ("目前版本是完全拆分解组单元格，不是取消合并上一次合并的单元格");
 drag split handles between cells; corner/edge resize handles; position lock; Delete deletes
 the selected table (B) [high].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M7a): merge needs a rectangle, split is complete (as ChiXie3), drag a table's lines to resize columns / rows, 位置锁定.
 **Recommended implementation:** cells as a rectangle partition of the table; merge = union of an
 axis-aligned rectangle of cells (reject non-rectangular selections); split = back to the
 underlying grid lines. Handles in the template editor canvas only.
@@ -653,7 +655,7 @@ pixel per row and set `margin_left`; errors "请先选中表格单元格再识�
 **ChiXie3:** buttons 预览原始背景, 上移选中页面, 下移选中页面, 删除选中页面, 增加空白页面, slider 透明度;
 messages "请先选中页面缩略图再使用此功能", "当前已经是第一页，无法上移", "请至少保留一个页面", confirms
 "确认要删除页面 <n> 吗？", "确认复制模板页面的第 <n> 页吗？（默认会复制为最后一页）" (B) [high].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Partial (M7a): a page list in the table editor with 增加 / 复制 / 上移 / 下移 / 删除 and ChiXie3's confirms; thumbnails of a background image come with M7b.
 **Recommended implementation:** part of the table template editor; a vertical list of page
 thumbnails rendered from the same layout code.
 
@@ -980,7 +982,7 @@ button 清空/忽略溢出内容. `UI_BatchOverflowHandlingDialog` (title 批量
 "点击溢出单元格左上角的警告标志，即可处理单个单元格溢出" (the warning badge sits at the cell's top-left corner), and three radio
 buttons 优先缩放字符 / 优先增加内部行数 / 优先忽略溢出内容, the counter 当前溢出单元格： ("0 个" placeholder) and the
 button 开始处理.
-**chixie-rs today:** missing.
+**chixie-rs today:** Done (M7a): overflow is a layout result (`Document.cells`, `CellInfo.overflow_from`); per-cell `Overflow::{Shrink, AddRows, Clip}` fitted with a few layout passes; a red badge on each overflowing cell opens 内容溢出 (方案1/2/3 with trial numbers, 清空溢出内容); 表格功能 › 批量溢出处理. Overflow is never written. Editing is never blocked.
 **Recommended implementation:** make overflow a layout result, not an editor state:
 `CellLayout { fitted: bool, overflow_from: Option<usize> }`. Cell policy per cell:
 `Overflow::Shrink { min_size }` (default: binary-search the largest size ≤ the cell size that
@@ -1969,7 +1971,7 @@ poor; ask users to copy-paste). Overwrite/append/insert-at-caret choice in one d
 expanded; cells with `accept_import=False` or a custom data source skipped; visual row/column
 mapping; number formats `General`, `0`, `0.0`, `0.00`, `0.000`, `0_ `, `m"月"d"日";@` (→ M月D日),
 datetime suffix stripped; formulas not supported (C §XLSX) [high].
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M7a): `calamine` 0.38 (xlsx / xls / ods), merges expanded, cached formula values; numbers without trailing zeros (calamine does not expose number formats, so `0.00` prints `36.5`), dates as M月D日.
 **Recommended implementation:** after tables: `calamine` (new crate; reason: reads xlsx/xls/ods,
 pure Rust, gives cached formula results — supports `.xls` too, better than ChiXie3) mapped through
 the page's `excel_range`. Tests on a fixture workbook with merges and formats.
@@ -1982,7 +1984,7 @@ line and writes the line into the selected target cell; other cells keep data-so
 (card text "批量导入数据文件，或导入多页表格实现批量数据导入") and 批量名单建页 (card text "根据名单数据，自动新建对应数量表格页面并填充",
 button 批量建页, label 目标单元格 showing 未选中 until a cell is chosen, text box 名单数据：). The first page has only the
 hint card on the form, so it is probably a pointer to normal data-file import (inferred).
-**chixie-rs today:** Missing.
+**chixie-rs today:** Done (M7a): 表格功能 › 批量导入… with 批量导入数据 (a workbook, one page per sheet) and 批量名单建页 (one page per line into the caret's cell, ChiXie3's messages). The CSV / `{{name}}` mail merge for notes is not done.
 **Recommended implementation:** generalise to mail merge: a CSV/TSV with a header row; each column
 binds to a cell (tables) or to a `{{name}}` placeholder in note text; one page (or one document
 copy) per row. Works for notes too (e.g. 30 personalised letters). P2, S after tables / with

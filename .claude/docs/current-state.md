@@ -234,4 +234,19 @@
     ruled pages, no effect on 作文格 (`Document.grid` skips it); rotation 1 = odd, 2 = even, about the
     frame centre. Local harness gained `-Text2` (typed Enter) and `-StartX` (▶ moves per template).
   - Open: auto changer slot editor; hardware #13d/#13e; not captured: rotation mode 3, 起点模式.
-
+- **M6 merged 2026-11-17** (`f9680d0`).
+- **M7 split (BOSS 2026-11-18):** M7a tables, M7b table-frame detector, M7c local template library (no cloud).
+- **M7a in progress (2026-11-18), branch `m7a-tables`:**
+  - New crate `chixie-rs-template`: `template.rs`, `chixie3_templates.rs` (moved from core), `table.rs` (TableTemplate /
+    Table / Cell / Span / DataSource / SameType / CellRange, merge / split / pages), `fill.rs` (data-source values,
+    refresh, batch_pages, import_sheets), `xlsx.rs` (calamine 0.38). Core keeps the template name only;
+    `Settings::page_params_with(Ruling)`, `Template::apply_to(&mut PageSettings)`.
+  - Core layout: `Ruling::Table`, `CELL_BREAK` (U+001F), `CellBox` / `CellInfo` / `CellFit`, `Overflow`, `VAlign`,
+    `Document.cells`; layout_flow fits Shrink / AddRows with extra passes; overflow clipped, never written.
+    `Ruling::Rows` gained `widths` and `upper`.
+  - Doc: `EditDoc::{next_cell, prev_cell, replace_many}`; DOCX `write_tables` / `TableShape` (w:tbl, gridSpan, vMerge),
+    cell break outside tables written as a tab; `chixie_rs_doc::save` takes table shapes.
+  - GUI: `templates_view/table.rs` (table editor), `table_ui.rs` (内容溢出, 批量溢出, 刷新数据, 批量导入), Tab / Shift+Tab,
+    overflow badge, ribbon 表格功能, origin right-click menu, template save checks, per-column widths, upper band.
+  - Autotest `AUTOTEST_TABLE` (grepped in CI). Not run locally (BOSS at the screen); CI runs it.
+  - Open: ChiXie3 2×2 form capture (needs BOSS AFK), 绘制表格 drag, 同型 sync, 异栏同型, data-source prompt on new pages.

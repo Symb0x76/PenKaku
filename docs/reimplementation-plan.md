@@ -100,7 +100,7 @@ milestone that needs it, never as a big-bang move.
 | `chixie-rs-doc` | Document model (flows, runs, paragraphs, cells, papers), edit commands + undo, DOCX read/write with the custom XML part, `.chx` v1 migration | M2 |
 | `chixie-rs-font` | font parsing/decrypt, local store, roles + mixing + fallback, glyph clean-ups | M4 (moves `font.rs`, `font_store.rs`) |
 | `chixie-rs-layout` | typesetting (kinsoku, alignment, indent, width classes, grid, cells, overflow), handwriting effects, deformation | M3 (moves `layout.rs`, `handwriting.rs`, `deformation.rs`) |
-| `chixie-rs-template` | template kinds (ruled, grid, table), editor ops, `.cx` / table import, data sources | M7 (moves `template.rs`, `chixie3_templates.rs`) |
+| `chixie-rs-template` | template kinds (ruled, grid, table), editor ops, `.cx` / xlsx import, data sources | M7a (moved `template.rs`, `chixie3_templates.rs`; core keeps only the template name, `page_params_with` takes a `Ruling`) |
 | `chixie-rs-output` | stroke pipeline: transform → order/plan → pen/colour segments → G-code dialects; job description | M6 (moved the emitter out of `gcode.rs`; the device settings stay in core as `profile.rs` because `config.rs` stores them, and `calibration.rs` stays in core because it fits layout scale) |
 | `chixie-rs-device` | transports (serial, Telnet, ESP3D HTTP), Grbl streamer, device actor, discovery, firmware dialects (Grbl_ESP32, ChiXie N1) | M1 (moves `transport.rs`, `grbl.rs`, `device.rs`, `esp3d.rs`, `discovery.rs`) |
 | `chixie-rs-cloud` | API client, session, cloud fonts, cloud template library, parameter sync | M4 (moves `api.rs`, `session.rs`, `credentials.rs`) |
@@ -390,6 +390,15 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
   - shrink makes overflow fit;
   - xlsx with merges maps correctly;
   - a 30-row batch makes 30 pages.
+
+**M7 status (2026-11-18).** Split into three merges (BOSS): M7a tables, M7b detector, M7c local
+template library (no cloud: ChiXie3 has no template backend; the online tabs wait for M10).
+- **M7a (branch `m7a-tables`):** `chixie-rs-template` (templates, table forms, data sources, xlsx
+  via `calamine`); cell text is one flow with `CELL_BREAK` segments (BOSS); per-cell layout with
+  shrink / add rows / clip fitting; Tab / Shift+Tab; Word tables in DOCX; table editor; 刷新数据;
+  批量导入 (list, xlsx); ChiXie3 save checks; per-column widths; upper dual-line band; origin
+  right-click menu. Open: the ChiXie3 2×2 form capture (cell placement VERIFY), 绘制表格 by
+  dragging, 同型 sync, 异栏同型, the prompt to load data sources when pages are added.
 
 ### M8 Files and editor UX (3–4 wk) — spec R3 (UX part)
 - Find/replace with options; Word-style context menu.
