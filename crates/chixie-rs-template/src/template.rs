@@ -531,9 +531,7 @@ mod tests {
         let mut t = Template::table("新建表格", A4);
         if let TemplateKind::Table(tt) = &mut t.kind {
             tt.insert_table(0, 2, 2, ColWidth::Fixed(84.0), A4.0, 21.0).unwrap();
-            for r in &mut tt.pages[0].tables[0].rows {
-                *r = 12.0;
-            }
+            tt.pages[0].tables[0].rows.fill(12.0);
             tt.pages[0].tables[0].y = 30.0;
         }
         let b = chixie_rs_core::layout::CELL_BREAK;
