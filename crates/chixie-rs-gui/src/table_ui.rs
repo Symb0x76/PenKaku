@@ -139,6 +139,33 @@ pub fn open_batch_overflow(view: Entity<DocView>, window: &mut Window, cx: &mut 
     });
 }
 
+/// 刷新数据(本页 / 所有页): data-source cells get fresh values (a new draw each time, so it is
+/// also 换一组). One undo step.
+pub fn refresh_data(view: &Entity<DocView>, all: bool, window: &mut Window, cx: &mut App) {
+    let Some(TemplateKind::Table(tt)) = cx.global::<AppState>().active_template().map(|t| t.kind) else { return };
+    let (edits, n) = {
+        let v = view.read(cx);
+        let chars = v.doc_chars();
+        let pages = if all {
+            0..tt.page_count(chars)
+        } else {
+            let caret = v.caret_index();
+            let seg = chars[..caret.min(chars.len())].iter().filter(|&&c| c == chixie_rs_core::layout::CELL_BREAK).count();
+            let j = tt.page_of_segment(seg);
+            j..j + 1
+        };
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+        let n = pages.len();
+        (tt.refresh(chars, pages, seed), n)
+    };
+    if edits.is_empty() {
+        window.push_notification(Notification::info("没有设置数据源的单元格（模板管理 › 单元格 › 数据源）"), cx);
+        return;
+    }
+    view.update(cx, |v, cx| v.replace_many(edits, cx));
+    window.push_notification(Notification::success(format!("已刷新 {n} 页的数据")), cx);
+}
+
 /// Apply plan `which` (0 shrink, 1 add rows, 2 ignore) to every overflowing cell; returns how many.
 pub fn batch_overflow(view: &Entity<DocView>, which: usize, cx: &mut App) -> usize {
     let Some(mut t) = cx.global::<AppState>().active_template() else { return 0 };

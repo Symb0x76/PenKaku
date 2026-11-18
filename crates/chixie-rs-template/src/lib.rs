@@ -2,6 +2,7 @@
 //! the reader for ChiXie3's own `.cx` note / grid templates.
 
 pub mod chixie3_templates;
+pub mod fill;
 pub mod table;
 pub mod template;
 

@@ -18,6 +18,8 @@ use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+mod table;
+
 use crate::doc_view::paint_guides;
 use crate::ribbon;
 use crate::state::AppState;
@@ -78,6 +80,8 @@ pub struct TemplatesView {
     nums: Vec<(F, Entity<InputState>)>,
     /// Per-column widths (栏宽相等 off), one input per possible column.
     col_widths: Vec<Entity<InputState>>,
+    /// Table form editing state (selected page and cells).
+    tbl: table::TableEdit,
     /// Suppress change events while filling the form.
     loading: bool,
     dirty: bool,
@@ -114,7 +118,7 @@ impl TemplatesView {
             }));
             col_widths.push(st);
         }
-        let mut this = Self { selected: 0, draft: None, original: String::new(), name, nums, col_widths, loading: false, dirty: false, _subs: subs };
+        let mut this = Self { selected: 0, draft: None, original: String::new(), name, nums, col_widths, tbl: Default::default(), loading: false, dirty: false, _subs: subs };
         let active = cx.global::<AppState>().settings.page.template.clone();
         let ix = active.and_then(|n| cx.global::<AppState>().templates.templates.iter().position(|t| t.name == n)).unwrap_or(0);
         this.select(ix, window, cx);
@@ -133,6 +137,7 @@ impl TemplatesView {
         };
         self.selected = ix;
         self.original = t.name.clone();
+        self.reset_table_edit();
         self.loading = true;
         let set = |e: &Entity<InputState>, v: String, window: &mut Window, cx: &mut Context<Self>| e.update(cx, |s, cx| s.set_value(v, window, cx));
         set(&self.name, t.name.clone(), window, cx);
@@ -397,6 +402,9 @@ impl TemplatesView {
                     })))
                     .child(ribbon::small("new-blank", "新建空白", IconName::File).on_click(cx.listener(|v, _: &ClickEvent, w, cx| {
                         v.add(Template::blank("新空白页", (210.0, 297.0)), w, cx)
+                    })))
+                    .child(ribbon::small("new-table", "新建表格", IconName::LayoutGrid).on_click(cx.listener(|v, _: &ClickEvent, w, cx| {
+                        v.add(Template::table("新表格", (210.0, 297.0)), w, cx)
                     }))),
             )
             .child(v_flex().id("tpl-list").gap_0p5().max_h(px(360.)).overflow_y_scroll().children(rows))
@@ -566,12 +574,6 @@ impl TemplatesView {
         .into_any_element()
     }
 
-    /// Table form editing (插入表格, cells, pages): filled in by the table editor.
-    fn table_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        div().pt_2().text_xs().text_color(muted).child("表格模板").into_any_element()
-    }
-
     fn set_paper(&mut self, w: f32, h: f32, window: &mut Window, cx: &mut Context<Self>) {
         for (f, v) in [(F::PaperW, w), (F::PaperH, h)] {
             let e = self.input(f).clone();
@@ -690,6 +692,12 @@ impl Render for TemplatesView {
             .items_start()
             .child(self.list(cx))
             .child(div().w(px(440.)).flex_none().child(self.form(cx)))
-            .child(div().flex_1().min_w(px(240.)).h(px(520.)).rounded_md().bg(desk).p_3().child(preview(self.draft.clone(), gpui_kit::white(), border)))
+            .child(div().flex_1().min_w(px(240.)).h(px(520.)).rounded_md().bg(desk).p_3().child(
+                if matches!(self.draft.as_ref().map(|t| &t.kind), Some(TemplateKind::Table(_))) {
+                    self.table_canvas(cx)
+                } else {
+                    preview(self.draft.clone(), gpui_kit::white(), border).into_any_element()
+                },
+            ))
     }
 }

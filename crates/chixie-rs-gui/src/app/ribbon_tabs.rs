@@ -163,7 +163,17 @@ impl ChixieRsApp {
                         small("next-cell", "下一格 (Tab)", IconName::ArrowRight).on_click(act(Box::new(doc_view::ToggleIndent))).into_any_element(),
                         small("prev-cell", "上一格 (Shift+Tab)", IconName::ArrowLeft).on_click(act(Box::new(doc_view::PrevCell))).into_any_element(),
                         small("overflow", if overflowing > 0 { format!("批量溢出 ({overflowing})") } else { "批量溢出".to_string() }, IconName::TriangleAlert)
-                            .on_click(move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_overflow(view.clone(), w, cx))
+                            .on_click({
+                                let view = view.clone();
+                                move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_overflow(view.clone(), w, cx)
+                            })
+                            .into_any_element(),
+                        small("refresh", "刷新数据", IconName::RefreshCw)
+                            .dropdown_menu(move |m, _w, _cx| {
+                                let (v1, v2) = (view.clone(), view.clone());
+                                m.item(PopupMenuItem::new("刷新数据(本页)").on_click(move |_, w, cx| crate::table_ui::refresh_data(&v1, false, w, cx)))
+                                    .item(PopupMenuItem::new("刷新数据(所有页)").on_click(move |_, w, cx| crate::table_ui::refresh_data(&v2, true, w, cx)))
+                            })
                             .into_any_element(),
                     ]),
                     None,

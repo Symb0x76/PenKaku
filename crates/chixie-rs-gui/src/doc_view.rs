@@ -494,6 +494,14 @@ impl DocView {
     pub fn doc_chars(&self) -> &[char] {
         self.doc.chars()
     }
+    pub fn caret_index(&self) -> usize {
+        self.doc.caret()
+    }
+    /// Several replacements as one undo step (刷新数据, 批量建页).
+    pub fn replace_many(&mut self, edits: Vec<(Range<usize>, String)>, cx: &mut Context<Self>) {
+        self.doc.replace_many(edits);
+        self.edited(cx);
+    }
     /// Delete chars `r` (one undo step).
     pub fn delete_range(&mut self, r: Range<usize>, cx: &mut Context<Self>) {
         self.doc.select_range(r);
