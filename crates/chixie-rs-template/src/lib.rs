@@ -2,6 +2,8 @@
 //! the reader for ChiXie3's own `.cx` note / grid templates.
 
 pub mod chixie3_templates;
+pub mod table;
 pub mod template;
 
-pub use template::{Template, TemplateKind, TemplateStore};
+pub use table::TableTemplate;
+pub use template::{Template, TemplateError, TemplateKind, TemplateStore};

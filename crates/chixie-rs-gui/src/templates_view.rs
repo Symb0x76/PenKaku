@@ -156,6 +156,7 @@ impl TemplatesView {
                 (F::RowGap, row_gap),
                 (F::ColGap, col_gap),
             ]),
+            TemplateKind::Table(_) => {}
         }
         for (f, v) in vals {
             let e = self.input(f).clone();
@@ -217,6 +218,7 @@ impl TemplatesView {
                 *row_gap = n(F::RowGap, *row_gap);
                 *col_gap = n(F::ColGap, *col_gap);
             }
+            TemplateKind::Table(_) => {}
         }
         if matches!(t.kind, TemplateKind::Grid { .. }) {
             t.margins = t.grid_margins();
@@ -454,6 +456,8 @@ impl TemplatesView {
             TemplateKind::Grid { .. } => {
                 col = col.child(section("位置")).child(h_flex().gap_3().child(field("左边距", F::Left, "mm")).child(field("上边距", F::Top, "mm")));
             }
+            // A table form's frame is its tables.
+            TemplateKind::Table(_) => {}
         }
         match t.kind {
             TemplateKind::Blank => col = col.child(div().pt_2().text_xs().text_color(muted).child("空白页：行距在「开始 › 段落」中设置。")),
@@ -543,6 +547,7 @@ impl TemplatesView {
                     .child(h_flex().gap_3().child(field("格宽", F::CellW, "mm")).child(field("格高", F::CellH, "mm")))
                     .child(h_flex().gap_3().child(field("行间距", F::RowGap, "mm")).child(field("列间距", F::ColGap, "mm")));
             }
+            TemplateKind::Table(_) => col = col.child(self.table_panel(cx)),
         }
         col.child(
             h_flex()
@@ -559,6 +564,12 @@ impl TemplatesView {
                 ))),
         )
         .into_any_element()
+    }
+
+    /// Table form editing (插入表格, cells, pages): filled in by the table editor.
+    fn table_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        div().pt_2().text_xs().text_color(muted).child("表格模板").into_any_element()
     }
 
     fn set_paper(&mut self, w: f32, h: f32, window: &mut Window, cx: &mut Context<Self>) {
@@ -624,6 +635,7 @@ pub fn kind_icon(k: &TemplateKind) -> IconName {
         TemplateKind::Blank => IconName::File,
         TemplateKind::Ruled { .. } => IconName::Rows3,
         TemplateKind::Grid { .. } => IconName::Grid3x3,
+        TemplateKind::Table(_) => IconName::LayoutGrid,
     }
 }
 

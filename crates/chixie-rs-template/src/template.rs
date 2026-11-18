@@ -4,6 +4,7 @@
 //! - `Ruled`: letter paper with N rule lines per page (fixed, or a random count per page),
 //!   optional dual-line band and equal columns.
 //! - `Grid`: composition paper (作文格), one character per cell.
+//! - `Table`: forms (表格模板); text fills the cells one segment each (see [`crate::table`]).
 //!
 //! Templates only position text; their ruling is drawn in the editor but never plotted.
 //! Stored as `templates.toml` next to `settings.toml`.
@@ -13,6 +14,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use chixie_rs_core::layout::Ruling;
+
+use crate::table::TableTemplate;
 use chixie_rs_core::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,6 +60,7 @@ pub enum TemplateKind {
         row_gap: f32,
         col_gap: f32,
     },
+    Table(TableTemplate),
 }
 
 impl Template {
@@ -89,9 +93,19 @@ impl Template {
         t
     }
 
+    /// An empty table form (one blank page; 插入表格 adds tables).
+    pub fn table(name: &str, paper: (f32, f32)) -> Self {
+        Self { name: name.into(), paper, margins: (0.0, 0.0, 0.0, 0.0), kind: TemplateKind::Table(TableTemplate::new()) }
+    }
+
     /// Margins for a grid: left/top as set, right/bottom = what the grid leaves of the paper.
+    /// For a table form: the first page's tables are the frame (the pen starts at their corner).
     pub fn grid_margins(&self) -> (f32, f32, f32, f32) {
         let (l, t, ..) = self.margins;
+        if let TemplateKind::Table(tt) = &self.kind {
+            let Some((x0, y0, x1, y1)) = tt.frame() else { return (0.0, 0.0, 0.0, 0.0) };
+            return (x0, y0, (self.paper.0 - x1).max(0.0), (self.paper.1 - y1).max(0.0));
+        }
         match self.kind {
             TemplateKind::Grid { rows, cols, cell_w, cell_h, row_gap, col_gap } => {
                 let w = cols as f32 * cell_w + cols.saturating_sub(1) as f32 * col_gap;
@@ -119,6 +133,10 @@ impl Template {
             &TemplateKind::Grid { rows, cols, cell_w, cell_h, row_gap, col_gap } => {
                 Ruling::Grid { rows: rows.max(1), cols: cols.max(1), cell: (cell_w, cell_h), gap: (col_gap, row_gap) }
             }
+            TemplateKind::Table(tt) => {
+                let (l, t, ..) = self.grid_margins();
+                Ruling::Table { pages: tt.cell_boxes(l, t) }
+            }
         }
     }
 
@@ -134,6 +152,7 @@ impl Template {
             TemplateKind::Blank => "空白",
             TemplateKind::Ruled { .. } => "信纸",
             TemplateKind::Grid { .. } => "作文格",
+            TemplateKind::Table(_) => "表格",
         }
     }
 
@@ -142,6 +161,7 @@ impl Template {
         match self.kind {
             TemplateKind::Blank | TemplateKind::Ruled { .. } => "笔记",
             TemplateKind::Grid { .. } => "作文",
+            TemplateKind::Table(_) => "表格",
         }
     }
 
@@ -181,6 +201,11 @@ impl Template {
                     return Err(TemplateError::GridTooWide);
                 }
             }
+            TemplateKind::Table(tt) => {
+                if tt.pages.is_empty() || tt.pages.iter().any(|p| p.tables.is_empty()) {
+                    return Err(TemplateError::BlankTablePage);
+                }
+            }
         }
         Ok(())
     }
@@ -204,6 +229,8 @@ pub enum TemplateError {
     GridTooWide,
     #[error("数据输入异常")]
     BadInput,
+    #[error("存在空白页面，无法新建表格模板")]
+    BlankTablePage,
 }
 
 /// Paper sizes behind ChiXie3's 快捷尺寸 buttons (portrait, mm).
@@ -469,6 +496,26 @@ mod tests {
         // Rows are 20 mm with a 10 mm band: lower text sits under it, upper text inside it.
         assert!(top(&low) <= -10.0 + 1e-3, "lower {}", top(&low));
         assert!(top(&up) > -10.0, "upper {}", top(&up));
+    }
+
+    #[test]
+    fn table_forms_lay_out_from_their_frame_and_round_trip() {
+        use crate::table::ColWidth;
+        let mut t = Template::table("表", A4);
+        assert_eq!(t.validate().unwrap_err().to_string(), "存在空白页面，无法新建表格模板");
+        if let TemplateKind::Table(tt) = &mut t.kind {
+            tt.insert_table(0, 2, 2, ColWidth::Fixed(40.0), A4.0, 20.0).unwrap();
+        }
+        assert_eq!(t.validate(), Ok(()));
+        // The frame is the table: the pen starts at its corner.
+        assert_eq!(t.grid_margins(), (20.0, 20.0, A4.0 - 100.0, A4.1 - 40.0));
+        let b = chixie_rs_core::layout::CELL_BREAK;
+        let doc = layout(&format!("x{b}x{b}x{b}x"), &font(), &params(&t));
+        assert_eq!(doc.cells.len(), 4);
+        assert_eq!(doc.cells[3].rect, (40.0, -10.0, 80.0, -20.0));
+        let store = TemplateStore { templates: vec![t.clone()] };
+        let text = toml::to_string_pretty(&store).unwrap();
+        assert_eq!(toml::from_str::<TemplateStore>(&text).unwrap(), store);
     }
 
     #[test]

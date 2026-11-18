@@ -124,6 +124,89 @@ pub enum Ruling {
     Rows { rows: (u32, u32), columns: u32, column_gap: f32, widths: Vec<f32>, band: Option<f32>, upper: bool, dashed: bool, divider: bool },
     /// Composition grid: one character per `cell` (w, h), `gap` (col, row) between cells.
     Grid { rows: u32, cols: u32, cell: (f32, f32), gap: (f32, f32) },
+    /// Table form: `pages[k]` lists page k's cells in writing order; the template's pages repeat.
+    /// The text's [`CELL_BREAK`]-separated segments fill the cells one by one.
+    Table { pages: Vec<Vec<CellBox>> },
+}
+
+/// Ends a table cell's text: the next character starts the next cell (Tab in the editor).
+pub const CELL_BREAK: char = '\u{1F}';
+
+/// Vertical placement of a cell's lines.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VAlign {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+
+/// What a cell does with text that needs more rows than it has (ChiXie3 内容溢出 方案1/2/3).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Overflow {
+    /// 方案1 缩放字符: shrink the characters until the text fits, down to `min` × their size.
+    Shrink { min: f32 },
+    /// 方案2 增加行数: up to `max` rows; the characters shrink with the rows.
+    AddRows { max: u32 },
+    /// 方案3 忽略溢出内容: what does not fit is not written.
+    Clip,
+}
+
+impl Default for Overflow {
+    fn default() -> Self {
+        Overflow::Shrink { min: 0.4 }
+    }
+}
+
+/// One table cell as layout sees it: a box (mm from the writable top-left, y down) holding
+/// `rows` writing rows inside its padding, with its own size, alignment and overflow policy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellBox {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub rows: u32,
+    /// (left, top, right, bottom) mm.
+    pub padding: (f32, f32, f32, f32),
+    pub align: Align,
+    pub valign: VAlign,
+    /// Character size relative to the document's.
+    pub scale: f32,
+    pub overflow: Overflow,
+}
+
+impl Default for CellBox {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, w: 10.0, h: 10.0, rows: 1, padding: (1.0, 0.0, 1.0, 0.0), align: Align::Left, valign: VAlign::Top, scale: 1.0, overflow: Overflow::default() }
+    }
+}
+
+/// How a cell's text was finally set: size relative to the document's, and rows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellFit {
+    pub scale: f32,
+    pub rows: u32,
+}
+
+/// A filled table cell after layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellInfo {
+    pub page: usize,
+    /// Index into the template page's cells.
+    pub cell: usize,
+    /// Which `CELL_BREAK`-separated segment of the text this is.
+    pub seg: usize,
+    /// Its chars: `start..end` (`end` is the break, or the text end).
+    pub start: usize,
+    pub end: usize,
+    /// (left, top, right, bottom) in machine mm.
+    pub rect: (f32, f32, f32, f32),
+    pub fit: CellFit,
+    /// First char that did not fit (not written); `None` when everything fits.
+    pub overflow_from: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -145,6 +228,15 @@ pub struct Document {
     pub punct_issues: Vec<usize>,
     /// Laid out on a composition grid (one character per cell).
     pub grid: bool,
+    /// Table forms: every filled cell, in writing order.
+    pub cells: Vec<CellInfo>,
+}
+
+impl Document {
+    /// Cells whose text does not fit (the 内容溢出 badge).
+    pub fn overflowing(&self) -> impl Iterator<Item = &CellInfo> {
+        self.cells.iter().filter(|c| c.overflow_from.is_some())
+    }
 }
 
 /// Where one input character sits (machine mm; y up, so `top > bottom`).
@@ -353,14 +445,75 @@ pub fn half_width(c: char, letters: bool) -> bool {
 pub const HALF_SPACE: char = '\u{2009}';
 
 /// Lay out a [`Flow`]. See [`layout_ids`].
+///
+/// Table forms: cells whose text overflows are fitted by their policy (shrink, more rows) with a
+/// few extra passes; every segment always lands in the same cell, so the cells are searched
+/// together and independently.
 pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
+    let Ruling::Table { pages } = &p.ruling else { return layout_pass(f, font, p, &[]) };
+    let pages: Vec<Vec<CellBox>> = pages.iter().filter(|c| !c.is_empty()).cloned().collect();
+    if pages.is_empty() {
+        return layout_pass(f, font, &PageParams { ruling: Ruling::Free, ..p.clone() }, &[]);
+    }
+    let q = PageParams { ruling: Ruling::Table { pages: pages.clone() }, ..p.clone() };
+    let doc = layout_pass(f, font, &q, &[]);
+    let boxed = |c: &CellInfo| pages[c.page % pages.len()][c.cell];
+    let todo: Vec<(usize, CellBox)> = doc.overflowing().map(|c| (c.seg, boxed(c))).filter(|(_, b)| b.overflow != Overflow::Clip).collect();
+    if todo.is_empty() {
+        return doc;
+    }
+    let segs = doc.cells.iter().map(|c| c.seg + 1).max().unwrap_or(0);
+    let mut fits: Vec<Option<CellFit>> = vec![None; segs];
+    let fits_now = |d: &Document, seg: usize| d.cells.iter().any(|c| c.seg == seg && c.overflow_from.is_none());
+    // 方案1: binary search for the largest size that fits (≥ min).
+    let shrink: Vec<(usize, f32, u32)> = todo.iter().filter_map(|&(seg, b)| match b.overflow {
+        Overflow::Shrink { min } => Some((seg, min.clamp(0.05, 1.0), b.rows.max(1))),
+        _ => None,
+    }).collect();
+    let mut range: Vec<(f32, f32)> = shrink.iter().map(|&(_, min, _)| (min, 1.0)).collect();
+    if !shrink.is_empty() {
+        for _ in 0..8 {
+            for (k, &(seg, _, rows)) in shrink.iter().enumerate() {
+                fits[seg] = Some(CellFit { scale: (range[k].0 + range[k].1) / 2.0, rows });
+            }
+            let d = layout_pass(f, font, &q, &fits);
+            for (k, &(seg, ..)) in shrink.iter().enumerate() {
+                let mid = (range[k].0 + range[k].1) / 2.0;
+                if fits_now(&d, seg) { range[k].0 = mid } else { range[k].1 = mid }
+            }
+        }
+        for (k, &(seg, _, rows)) in shrink.iter().enumerate() {
+            fits[seg] = Some(CellFit { scale: range[k].0, rows });
+        }
+    }
+    // 方案2: the fewest extra rows that fit; characters shrink in step with the rows.
+    let mut grow: Vec<(usize, u32, u32)> = todo.iter().filter_map(|&(seg, b)| match b.overflow {
+        Overflow::AddRows { max } => Some((seg, b.rows.max(1), max.max(b.rows.max(1)))),
+        _ => None,
+    }).collect();
+    let mut extra = 1;
+    while !grow.is_empty() {
+        for &(seg, rows, max) in &grow {
+            let r = (rows + extra).min(max);
+            fits[seg] = Some(CellFit { scale: rows as f32 / r as f32, rows: r });
+        }
+        let d = layout_pass(f, font, &q, &fits);
+        grow.retain(|&(seg, rows, max)| !fits_now(&d, seg) && rows + extra < max);
+        extra += 1;
+    }
+    layout_pass(f, font, &q, &fits)
+}
+
+/// One layout pass; `fits[seg]` overrides a table cell's size and rows.
+fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[Option<CellFit>]) -> Document {
     let Flow { chars, ids, paras, joins, tuning } = *f;
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
     let join = |k: usize| joins.get(k).copied().unwrap_or(false);
     let tune = |k: usize| tuning.get(k).copied().flatten().unwrap_or_default();
     let mut para_ix = 0;
-    let s = p.mm_per_unit;
+    let mut s = p.mm_per_unit;
+    let table = matches!(p.ruling, Ruling::Table { .. });
     let (ox, oy) = p.origin;
     let jitter_on = p.style.enabled;
     let deform_on = p.deformation.is_active();
@@ -391,13 +544,26 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
         row_h: p.line_height,
         text_top: 0.0,
         em: EM_UNITS * s,
+        scale: s,
+        fits,
+        cell: 0,
+        seg: 0,
+        cell_first_line: 0,
+        cell_first_stroke: 0,
+        cell_first_char: 0,
+        overflow_from: None,
     };
     pen.rows = pen.rows_for(0);
     pen.enter_slot();
     pen.page_guides();
+    if table {
+        pen.start_cell(0);
+        s = pen.scale;
+    }
     let mut prev: Option<char> = None;
     // Jitter: the next placed character starts a line (and maybe a paragraph).
-    let (mut fresh_line, mut fresh_paragraph) = (true, true);
+    // Table cells never take a first-line indent.
+    let (mut fresh_line, mut fresh_paragraph) = (true, !table);
     // Grid: closing marks hung past the row's last cell so far.
     let mut hung = 0u32;
     // Grid with 作文格分词: where each word starting at a char ends.
@@ -406,7 +572,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
     let mut shared: Option<(f32, usize, usize, bool)> = None;
     // Scales for a char in a shared cell's slot `w` mm wide: a 合并内容 run is squeezed across;
     // a half-width char keeps its size unless it would not fit.
-    let slot_scale = |g: Option<&Glyph>, squeeze: bool, n: usize, w: f32| {
+    let slot_scale = |s: f32, g: Option<&Glyph>, squeeze: bool, n: usize, w: f32| {
         if squeeze {
             return (s / n as f32, s);
         }
@@ -439,13 +605,13 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
             fresh_paragraph = false;
         }
         let x0 = pen.cx;
-        if let (Some((cols, cw, cg)), false) = (grid, ch == '\n') {
+        if let (Some((cols, cw, cg)), false) = (grid, ch == '\n' || ch == CELL_BREAK) {
             // One character per cell, centred; spaces and missing glyphs take a cell too.
             // 合并内容 groups and pairs of half-width chars share one cell, one slot each.
             if let Some((cell_x, slot, n, squeeze)) = shared {
                 let w = cw / n as f32;
                 let x = cell_x + w * slot as f32;
-                let (sx, sy) = slot_scale(font.glyph(ch, id), squeeze, n, w);
+                let (sx, sy) = slot_scale(s, font.glyph(ch, id), squeeze, n, w);
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
                 draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0, tune(i));
                 pen.cx = x + w;
@@ -492,7 +658,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
             };
             if n > 1 {
                 let w = cw / n as f32;
-                let (sx, sy) = slot_scale(font.glyph(ch, id), join(i), n, w);
+                let (sx, sy) = slot_scale(s, font.glyph(ch, id), join(i), n, w);
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
                 draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0, tune(i));
                 pen.cx = cell_x + w;
@@ -517,8 +683,23 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
                 pen.push_box(x0);
                 pen.newline(i, i + 1);
                 para_ix += 1;
-                pen.align = para(para_ix).align;
-                (fresh_line, fresh_paragraph) = (true, true);
+                if !table {
+                    pen.align = para(para_ix).align;
+                }
+                (fresh_line, fresh_paragraph) = (true, !table);
+                prev = None;
+                continue;
+            }
+            CELL_BREAK => {
+                pen.push_box(x0);
+                if table {
+                    pen.next_cell(i, i + 1);
+                    s = pen.scale;
+                } else {
+                    // Outside a table form a cell break reads as a line break.
+                    pen.newline(i, i + 1);
+                }
+                fresh_line = true;
                 prev = None;
                 continue;
             }
@@ -609,6 +790,9 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
     }
     pen.tag_strokes(chars.len().saturating_sub(1));
     pen.close_line(chars.len(), false);
+    if table {
+        pen.finish_cell(chars.len());
+    }
     let mut doc = pen.doc;
     doc.pages.push(pen.page);
     doc.punct_issues = kinsoku::issues(chars, &doc.lines);

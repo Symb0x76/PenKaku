@@ -477,3 +477,99 @@ fn tuning_moves_resizes_and_rerolls_one_char() {
     assert_ne!(ink(&plain, 1), ink(&rerolled, 1));
     assert_eq!(plain.boxes, rerolled.boxes);
 }
+
+/// 'X': advance 5, one stroke spanning the em (0..7 units).
+fn x_font() -> Font {
+    font_with('X', Glyph { advance: 5.0, strokes: vec![vec![(0.0, 0.0), (5.0, 7.0)]] })
+}
+
+fn table(cells: Vec<CellBox>) -> PageParams {
+    PageParams { page: Some(PageBox { width: 100.0, height: 100.0 }), ruling: Ruling::Table { pages: vec![cells] }, ..Default::default() }
+}
+
+/// 2×2 cells of 20 × 10 mm, one row each, 1 mm side padding.
+fn two_by_two(overflow: Overflow) -> Vec<CellBox> {
+    let c = |x: f32, y: f32| CellBox { x, y, w: 20.0, h: 10.0, rows: 1, overflow, ..Default::default() };
+    vec![c(0.0, 0.0), c(20.0, 0.0), c(0.0, 10.0), c(20.0, 10.0)]
+}
+
+fn x_span(s: &Stroke) -> (f32, f32) {
+    s.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)))
+}
+
+#[test]
+fn table_segments_fill_cells_then_the_next_page() {
+    let b = CELL_BREAK;
+    let doc = layout(&format!("X{b}X{b}X{b}X{b}X"), &x_font(), &table(two_by_two(Overflow::Clip)));
+    assert_eq!(doc.pages.len(), 2);
+    let segs: Vec<(usize, usize, usize)> = doc.cells.iter().map(|c| (c.page, c.cell, c.seg)).collect();
+    assert_eq!(segs, vec![(0, 0, 0), (0, 1, 1), (0, 2, 2), (0, 3, 3), (1, 0, 4)]);
+    // Each X starts inside its cell's padding and stays inside the cell vertically.
+    for (k, s) in doc.pages[0].strokes.iter().enumerate() {
+        let cx = if k % 2 == 0 { 0.0 } else { 20.0 };
+        assert_eq!(x_span(s).0, cx + 1.0);
+        let (top, bottom) = (s.iter().map(|p| p.1).fold(f32::MIN, f32::max), s.iter().map(|p| p.1).fold(f32::MAX, f32::min));
+        let cell_bottom = if k < 2 { -10.0 } else { -20.0 };
+        assert!(top <= cell_bottom + 10.0 && bottom >= cell_bottom, "stroke {k} y {top}..{bottom}");
+    }
+    assert_eq!(doc.pages[1].guides.len(), 12, "a 2×2 table has 12 distinct border segments");
+    assert_eq!(doc.overflowing().count(), 0);
+}
+
+#[test]
+fn clip_drops_what_does_not_fit() {
+    // 18 mm inside, X is 5 mm: three per row, one row.
+    let doc = layout("XXXXXX", &x_font(), &table(two_by_two(Overflow::Clip)));
+    assert_eq!(doc.pages[0].strokes.len(), 3);
+    assert_eq!(doc.pages[0].stroke_chars, vec![0, 1, 2]);
+    assert_eq!(doc.cells[0].overflow_from, Some(3));
+    assert_eq!(doc.boxes.len(), 6, "overflowing chars keep their caret boxes");
+}
+
+#[test]
+fn shrink_fits_forty_chars_into_a_two_row_cell() {
+    let cell = CellBox { w: 20.0, h: 20.0, rows: 2, overflow: Overflow::Shrink { min: 0.1 }, ..Default::default() };
+    let doc = layout(&"X".repeat(40), &x_font(), &table(vec![cell]));
+    let c = doc.cells[0];
+    assert_eq!(c.overflow_from, None, "fits after shrinking");
+    assert!(c.fit.scale < 0.2 && c.fit.scale >= 0.1, "scale {}", c.fit.scale);
+    assert_eq!(doc.pages[0].strokes.len(), 40);
+    for s in &doc.pages[0].strokes {
+        assert!(x_span(s).1 <= 19.0 + 1e-3);
+    }
+}
+
+#[test]
+fn shrink_stops_at_its_minimum() {
+    let cell = CellBox { w: 20.0, h: 10.0, rows: 1, overflow: Overflow::Shrink { min: 0.9 }, ..Default::default() };
+    let doc = layout("XXXXXX", &x_font(), &table(vec![cell]));
+    assert!(doc.cells[0].overflow_from.is_some());
+    assert!((doc.cells[0].fit.scale - 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn add_rows_takes_the_fewest_that_fit() {
+    let cell = CellBox { w: 20.0, h: 10.0, rows: 1, overflow: Overflow::AddRows { max: 4 }, ..Default::default() };
+    let doc = layout("XXXXXX", &x_font(), &table(vec![cell]));
+    // Two rows at half size: 7 chars a row.
+    assert_eq!(doc.cells[0].fit, CellFit { scale: 0.5, rows: 2 });
+    assert_eq!(doc.cells[0].overflow_from, None);
+    assert_eq!(doc.pages[0].strokes.len(), 6);
+}
+
+#[test]
+fn middle_alignment_centres_the_lines() {
+    let cell = CellBox { w: 20.0, h: 30.0, rows: 3, valign: VAlign::Middle, ..Default::default() };
+    let top = |d: &Document| d.pages[0].strokes[0].iter().map(|p| p.1).fold(f32::MIN, f32::max);
+    let mid = layout("X", &x_font(), &table(vec![cell]));
+    let up = layout("X", &x_font(), &table(vec![CellBox { valign: VAlign::Top, ..cell }]));
+    assert!((top(&up) - top(&mid) - 10.0).abs() < 1e-4, "one row lower");
+    assert_eq!(mid.lines[0].top, -10.0);
+}
+
+#[test]
+fn cell_break_is_a_line_break_outside_tables() {
+    let doc = layout(&format!("X{CELL_BREAK}X"), &x_font(), &PageParams::default());
+    assert_eq!(doc.lines.len(), 2);
+    assert!(doc.cells.is_empty());
+}
