@@ -10,3 +10,4 @@ chixie-rs-core.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
+calamine = "0.38"

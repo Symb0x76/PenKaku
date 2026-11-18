@@ -5,7 +5,9 @@ use chixie_rs_core::layout::{CellInfo, Overflow};
 use chixie_rs_template::{Template, TemplateKind};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::radio::RadioGroup;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::*;
 
@@ -164,6 +166,109 @@ pub fn refresh_data(view: &Entity<DocView>, all: bool, window: &mut Window, cx: 
     }
     view.update(cx, |v, cx| v.replace_many(edits, cx));
     window.push_notification(Notification::success(format!("已刷新 {n} 页的数据")), cx);
+}
+
+/// 批量导入: 批量导入数据 (xlsx / xls / ods into the form's pages) and 批量名单建页 (one page per
+/// line of a list, written into the caret's cell).
+pub fn open_batch_import(view: Entity<DocView>, window: &mut Window, cx: &mut App) {
+    let Some(TemplateKind::Table(tt)) = cx.global::<AppState>().active_template().map(|t| t.kind) else {
+        window.push_notification(Notification::warning("请先应用一个表格模板（布局 › 模板）"), cx);
+        return;
+    };
+    // 目标单元格: the caret's cell, numbered in writing order within its page.
+    let target = {
+        let v = view.read(cx);
+        let chars = v.doc_chars();
+        let seg = chars[..v.caret_index().min(chars.len())].iter().filter(|&&c| c == chixie_rs_core::layout::CELL_BREAK).count();
+        seg - tt.first_segment(tt.page_of_segment(seg))
+    };
+    let names = cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 12));
+    let tab = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    window.open_dialog(cx, move |d, _w, cx| {
+        let muted = cx.theme().muted_foreground;
+        let (view, names, tab, tt) = (view.clone(), names.clone(), tab.clone(), tt.clone());
+        let set = tab.clone();
+        let body: AnyElement = if tab.get() == 0 {
+            let view = view.clone();
+            v_flex()
+                .gap_2()
+                .child(div().text_sm().text_color(muted).child("批量导入数据文件，或导入多页表格实现批量数据导入"))
+                .child(div().text_xs().text_color(muted).child("每个工作表写成一页（多页模板需要和模板页数相同的工作表），按「Excel导入配置」的范围对应单元格；合并单元格展开。"))
+                .child(Button::new("bi-file").primary().label("选择文件…").on_click(move |_: &ClickEvent, w, cx| {
+                    w.close_dialog(cx);
+                    import_file(view.clone(), w, cx);
+                }))
+                .into_any_element()
+        } else {
+            let label = if tt.pages.len() == 1 { format!("目标单元格：第 {} 格", target + 1) } else { "目标单元格：未选中".to_string() };
+            v_flex()
+                .gap_2()
+                .child(div().text_sm().text_color(muted).child("根据名单数据，自动新建对应数量表格页面并填充"))
+                .child(div().text_sm().child(label))
+                .child(div().text_xs().text_color(muted).child("把光标放进要填写的单元格再打开本窗口；其它单元格按数据源填写。"))
+                .child(div().text_sm().child("名单数据："))
+                .child(Textarea::new(&names))
+                .child(h_flex().justify_end().child(Button::new("bi-pages").primary().label("批量建页").on_click(move |_: &ClickEvent, w, cx| {
+                    let lines: Vec<String> = names.read(cx).value().lines().map(str::to_string).collect();
+                    let chars = view.read(cx).doc_chars().to_vec();
+                    let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+                    match tt.batch_pages(&chars, &lines, target, seed) {
+                        Ok(edits) => {
+                            let n = lines.iter().filter(|l| !l.trim().is_empty()).count();
+                            view.update(cx, |v, cx| v.replace_many(edits, cx));
+                            w.push_notification(Notification::success(format!("已新建 {n} 页")), cx);
+                            w.close_dialog(cx);
+                        }
+                        Err(e) => w.push_notification(Notification::warning(e), cx),
+                    }
+                })))
+                .into_any_element()
+        };
+        d.title("批量导入").w(px(480.)).child(
+            v_flex()
+                .gap_3()
+                .child(
+                    TabBar::new("bi-tab")
+                        .small()
+                        .segmented()
+                        .selected_index(tab.get())
+                        .children([Tab::new().label("批量导入数据"), Tab::new().label("批量名单建页")])
+                        .on_click(move |ix: &usize, _w, cx| {
+                            set.set(*ix);
+                            cx.refresh_windows();
+                        }),
+                )
+                .child(body),
+        )
+    });
+}
+
+/// Pick a workbook and fill the form from it (one undo step).
+fn import_file(view: Entity<DocView>, window: &mut Window, cx: &mut App) {
+    let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("选择表格文件（xlsx / xls / ods）".into()) });
+    window
+        .spawn(cx, async move |cx| {
+            let Ok(Ok(Some(paths))) = rx.await else { return };
+            let Some(path) = paths.into_iter().next() else { return };
+            let _ = cx.update(|w, cx| {
+                let Some(TemplateKind::Table(tt)) = cx.global::<AppState>().active_template().map(|t| t.kind) else { return };
+                let res = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| chixie_rs_template::xlsx::read_sheets(&b));
+                match res {
+                    Ok(sheets) => {
+                        let chars = view.read(cx).doc_chars().to_vec();
+                        match tt.import_sheets(&chars, &sheets) {
+                            Ok(edits) => {
+                                view.update(cx, |v, cx| v.replace_many(edits, cx));
+                                w.push_notification(Notification::success(format!("已导入 {} 个工作表", sheets.len())), cx);
+                            }
+                            Err(e) => w.push_notification(Notification::warning(e), cx),
+                        }
+                    }
+                    Err(e) => w.push_notification(Notification::error(format!("导入失败：{e}")), cx),
+                }
+            });
+        })
+        .detach();
 }
 
 /// Apply plan `which` (0 shrink, 1 add rows, 2 ignore) to every overflowing cell; returns how many.

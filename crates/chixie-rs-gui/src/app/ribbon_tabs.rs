@@ -168,6 +168,12 @@ impl ChixieRsApp {
                                 move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_overflow(view.clone(), w, cx)
                             })
                             .into_any_element(),
+                        small("batch", "批量导入…", IconName::Import)
+                            .on_click({
+                                let view = view.clone();
+                                move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_import(view.clone(), w, cx)
+                            })
+                            .into_any_element(),
                         small("refresh", "刷新数据", IconName::RefreshCw)
                             .dropdown_menu(move |m, _w, _cx| {
                                 let (v1, v2) = (view.clone(), view.clone());

@@ -106,8 +106,10 @@ impl TableTemplate {
             }
         }
         if !tail.is_empty() {
+            // First among edits at the same place (the stable sort keeps it so): applied
+            // last-first, the last segment's own edit then lands before it.
             let b = CELL_BREAK.to_string();
-            edits.push((chars.len()..chars.len(), format!("{b}{}", tail.join(&b))));
+            edits.insert(0, (chars.len()..chars.len(), format!("{b}{}", tail.join(&b))));
         }
         edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
         edits
@@ -136,6 +138,39 @@ impl TableTemplate {
             j += 1;
         }
         j + 1
+    }
+
+    /// 导入 xlsx: sheet j fills page copy j. A single-page template makes one page per sheet; a
+    /// multi-page one needs one sheet per page (ChiXie3's check). Each page reads from its Excel
+    /// range (A1 when unset), table cells mapped by grid position (tables stacked downwards, a
+    /// merged cell reads its top-left square); `指定单元格` cells read their own row / column.
+    /// Cells with `接受导入` off or another data source are left alone.
+    pub fn import_sheets(&self, chars: &[char], sheets: &[crate::xlsx::Sheet]) -> Result<Vec<Edit>, &'static str> {
+        if self.pages.len() > 1 && sheets.len() != self.pages.len() {
+            return Err("多页模板页数和所导入的表格sheet页数不一致");
+        }
+        let mut values = Vec::new();
+        for (j, sheet) in sheets.iter().enumerate() {
+            let page = &self.pages[j % self.pages.len()];
+            let ((c0, r0), last) = page.excel_range.map_or(((1, 1), None), |r| (r.first, Some(r.last)));
+            let first = self.first_segment(j);
+            for (n, (t, c)) in self.page_cells(j).into_iter().enumerate() {
+                let cell = &page.tables[t].cells[c];
+                let below: u32 = page.tables[..t].iter().map(|x| x.rows.len() as u32).sum();
+                let at = match cell.data {
+                    DataSource::FromImport { row, col } => Some((row.max(1) - 1, col.max(1) - 1)),
+                    DataSource::None if cell.accept_import => {
+                        let (r, col) = (r0 - 1 + below + cell.span.r0, c0 - 1 + cell.span.c0);
+                        last.is_none_or(|(lc, lr)| r < lr && col < lc).then_some((r, col))
+                    }
+                    _ => None,
+                };
+                if let Some((r, col)) = at {
+                    values.push((first + n, crate::xlsx::get(sheet, r as usize, col as usize).to_string()));
+                }
+            }
+        }
+        Ok(self.set_cells(chars, values))
     }
 
     /// 批量名单建页 (single-page templates): one page per line of `names`, the line written into
@@ -214,6 +249,32 @@ mod tests {
         assert!(segs[3].parse::<f64>().is_ok() && segs[7].parse::<f64>().is_ok());
         assert_eq!(tt.page_count(&out.chars().collect::<Vec<_>>()), 2);
         assert_eq!(tt.page_of_segment(5), 1);
+    }
+
+    #[test]
+    fn xlsx_with_merges_maps_onto_the_form() {
+        let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/merged.xlsx")).unwrap();
+        let sheets = crate::xlsx::read_sheets(&bytes).unwrap();
+        // 3×2 table, top row merged; read from B1; the bottom-right cell is bound to A2.
+        let mut tt = TableTemplate::new();
+        tt.insert_table(0, 3, 2, ColWidth::Fixed(30.0), 210.0, 10.0).unwrap();
+        let t = &mut tt.pages[0].tables[0];
+        t.merge(&[0, 1]).unwrap();
+        let bound = t.cells.iter().position(|c| c.span.r0 == 2 && c.span.c0 == 1).unwrap();
+        t.cells[bound].data = DataSource::FromImport { row: 2, col: 1 };
+        let skip = t.cells.iter().position(|c| c.span.r0 == 1 && c.span.c0 == 1).unwrap();
+        t.cells[skip].accept_import = false;
+        tt.pages[0].excel_range = Some(crate::table::CellRange::from_fields("B", "1", "C", "3").unwrap());
+        let out = apply(&[], &tt.import_sheets(&[], &sheets).unwrap());
+        let segs: Vec<&str> = out.split(CELL_BREAK).collect();
+        // Page 1: merged top row = B1 (姓名); row 2: B2 (张三) and the skipped cell; row 3: B3
+        // (empty) and the cell bound to A2 (36.5).
+        assert_eq!(&segs[..5], &["姓名", "张三", "", "", "36.5"]);
+        assert_eq!(tt.page_count(&out.chars().collect::<Vec<_>>()), 2, "one page per sheet");
+        let mut two = tt.clone();
+        two.add_page();
+        two.add_page();
+        assert_eq!(two.import_sheets(&[], &sheets), Err("多页模板页数和所导入的表格sheet页数不一致"));
     }
 
     #[test]

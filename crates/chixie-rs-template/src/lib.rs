@@ -5,6 +5,7 @@ pub mod chixie3_templates;
 pub mod fill;
 pub mod table;
 pub mod template;
+pub mod xlsx;
 
 pub use table::TableTemplate;
 pub use template::{Template, TemplateError, TemplateKind, TemplateStore};
