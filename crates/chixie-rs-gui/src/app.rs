@@ -477,7 +477,7 @@ impl ChixieRsApp {
     /// Use template `name` for the page (`None`: blank page, current paper kept).
     pub fn apply_template(&mut self, name: Option<String>, cx: &mut Context<Self>) {
         self.edit_settings(cx, |st| match name.as_deref().and_then(|n| st.templates.get(n)).cloned() {
-            Some(t) => st.settings.page.apply_template(&t),
+            Some(t) => t.apply_to(&mut st.settings.page),
             None => st.settings.page.template = None,
         });
     }

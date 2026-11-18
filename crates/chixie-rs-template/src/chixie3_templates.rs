@@ -6,7 +6,7 @@
 //! by name; nothing is ever executed. Field meanings: docs/protocol.md (templates).
 
 use crate::template::{Template, TemplateKind};
-use crate::{Error, Result};
+use chixie_rs_core::{Error, Result};
 
 /// Read every template from one `.cx` file's bytes.
 pub fn import(bytes: &[u8]) -> Result<Vec<Template>> {
@@ -367,7 +367,7 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> Vec<u8> {
-        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)).unwrap()
+        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../chixie-rs-core/tests/fixtures").join(name)).unwrap()
     }
 
     #[test]

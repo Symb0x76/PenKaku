@@ -244,7 +244,7 @@ impl ChixieRsApp {
         });
 
         // Template gallery: 空白 + every stored template, the active one outlined.
-        let card = |id: usize, name: String, icon: IconName, t: Option<chixie_rs_core::template::Template>, selected: bool| {
+        let card = |id: usize, name: String, icon: IconName, t: Option<chixie_rs_template::Template>, selected: bool| {
             v_flex()
                 .id(("gallery", id))
                 .w(px(64.))

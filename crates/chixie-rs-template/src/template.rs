@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::layout::Ruling;
-use crate::{Error, Result};
+use chixie_rs_core::layout::Ruling;
+use chixie_rs_core::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Template {
@@ -112,6 +112,13 @@ impl Template {
         }
     }
 
+    /// Use this template's paper and margins for `page` and remember it as the active template.
+    pub fn apply_to(&self, page: &mut chixie_rs_core::config::PageSettings) {
+        page.paper = self.paper;
+        page.margins = self.grid_margins();
+        page.template = Some(self.name.clone());
+    }
+
     pub fn kind_label(&self) -> &'static str {
         match self.kind {
             TemplateKind::Blank => "空白",
@@ -201,8 +208,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::font::{Font, Glyph};
-    use crate::layout::{PageBox, PageParams, layout};
+    use chixie_rs_core::font::{Font, Glyph};
+    use chixie_rs_core::layout::{PageBox, PageParams, layout};
 
     /// 'x' is a 7×7 box glyph with advance 7.
     fn font() -> Font {
@@ -288,7 +295,7 @@ mod tests {
     }
 
     fn fixture_font() -> Font {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/font_fixture.json");
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../chixie-rs-core/tests/fixtures/font_fixture.json");
         Font::from_json(&std::fs::read(p).unwrap()).unwrap()
     }
 

@@ -1,0 +1,11 @@
+[package]
+name = "chixie-rs-template"
+description = "chixie-rs page templates: notes, composition grids, tables, ChiXie3 .cx import"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chixie-rs-core.workspace = true
+serde.workspace = true
+toml.workspace = true

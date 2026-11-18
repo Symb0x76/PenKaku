@@ -119,7 +119,7 @@ impl ChixieRsApp {
         let theme = cx.theme();
         let (border, hover, muted) = (theme.border, theme.secondary, theme.muted_foreground);
         let templates = cx.global::<AppState>().templates.templates.clone();
-        let card = |id: usize, name: String, t: Option<chixie_rs_core::template::Template>| {
+        let card = |id: usize, name: String, t: Option<chixie_rs_template::Template>| {
             v_flex()
                 .id(("bs-new", id))
                 .w(px(150.))

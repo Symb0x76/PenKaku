@@ -4,7 +4,6 @@
 pub mod api;
 pub mod calibration;
 pub mod chixie3_devices;
-pub mod chixie3_templates;
 pub mod config;
 pub mod credentials;
 pub mod deformation;
@@ -15,7 +14,6 @@ pub mod layout;
 pub mod path;
 pub mod profile;
 pub mod session;
-pub mod template;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -1037,6 +1037,7 @@ dependencies = [
  "chixie-rs-device",
  "chixie-rs-doc",
  "chixie-rs-output",
+ "chixie-rs-template",
  "env_logger",
  "gpui-kit",
  "image",
@@ -1051,6 +1052,15 @@ version = "0.1.0"
 dependencies = [
  "chixie-rs-core",
  "serde",
+]
+
+[[package]]
+name = "chixie-rs-template"
+version = "0.1.0"
+dependencies = [
+ "chixie-rs-core",
+ "serde",
+ "toml 1.2.0+spec-1.1.0",
 ]
 
 [[package]]

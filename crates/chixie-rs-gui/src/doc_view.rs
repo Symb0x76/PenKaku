@@ -15,7 +15,7 @@ use std::time::Duration;
 use chixie_rs_core::config::{PageSettings, Settings};
 use chixie_rs_doc::EditDoc;
 use chixie_rs_core::handwriting::StyleFile;
-use chixie_rs_core::template::Template;
+use chixie_rs_template::Template;
 use chixie_rs_core::layout::{self, Document};
 use gpui_kit::*;
 use gpui_kit::component::WindowExt as _;
@@ -273,7 +273,7 @@ impl DocView {
 
     fn relayout(&mut self, cx: &mut Context<Self>) {
         let st = cx.global::<AppState>();
-        let params = st.settings.page_params_with(st.active_template().as_ref());
+        let params = st.settings.page_params_with(st.active_template().map(|t| t.ruling()).unwrap_or_default());
         // Every font in use (roles, mix, fallbacks); empty until one is chosen.
         let fonts = st.font_set.clone();
         self.has_font = !fonts.is_empty();

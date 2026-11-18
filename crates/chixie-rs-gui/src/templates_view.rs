@@ -3,10 +3,10 @@
 
 use std::path::PathBuf;
 
-use chixie_rs_core::chixie3_templates;
+use chixie_rs_template::chixie3_templates;
 use chixie_rs_core::font::Font;
 use chixie_rs_core::layout::{self, PageBox, PageParams};
-use chixie_rs_core::template::{Template, TemplateKind};
+use chixie_rs_template::{Template, TemplateKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput};
@@ -227,7 +227,7 @@ impl TemplatesView {
         let ix = st.templates.upsert(t.clone());
         // Keep the document's paper in step when the active template changed.
         if st.settings.page.template.as_deref() == Some(t.name.as_str()) {
-            st.settings.page.apply_template(&t);
+            t.apply_to(&mut st.settings.page);
             st.save_settings();
         }
         st.save_templates();
