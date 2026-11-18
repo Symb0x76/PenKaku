@@ -10,7 +10,7 @@ use chixie_rs_core::config::Settings;
 use chixie_rs_core::font::Font;
 use chixie_rs_core::font::fontset::FontSet;
 use chixie_rs_core::session::SessionHandle;
-use chixie_rs_core::template::{Template, TemplateStore};
+use chixie_rs_template::{Template, TemplateStore};
 use gpui_kit::Global;
 
 use crate::cloud_preview::CloudPreview;

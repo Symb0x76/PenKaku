@@ -247,6 +247,31 @@ Fake-Grbl captures, 艾玛体 100, deformation off, text `一二` ⏎ `三十` (
   stalled; 3 = all pages by the form order), 起点模式, 多色绘制 (ChiXie3's pause is in the app, not
   the G-code).
 
+## Table forms (captured 2026-11-18, `captures/m7/table22.gcode`)
+ChiXie3 模板管理 › 创建模板 › 表格模板 › 绘制表格 › 2×2 on A4 gives a table at x 21, y 30 mm, 168 × 24 mm
+(cells 84 × 12, 内部行数 1); saved as 新建表格, typed 你 | 好 / 你好 | 好你好 (艾玛体 100, deformation off)
+and streamed to the fake Grbl (394 lines).
+
+- The pen origin is the table's top-left corner (the 书写原点 ring sits there).
+- Ink of each cell's first character (mm from the origin):
+
+| Cell | Char | Left | Top | Bottom |
+|---|---|---|---|---|
+| 1 | 你 | 3.04 | −3.35 | −9.78 |
+| 2 | 好 | 85.94 | −3.04 | −8.68 |
+| 3 | 你 | 2.07 | −14.69 | −21.76 |
+| 4 | 好 | 86.02 | −15.25 | −21.10 |
+
+- Vertically the em box is **centred in the row** (glyph tops 2.3–3.0 mm into a 12 mm row; centred
+  = 2.5), not set on the row's line like ruled notes.
+- Horizontally the first character starts 1.9–3.0 mm in: a 1 mm padding plus ChiXie3's 首字不对齐
+  (a random 0–2 mm first-character offset, on in this config) and the glyph's own bearing.
+- Glyph widths vary up to 2.5 mm between layouts (ChiXie3's per-layout variation); cells are
+  written in no fixed order (here 2, 3, 4, 1), each cell's characters in order.
+- chixie-rs: cell rows centre the em (`pen.rs`), padding 1 mm; regression test
+  `template::tests::table_cells_match_chixie3_capture` (tops within 0.6 mm, left edge within our
+  padding .. padding + 2 mm).
+
 ## Page templates (`%USERPROFILE%\ChiXie3\conf\*.cx`, decoded 2026-11-07)
 Python pickles (protocol 4) of `{name: object}`; the objects come from `core.DataModel.*` and carry
 their state as a plain `__dict__`. They are read by `chixie_rs_core::chixie3_templates`, a small pickle

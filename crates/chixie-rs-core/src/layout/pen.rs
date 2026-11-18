@@ -1,9 +1,31 @@
 //! Line and page bookkeeping while laying out.
 
-use super::{Align, CharBox, Tuning, Document, Guide, LineInfo, Page, PageBox, PageParams, Ruling};
+use super::{Align, CELL_BREAK, CellBox, CellFit, CellInfo, CharBox, Document, EM_UNITS, Guide, LineInfo, Page, PageBox, PageParams, Ruling, Tuning, VAlign};
 use crate::font::fontset::Glyphs;
 use crate::font::{Font, Glyph};
 use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, is_cjk, rng_for};
+
+/// Ruled columns as (left x, width) in mm: `widths` when it names every column (scaled down if
+/// they overrun the page), else `columns` equal columns `gap` apart.
+pub(crate) fn column_spans(page_w: f32, columns: u32, gap: f32, widths: &[f32]) -> Vec<(f32, f32)> {
+    let n = columns.max(1) as usize;
+    let room = page_w - gap * (n - 1) as f32;
+    let ws: Vec<f32> = if widths.len() == n && widths.iter().all(|w| *w > 0.0) {
+        let sum: f32 = widths.iter().sum();
+        let k = if sum > room { room / sum } else { 1.0 };
+        widths.iter().map(|w| w * k).collect()
+    } else {
+        vec![room / n as f32; n]
+    };
+    let mut x = 0.0;
+    ws.into_iter()
+        .map(|w| {
+            let span = (x, w);
+            x += w + gap;
+            span
+        })
+        .collect()
+}
 
 /// Pen state while laying out; owns the line/page bookkeeping.
 pub(super) struct Pen<'p> {
@@ -34,6 +56,18 @@ pub(super) struct Pen<'p> {
     /// Where glyph tops (glyph y = 0) go on this line.
     pub(super) text_top: f32,
     pub(super) em: f32,
+    /// mm per glyph unit right now (a table cell can have its own size).
+    pub(super) scale: f32,
+    /// Table forms: size / rows overrides per text segment (from the fitting passes).
+    pub(super) fits: &'p [Option<CellFit>],
+    /// Table forms: the cell being filled (index into the template page's cells), the text
+    /// segment, where the cell's lines / strokes / chars start, and its first overflowing char.
+    pub(super) cell: usize,
+    pub(super) seg: usize,
+    pub(super) cell_first_line: usize,
+    pub(super) cell_first_stroke: usize,
+    pub(super) cell_first_char: usize,
+    pub(super) overflow_from: Option<usize>,
 }
 
 impl Pen<'_> {
@@ -54,8 +88,99 @@ impl Pen<'_> {
                 }
             }
             Ruling::Grid { rows, .. } => rows.max(1),
+            Ruling::Table { ref pages } => pages[k % pages.len()].first().map_or(1, |c| c.rows.max(1)),
             Ruling::Free => 0,
         }
+    }
+
+    pub(super) fn is_table(&self) -> bool {
+        matches!(self.p.ruling, Ruling::Table { .. })
+    }
+
+    /// The cell being filled.
+    fn cell_box(&self) -> CellBox {
+        match &self.p.ruling {
+            Ruling::Table { pages } => pages[self.page_ix % pages.len()][self.cell],
+            _ => CellBox::default(),
+        }
+    }
+
+    /// Start filling the current cell with the text from char `first`.
+    pub(super) fn start_cell(&mut self, first: usize) {
+        let c = self.cell_box();
+        let fit = self.fits.get(self.seg).copied().flatten();
+        self.rows = fit.map_or(c.rows, |f| f.rows).max(1);
+        self.scale = self.p.mm_per_unit * c.scale * fit.map_or(1.0, |f| f.scale);
+        self.em = EM_UNITS * self.scale;
+        self.align = c.align;
+        (self.slot, self.col, self.cx) = (0, 0, 0.0);
+        self.overflow_from = None;
+        self.cell_first_line = self.doc.lines.len();
+        self.cell_first_stroke = self.page.strokes.len();
+        self.cell_first_char = first;
+        self.enter_slot();
+        self.line_start = first;
+        self.line_stroke = self.page.strokes.len();
+    }
+
+    /// A cell break at char `end`: close this cell and start the next (on the next copy of the
+    /// template page after the last one) with the text from `next`.
+    pub(super) fn next_cell(&mut self, end: usize, next: usize) {
+        self.close_line(end, false);
+        self.finish_cell(end);
+        self.cell += 1;
+        self.seg += 1;
+        let n = match &self.p.ruling {
+            Ruling::Table { pages } => pages[self.page_ix % pages.len()].len(),
+            _ => 1,
+        };
+        if self.cell >= n {
+            self.cell = 0;
+            self.new_page();
+        }
+        self.start_cell(next);
+    }
+
+    /// The cell's text (chars up to `end`) is laid: drop what overflowed, place the lines
+    /// vertically, and record the cell.
+    pub(super) fn finish_cell(&mut self, end: usize) {
+        let c = self.cell_box();
+        if let Some(f) = self.overflow_from
+            && self.page.stroke_chars.len() == self.page.strokes.len()
+        {
+            // Never written: overflow would run below the cell.
+            let keep: Vec<bool> = self.page.stroke_chars.iter().map(|&k| k < f).collect();
+            let mut it = keep.iter();
+            self.page.strokes.retain(|_| *it.next().unwrap_or(&true));
+            self.page.stroke_chars.retain(|&k| k < f);
+        }
+        let used = (self.doc.lines.len() - self.cell_first_line).min(self.rows as usize) as f32;
+        let free = (self.rows as f32 - used).max(0.0) * self.row_h;
+        let dy = match c.valign {
+            VAlign::Top => 0.0,
+            VAlign::Middle => free / 2.0,
+            VAlign::Bottom => free,
+        };
+        if dy > 0.0 && self.overflow_from.is_none() {
+            let from = self.cell_first_stroke.min(self.page.strokes.len());
+            for s in &mut self.page.strokes[from..] {
+                s.iter_mut().for_each(|pt| pt.1 -= dy);
+            }
+            for l in &mut self.doc.lines[self.cell_first_line..] {
+                (l.top, l.bottom) = (l.top - dy, l.bottom - dy);
+            }
+        }
+        let (ox, oy) = self.p.origin;
+        self.doc.cells.push(CellInfo {
+            page: self.page_ix,
+            cell: self.cell,
+            seg: self.seg,
+            start: self.cell_first_char,
+            end,
+            rect: (ox + c.x, oy - c.y, ox + c.x + c.w, oy - (c.y + c.h)),
+            fit: CellFit { scale: self.scale / self.p.mm_per_unit, rows: self.rows },
+            overflow_from: self.overflow_from,
+        });
     }
 
     /// Set the current line's geometry from the ruling and slot.
@@ -66,14 +191,11 @@ impl Pen<'_> {
                 (self.line_x, self.line_w) = (0.0, b.width);
                 (self.row_top, self.row_h, self.text_top) = (self.line_top, self.p.line_height, self.line_top);
             }
-            Ruling::Rows { columns, column_gap, band, .. } => {
+            Ruling::Rows { columns, column_gap, ref widths, band, upper, .. } => {
                 let n = self.rows as usize;
-                let cols = columns.max(1) as f32;
                 let pitch = b.height / n as f32;
-                let col_w = (b.width - column_gap * (cols - 1.0)) / cols;
                 let (c, r) = (self.slot / n, self.slot % n);
-                self.line_x = c as f32 * (col_w + column_gap);
-                self.line_w = col_w;
+                (self.line_x, self.line_w) = column_spans(b.width, columns, column_gap, widths)[c];
                 self.row_top = r as f32 * pitch;
                 self.row_h = pitch;
                 // Sit on the rule: the glyph box (em) ends 0.2 em above the row's line. Captured
@@ -81,7 +203,25 @@ impl Pen<'_> {
                 // on average; ChiXie3 adds a per-row spread of ≈ ±0.35 mm we do not model.
                 let band = band.unwrap_or(0.0).min(pitch);
                 let gap = 0.2 * self.em;
-                self.text_top = (self.row_top + pitch - self.em - gap).max(self.row_top + band);
+                self.text_top = if upper && band > 0.0 {
+                    // Upper band: sit on the band's line the same way.
+                    (self.row_top + band - self.em - gap).max(self.row_top)
+                } else {
+                    (self.row_top + pitch - self.em - gap).max(self.row_top + band)
+                };
+            }
+            Ruling::Table { .. } => {
+                let c = self.cell_box();
+                let (pl, pt, pr, pb) = c.padding;
+                let pitch = ((c.h - pt - pb) / self.rows.max(1) as f32).max(0.1);
+                self.line_x = c.x + pl;
+                self.line_w = (c.w - pl - pr).max(0.1);
+                // Rows past the last are the overflow (laid out, never written).
+                self.row_top = c.y + pt + self.slot as f32 * pitch;
+                self.row_h = pitch;
+                // Centred in each writing row, like a grid cell. ChiXie3 capture 2026-11-18 (2×2
+                // form, 12 mm rows, size 100): glyph tops 2.3–3.0 mm into the row (centred: 2.5).
+                self.text_top = self.row_top + (pitch - self.em) / 2.0;
             }
             Ruling::Grid { cols, cell: (cw, ch), gap: (cg, rg), .. } => {
                 self.line_x = 0.0;
@@ -101,13 +241,12 @@ impl Pen<'_> {
         let mut g = Vec::new();
         match self.p.ruling {
             Ruling::Free => {}
-            Ruling::Rows { columns, column_gap, band, dashed, divider, .. } => {
+            Ruling::Rows { columns, column_gap, ref widths, band, dashed, divider, .. } => {
                 let n = self.rows;
-                let cols = columns.max(1);
                 let pitch = b.height / n as f32;
-                let col_w = (b.width - column_gap * (cols as f32 - 1.0)) / cols as f32;
-                for c in 0..cols {
-                    let x0 = c as f32 * (col_w + column_gap);
+                let spans = column_spans(b.width, columns, column_gap, widths);
+                let cols = spans.len();
+                for (c, &(x0, col_w)) in spans.iter().enumerate() {
                     for r in 0..=n {
                         let y = r as f32 * pitch;
                         g.push(seg(x0, y, x0 + col_w, y, false));
@@ -121,6 +260,18 @@ impl Pen<'_> {
                     if divider && c + 1 < cols {
                         let x = x0 + col_w + column_gap / 2.0;
                         g.push(seg(x, 0.0, x, b.height, false));
+                    }
+                }
+            }
+            Ruling::Table { ref pages } => {
+                // Cell borders; a border shared by two cells is drawn once.
+                for c in &pages[self.page_ix % pages.len()] {
+                    let (x0, y0, x1, y1) = (c.x, c.y, c.x + c.w, c.y + c.h);
+                    for gd in [seg(x0, y0, x1, y0, false), seg(x0, y1, x1, y1, false), seg(x0, y0, x0, y1, false), seg(x1, y0, x1, y1, false)] {
+                        let same = |a: &Guide| (a.a == gd.a && a.b == gd.b) || (a.a == gd.b && a.b == gd.a);
+                        if !g.iter().any(same) {
+                            g.push(gd);
+                        }
                     }
                 }
             }
@@ -232,6 +383,8 @@ impl Pen<'_> {
                     self.new_page();
                 }
             }
+            // Within the cell; rows past the last one overflow (see `push_box`).
+            Ruling::Table { .. } => self.slot += 1,
         }
         self.enter_slot();
         self.line_start = next;
@@ -257,6 +410,14 @@ impl Pen<'_> {
     pub(super) fn push_box(&mut self, x0: f32) {
         let ox = self.p.origin.0 + self.line_x;
         let line = self.doc.lines.len();
+        let k = self.doc.boxes.len();
+        if self.slot >= self.rows as usize
+            && self.overflow_from.is_none()
+            && self.is_table()
+            && self.chars.get(k).is_some_and(|&c| !c.is_whitespace() && c != CELL_BREAK)
+        {
+            self.overflow_from = Some(k);
+        }
         self.doc.boxes.push(CharBox { page: self.page_ix, line, x0: ox + x0, x1: ox + self.cx });
     }
 }

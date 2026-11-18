@@ -58,7 +58,10 @@ impl ChixieRsApp {
         let has_fonts = !self.font_ids.is_empty();
         let font_size = cx.global::<AppState>().settings.page.font_size;
         let pen_menu = self.pen_colour_menu();
-        let grid = matches!(cx.global::<AppState>().active_template().map(|t| t.ruling()), Some(Ruling::Grid { .. }));
+        let ruling = cx.global::<AppState>().active_template().map(|t| t.ruling());
+        let grid = matches!(ruling, Some(Ruling::Grid { .. }));
+        let table = matches!(ruling, Some(Ruling::Table { .. }));
+        let overflowing = self.doc.read(cx).layout_doc().overflowing().count();
         let (align, indented) = {
             let d = self.doc.read(cx).doc();
             (d.align(), d.indented())
@@ -150,6 +153,38 @@ impl ChixieRsApp {
                     ),
                 None,
             ))
+            .when(table, |el| {
+                let view = self.doc.clone();
+                el.child(group(
+                    cx,
+                    "table",
+                    "表格功能",
+                    stack([
+                        small("next-cell", "下一格 (Tab)", IconName::ArrowRight).on_click(act(Box::new(doc_view::ToggleIndent))).into_any_element(),
+                        small("prev-cell", "上一格 (Shift+Tab)", IconName::ArrowLeft).on_click(act(Box::new(doc_view::PrevCell))).into_any_element(),
+                        small("overflow", if overflowing > 0 { format!("批量溢出 ({overflowing})") } else { "批量溢出".to_string() }, IconName::TriangleAlert)
+                            .on_click({
+                                let view = view.clone();
+                                move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_overflow(view.clone(), w, cx)
+                            })
+                            .into_any_element(),
+                        small("batch", "批量导入…", IconName::Import)
+                            .on_click({
+                                let view = view.clone();
+                                move |_: &ClickEvent, w, cx| crate::table_ui::open_batch_import(view.clone(), w, cx)
+                            })
+                            .into_any_element(),
+                        small("refresh", "刷新数据", IconName::RefreshCw)
+                            .dropdown_menu(move |m, _w, _cx| {
+                                let (v1, v2) = (view.clone(), view.clone());
+                                m.item(PopupMenuItem::new("刷新数据(本页)").on_click(move |_, w, cx| crate::table_ui::refresh_data(&v1, false, w, cx)))
+                                    .item(PopupMenuItem::new("刷新数据(所有页)").on_click(move |_, w, cx| crate::table_ui::refresh_data(&v2, true, w, cx)))
+                            })
+                            .into_any_element(),
+                    ]),
+                    None,
+                ))
+            })
             .child(group(
                 cx,
                 "edit",
@@ -244,7 +279,7 @@ impl ChixieRsApp {
         });
 
         // Template gallery: 空白 + every stored template, the active one outlined.
-        let card = |id: usize, name: String, icon: IconName, t: Option<chixie_rs_core::template::Template>, selected: bool| {
+        let card = |id: usize, name: String, icon: IconName, t: Option<chixie_rs_template::Template>, selected: bool| {
             v_flex()
                 .id(("gallery", id))
                 .w(px(64.))

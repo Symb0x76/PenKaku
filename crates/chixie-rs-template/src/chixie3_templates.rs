@@ -6,7 +6,7 @@
 //! by name; nothing is ever executed. Field meanings: docs/protocol.md (templates).
 
 use crate::template::{Template, TemplateKind};
-use crate::{Error, Result};
+use chixie_rs_core::{Error, Result};
 
 /// Read every template from one `.cx` file's bytes.
 pub fn import(bytes: &[u8]) -> Result<Vec<Template>> {
@@ -41,7 +41,9 @@ fn note(name: &str, f: &Fields) -> Result<Template> {
         columns: f.num("column_num").map(|n| n as u32).unwrap_or(1).max(1),
         // Equal columns only; ChiXie3 keeps per-column gaps in `column_space`.
         column_gap: f.first_num("column_space").unwrap_or(6.0),
+        column_widths: Vec::new(),
         divider: f.bool("show_dividing_line").unwrap_or(true),
+        write_upper: false,
     };
     Ok(Template { name: name.into(), paper, margins, kind })
 }
@@ -367,7 +369,7 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> Vec<u8> {
-        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)).unwrap()
+        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../chixie-rs-core/tests/fixtures").join(name)).unwrap()
     }
 
     #[test]
@@ -379,7 +381,7 @@ mod tests {
         assert_eq!((t.name.as_str(), t.paper, t.margins), ("随机双栏", (210.0, 297.0), (20.0, 30.0, 20.0, 20.0)));
         assert_eq!(
             t.kind,
-            TemplateKind::Ruled { rows_min: 20, rows_max: 26, dual_line: Some(2.5), dashed: true, columns: 2, column_gap: 8.0, divider: true }
+            TemplateKind::Ruled { rows_min: 20, rows_max: 26, dual_line: Some(2.5), dashed: true, columns: 2, column_gap: 8.0, column_widths: vec![], divider: true, write_upper: false }
         );
     }
 

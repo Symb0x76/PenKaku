@@ -28,9 +28,10 @@ pub fn open(path: &Path) -> std::io::Result<Loaded> {
     }
 }
 
-/// Save as DOCX. Write-then-rename, so a crash never leaves a half-written document.
-pub fn save(path: &Path, doc: &Document, seed: u64) -> std::io::Result<()> {
-    let bytes = docx::write(doc, seed).map_err(std::io::Error::other)?;
+/// Save as DOCX. Write-then-rename, so a crash never leaves a half-written document. `tables`:
+/// the table form's pages, when the document is written on one (see [`docx::write_tables`]).
+pub fn save(path: &Path, doc: &Document, seed: u64, tables: &[Vec<docx::TableShape>]) -> std::io::Result<()> {
+    let bytes = docx::write_tables(doc, seed, tables).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("docx.tmp");
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)

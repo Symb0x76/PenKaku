@@ -477,7 +477,7 @@ impl ChixieRsApp {
     /// Use template `name` for the page (`None`: blank page, current paper kept).
     pub fn apply_template(&mut self, name: Option<String>, cx: &mut Context<Self>) {
         self.edit_settings(cx, |st| match name.as_deref().and_then(|n| st.templates.get(n)).cloned() {
-            Some(t) => st.settings.page.apply_template(&t),
+            Some(t) => t.apply_to(&mut st.settings.page),
             None => st.settings.page.template = None,
         });
     }
@@ -496,7 +496,7 @@ impl ChixieRsApp {
         }
         let st = cx.global::<AppState>();
         let path = file_ops::draft_path(&st.settings_path);
-        if let Err(e) = file_ops::save(&path, self.doc.read(cx).doc(), st.settings.style.handwriting.seed) {
+        if let Err(e) = file_ops::save(&path, self.doc.read(cx).doc(), st.settings.style.handwriting.seed, &file_ops::table_shapes(st.active_template().as_ref())) {
             log::warn!("draft {}: {e}", path.display());
         }
     }
@@ -542,8 +542,9 @@ impl ChixieRsApp {
     fn save_doc(&mut self, save_as: bool, window: &mut Window, cx: &mut Context<Self>) {
         let doc = self.doc.read(cx).doc().clone();
         let seed = cx.global::<AppState>().settings.style.handwriting.seed;
+        let tables = file_ops::table_shapes(cx.global::<AppState>().active_template().as_ref());
         if let (false, Some(path)) = (save_as, self.file.clone()) {
-            let msg = match file_ops::save(&path, &doc, seed) {
+            let msg = match file_ops::save(&path, &doc, seed, &tables) {
                 Ok(()) => Notification::success(format!("已保存 {}", path.display())),
                 Err(e) => Notification::error(format!("保存失败：{e}")),
             };
@@ -557,7 +558,7 @@ impl ChixieRsApp {
             if path.extension().is_none() {
                 path.set_extension("docx");
             }
-            let res = file_ops::save(&path, &doc, seed);
+            let res = file_ops::save(&path, &doc, seed, &tables);
             let _ = this.update_in(cx, |app, window, cx| {
                 let msg = match res {
                     Ok(()) => {

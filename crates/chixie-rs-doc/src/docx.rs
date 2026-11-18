@@ -2,7 +2,8 @@
 //!
 //! - `word/document.xml`: one `w:p` per paragraph (alignment, first-line indent) with runs split
 //!   where the formatting changes (`rFonts`, `sz`, `color`, `position`), so Word, WPS and
-//!   LibreOffice show the text, fonts and colours.
+//!   LibreOffice show the text, fonts and colours. On a table form ([`write_tables`]) the
+//!   cell segments go into real `w:tbl` tables (merged cells as `gridSpan` / `vMerge`).
 //! - `customXml/item1.xml` (namespace [`NS`]): what Word can't hold exactly — the handwriting seed,
 //!   character ids (run-length encoded), exact attributes and paragraph records, plus the text they
 //!   belong to. Word keeps custom XML parts when it saves.
@@ -18,6 +19,8 @@ use quick_xml::events::{BytesStart, Event};
 use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
+
+use chixie_rs_core::layout::CELL_BREAK;
 
 use crate::model::{Align, Attrs, Char, Document, Para};
 
@@ -186,42 +189,125 @@ fn para_props(p: &Para) -> String {
     if s.is_empty() { s } else { format!("<w:pPr>{s}</w:pPr>") }
 }
 
-fn document_xml(doc: &Document) -> String {
-    let mut x = String::from(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#,
-    );
+/// One table of a form page, as Word sees it: grid column widths (mm), grid rows, and the cells'
+/// spans `(r0, c0, r1, c1)` (end exclusive) in writing order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableShape {
+    pub cols: Vec<f32>,
+    pub rows: u32,
+    pub cells: Vec<(u32, u32, u32, u32)>,
+}
+
+const DOC_HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#;
+
+/// Paragraphs for chars `range` (split at `'\n'`), starting with paragraph record `para`.
+/// Returns the next paragraph index. Outside a table a cell break is written as a tab (XML can't
+/// hold U+001F).
+fn paragraphs_xml(x: &mut String, doc: &Document, range: std::ops::Range<usize>, mut para: usize) -> usize {
     let chars = doc.chars();
-    let mut para = 0;
-    let mut i = 0;
+    let mut i = range.start;
     loop {
-        x += "<w:p>";
-        x += &para_props(&doc.paras()[para]);
+        *x += "<w:p>";
+        *x += &para_props(&doc.paras()[para.min(doc.paras().len() - 1)]);
         // Runs up to the paragraph's end.
-        while i < chars.len() && chars[i] != '\n' {
+        while i < range.end && chars[i] != '\n' {
             let a = doc.attrs(i);
             let start = i;
-            while i < chars.len() && chars[i] != '\n' && doc.attrs(i) == a {
+            while i < range.end && chars[i] != '\n' && doc.attrs(i) == a {
                 i += 1;
             }
-            x += "<w:r>";
-            x += &run_props(a);
-            for (k, piece) in chars[start..i].split(|&c| c == '\t').enumerate() {
+            *x += "<w:r>";
+            *x += &run_props(a);
+            for (k, piece) in chars[start..i].split(|&c| c == '\t' || c == CELL_BREAK).enumerate() {
                 if k > 0 {
-                    x += "<w:tab/>";
+                    *x += "<w:tab/>";
                 }
                 if !piece.is_empty() {
-                    x += &format!(r#"<w:t xml:space="preserve">{}</w:t>"#, esc(&piece.iter().collect::<String>()));
+                    *x += &format!(r#"<w:t xml:space="preserve">{}</w:t>"#, esc(&piece.iter().collect::<String>()));
                 }
             }
-            x += "</w:r>";
+            *x += "</w:r>";
         }
-        x += "</w:p>";
-        if i >= chars.len() {
-            break;
+        *x += "</w:p>";
+        if i >= range.end {
+            return para;
         }
         i += 1; // the '\n'
         para += 1;
+    }
+}
+
+fn document_xml(doc: &Document) -> String {
+    let mut x = String::from(DOC_HEAD);
+    paragraphs_xml(&mut x, doc, 0..doc.len(), 0);
+    x += "</w:body></w:document>";
+    x
+}
+
+/// `document.xml` of a table form: the text's cell segments fill the tables of `pages` (repeated
+/// in order) until every segment is placed.
+fn tables_xml(doc: &Document, pages: &[Vec<TableShape>]) -> String {
+    let chars = doc.chars();
+    let mut segs: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut start = 0;
+    for (i, &c) in chars.iter().enumerate() {
+        if c == CELL_BREAK {
+            segs.push(start..i);
+            start = i + 1;
+        }
+    }
+    segs.push(start..chars.len());
+    let cells_per_copy: usize = pages.iter().flatten().map(|t| t.cells.len()).sum();
+    if cells_per_copy == 0 {
+        return document_xml(doc);
+    }
+    // Paragraph record of each segment's first paragraph.
+    let para_at = |i: usize| chars[..i].iter().filter(|&&c| c == '\n').count();
+    let mut x = String::from(DOC_HEAD);
+    let mut seg = 0;
+    'copies: for k in 0.. {
+        for t in &pages[k % pages.len()] {
+            if seg >= segs.len() {
+                break 'copies;
+            }
+            x += r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>"#;
+            for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
+                x += &format!(r#"<w:{side} w:val="single" w:sz="4" w:space="0" w:color="auto"/>"#);
+            }
+            x += "</w:tblBorders></w:tblPr><w:tblGrid>";
+            for w in &t.cols {
+                x += &format!(r#"<w:gridCol w:w="{}"/>"#, (w * TWIPS_PER_MM).round() as i64);
+            }
+            x += "</w:tblGrid>";
+            // Segment of each cell, in writing order.
+            let first = seg;
+            seg += t.cells.len();
+            for r in 0..t.rows {
+                x += "<w:tr>";
+                for c in 0..t.cols.len() as u32 {
+                    let Some(ci) = t.cells.iter().position(|&(r0, c0, r1, c1)| r0 <= r && r < r1 && c0 == c && c < c1) else { continue };
+                    let (r0, c0, r1, c1) = t.cells[ci];
+                    x += "<w:tc><w:tcPr>";
+                    if c1 - c0 > 1 {
+                        x += &format!(r#"<w:gridSpan w:val="{}"/>"#, c1 - c0);
+                    }
+                    if r1 - r0 > 1 {
+                        x += if r == r0 { r#"<w:vMerge w:val="restart"/>"# } else { "<w:vMerge/>" };
+                    }
+                    x += "</w:tcPr>";
+                    match segs.get(first + ci).filter(|_| r == r0) {
+                        Some(range) => {
+                            paragraphs_xml(&mut x, doc, range.clone(), para_at(range.start));
+                        }
+                        None => x += "<w:p/>",
+                    }
+                    x += "</w:tc>";
+                }
+                x += "</w:tr>";
+            }
+            x += "</w:tbl>";
+        }
     }
     x += "</w:body></w:document>";
     x
@@ -247,12 +333,19 @@ fn extras_xml(doc: &Document, seed: u64) -> String {
 
 /// The document as DOCX bytes. Deterministic: the same document and seed give the same bytes.
 pub fn write(doc: &Document, seed: u64) -> Result<Vec<u8>, Error> {
+    write_tables(doc, seed, &[])
+}
+
+/// [`write`] for a table form: `pages` are the template's pages (their tables in order); the
+/// cell segments are written into Word tables. Empty `pages` = plain paragraphs.
+pub fn write_tables(doc: &Document, seed: u64, pages: &[Vec<TableShape>]) -> Result<Vec<u8>, Error> {
+    let body = if pages.is_empty() { document_xml(doc) } else { tables_xml(doc, pages) };
     let mut z = ZipWriter::new(Cursor::new(Vec::new()));
     let opt = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).last_modified_time(DateTime::default());
     let parts: [(&str, String); 7] = [
         ("[Content_Types].xml", CONTENT_TYPES.into()),
         ("_rels/.rels", ROOT_RELS.into()),
-        ("word/document.xml", document_xml(doc)),
+        ("word/document.xml", body),
         ("word/_rels/document.xml.rels", DOC_RELS.into()),
         ("customXml/item1.xml", extras_xml(doc, seed)),
         ("customXml/itemProps1.xml", ITEM_PROPS.into()),
@@ -295,6 +388,9 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
     let mut paras: Vec<Para> = Vec::new();
     let (mut in_ppr, mut in_rpr, mut in_t) = (false, false, false);
     let mut run = Attrs::default();
+    // Tables: inside a cell; its first paragraph is still to come; it continues a vertical merge
+    // (its text is skipped); cells seen so far.
+    let (mut in_tc, mut tc_first_p, mut tc_skip, mut tc_seen) = (false, false, false, 0usize);
     loop {
         let ev = r.read_event()?;
         let (e, open) = match &ev {
@@ -304,6 +400,20 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
         };
         if let Some(e) = e {
             match e.name().as_ref() {
+                b"w:tc" if open => (in_tc, tc_first_p, tc_skip) = (true, true, false),
+                b"w:vMerge" if in_tc => tc_skip = attr(&e, "w:val")?.as_deref() != Some("restart"),
+                b"w:p" if in_tc && tc_skip => {}
+                b"w:p" if in_tc && tc_first_p => {
+                    // A cell's first paragraph starts the cell's segment.
+                    tc_first_p = false;
+                    if tc_seen > 0 {
+                        chars.push((CELL_BREAK, Attrs::default()));
+                    }
+                    tc_seen += 1;
+                    if paras.is_empty() {
+                        paras.push(Para::default());
+                    }
+                }
                 b"w:p" => {
                     if !paras.is_empty() {
                         chars.push(('\n', Attrs::default()));
@@ -320,7 +430,7 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
                     let p = paras.last().cloned().unwrap_or_default();
                     paras.push(p);
                 }
-                b"w:jc" if in_ppr => {
+                b"w:jc" if in_ppr && !tc_skip => {
                     if let Some(p) = paras.last_mut() {
                         p.align = match attr(&e, "w:val")?.as_deref() {
                             Some("center") => Align::Center,
@@ -357,13 +467,14 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
         }
         match ev {
             Event::End(e) => match e.name().as_ref() {
+                b"w:tc" => (in_tc, tc_skip) = (false, false),
                 b"w:pPr" => in_ppr = false,
                 b"w:rPr" => in_rpr = false,
                 b"w:t" => in_t = false,
                 _ => {}
             },
-            Event::Text(t) if in_t => chars.extend(t.decode()?.chars().map(|c| (c, run.clone()))),
-            Event::GeneralRef(g) if in_t => {
+            Event::Text(t) if in_t && !tc_skip => chars.extend(t.decode()?.chars().map(|c| (c, run.clone()))),
+            Event::GeneralRef(g) if in_t && !tc_skip => {
                 let c = match g.resolve_char_ref()? {
                     Some(c) => Some(c),
                     None => predefined(&g.decode()?),
@@ -376,6 +487,10 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
     }
     if paras.is_empty() {
         paras.push(Para::default());
+    }
+    // Empty cells at the end of a form carry nothing.
+    while chars.last().is_some_and(|(c, _)| *c == CELL_BREAK) {
+        chars.pop();
     }
     Ok((chars, paras))
 }
@@ -418,6 +533,18 @@ fn merge(parsed: Vec<(char, Attrs)>, paras: Vec<Para>, ex: &Extras) -> Option<Do
         return None;
     }
     let new: Vec<char> = parsed.iter().map(|(c, _)| *c).collect();
+    // Word holds a cell break as a tab (or a table cell) and drops empty cells at the end.
+    let key = |v: &[char]| {
+        let mut k: Vec<char> = v.iter().map(|&c| if c == CELL_BREAK { '\t' } else { c }).collect();
+        while k.last() == Some(&'\t') {
+            k.pop();
+        }
+        k
+    };
+    if new != old && key(&new) == key(&old) {
+        let chars = old.iter().enumerate().map(|(j, &ch)| Char { ch, id: ids[j], attrs: ex.styles[styles[j]].clone() }).collect();
+        return Document::from_loaded(chars, ex.paras.clone());
+    }
     let exact = new == old;
     let pre = new.iter().zip(&old).take_while(|(a, b)| a == b).count();
     let max_suf = new.len().min(old.len()) - pre;
@@ -560,5 +687,41 @@ mod tests {
         z.start_file("a.txt", SimpleFileOptions::default()).unwrap();
         let bytes = z.finish().unwrap().into_inner();
         assert!(matches!(read(&bytes), Err(Error::NotDocx)));
+    }
+
+    /// 2×2 grid; the left column is one merged cell (rows 0..2): three cells.
+    fn merged_shape() -> Vec<Vec<TableShape>> {
+        vec![vec![TableShape { cols: vec![30.0, 40.0], rows: 2, cells: vec![(0, 0, 2, 1), (0, 1, 1, 2), (1, 1, 2, 2)] }]]
+    }
+
+    #[test]
+    fn table_forms_write_word_tables_and_round_trip() {
+        let b = CELL_BREAK;
+        // Two copies of the page: 3 cells + 2 cells, the last one empty-ended.
+        let d = Document::from_text(&format!("姓名{b}张三\n李四{b}12{b}A{b}B{b}"));
+        let shapes = merged_shape();
+        let xml = tables_xml(&d, &shapes);
+        assert!(!xml.contains(b), "U+001F is not XML");
+        assert_eq!(xml.matches("<w:tbl>").count(), 2);
+        assert_eq!(xml.matches(r#"<w:vMerge w:val="restart"/>"#).count(), 2);
+        assert_eq!(xml.matches("<w:vMerge/>").count(), 2);
+        assert!(xml.contains(r#"<w:gridCol w:w="1701"/>"#));
+        let bytes = write_tables(&d, 9, &shapes).unwrap();
+        let l = read(&bytes).unwrap();
+        assert!(l.doc.same_content(&d), "{:?}", l.doc.text());
+        // Word's view alone: cells become cell breaks, the merge continuation is skipped and the
+        // empty cells at the end are dropped.
+        let (chars, paras) = parse_document(&xml).unwrap();
+        assert_eq!(chars.iter().map(|c| c.0).collect::<String>(), format!("姓名{b}张三\n李四{b}12{b}A{b}B"));
+        assert_eq!(paras.len(), 2);
+    }
+
+    #[test]
+    fn cell_breaks_outside_tables_stay_valid_xml() {
+        let b = CELL_BREAK;
+        let d = Document::from_text(&format!("a{b}b"));
+        let xml = document_xml(&d);
+        assert!(!xml.contains(b) && xml.contains("<w:tab/>"));
+        assert!(read(&write(&d, 1).unwrap()).unwrap().doc.same_content(&d));
     }
 }

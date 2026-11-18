@@ -129,13 +129,6 @@ impl PageSettings {
         let (l, t, r, b) = self.margins;
         ((w - l - r).max(1.0), (h - t - b).max(1.0))
     }
-
-    /// Use `t`'s paper and margins and remember it as the active template.
-    pub fn apply_template(&mut self, t: &crate::template::Template) {
-        self.paper = t.paper;
-        self.margins = t.grid_margins();
-        self.template = Some(t.name.clone());
-    }
 }
 
 impl Settings {
@@ -143,11 +136,11 @@ impl Settings {
     /// writable area = the pen's start position, Y negative going down the page, matching what
     /// ChiXie3 streams (docs/protocol.md).
     pub fn page_params(&self) -> crate::layout::PageParams {
-        self.page_params_with(None)
+        self.page_params_with(crate::layout::Ruling::Free)
     }
 
-    /// Like [`Settings::page_params`], with `template`'s ruling (rows / grid) when given.
-    pub fn page_params_with(&self, template: Option<&crate::template::Template>) -> crate::layout::PageParams {
+    /// Like [`Settings::page_params`], with the active template's ruling (rows / grid / table).
+    pub fn page_params_with(&self, ruling: crate::layout::Ruling) -> crate::layout::PageParams {
         let (width, height) = self.page.writable();
         crate::layout::PageParams {
             mm_per_unit: crate::calibration::mm_per_unit_for_font_size(self.page.font_size),
@@ -156,7 +149,7 @@ impl Settings {
             page: Some(crate::layout::PageBox { width, height }),
             style: self.style.handwriting.clone(),
             deformation: self.style.deformation.clone(),
-            ruling: template.map(|t| t.ruling()).unwrap_or_default(),
+            ruling,
             kinsoku: self.page.kinsoku,
             grid_pair_letters: self.page.grid_pair_letters,
             grid_keep_words: self.page.grid_keep_words,

@@ -3,10 +3,10 @@
 
 use std::path::PathBuf;
 
-use chixie_rs_core::chixie3_templates;
+use chixie_rs_template::chixie3_templates;
 use chixie_rs_core::font::Font;
 use chixie_rs_core::layout::{self, PageBox, PageParams};
-use chixie_rs_core::template::{Template, TemplateKind};
+use chixie_rs_template::{Template, TemplateKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput};
@@ -17,6 +17,8 @@ use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _
 use gpui_kit::component::input::Input;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+mod table;
 
 use crate::doc_view::paint_guides;
 use crate::ribbon;
@@ -76,6 +78,10 @@ pub struct TemplatesView {
     original: String,
     name: Entity<InputState>,
     nums: Vec<(F, Entity<InputState>)>,
+    /// Per-column widths (栏宽相等 off), one input per possible column.
+    col_widths: Vec<Entity<InputState>>,
+    /// Table form editing state (selected page and cells).
+    tbl: table::TableEdit,
     /// Suppress change events while filling the form.
     loading: bool,
     dirty: bool,
@@ -102,7 +108,17 @@ impl TemplatesView {
             }));
             nums.push((f, st));
         }
-        let mut this = Self { selected: 0, draft: None, original: String::new(), name, nums, loading: false, dirty: false, _subs: subs };
+        let mut col_widths = Vec::new();
+        for _ in 0..MAX_COLUMNS {
+            let st = cx.new(|cx| InputState::new(window, cx).min(1.0).step(1.0));
+            subs.push(cx.subscribe_in(&st, window, |this, _s, ev: &InputEvent, _w, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    this.read_form(cx);
+                }
+            }));
+            col_widths.push(st);
+        }
+        let mut this = Self { selected: 0, draft: None, original: String::new(), name, nums, col_widths, tbl: Default::default(), loading: false, dirty: false, _subs: subs };
         let active = cx.global::<AppState>().settings.page.template.clone();
         let ix = active.and_then(|n| cx.global::<AppState>().templates.templates.iter().position(|t| t.name == n)).unwrap_or(0);
         this.select(ix, window, cx);
@@ -121,6 +137,7 @@ impl TemplatesView {
         };
         self.selected = ix;
         self.original = t.name.clone();
+        self.reset_table_edit();
         self.loading = true;
         let set = |e: &Entity<InputState>, v: String, window: &mut Window, cx: &mut Context<Self>| e.update(cx, |s, cx| s.set_value(v, window, cx));
         set(&self.name, t.name.clone(), window, cx);
@@ -144,10 +161,15 @@ impl TemplatesView {
                 (F::RowGap, row_gap),
                 (F::ColGap, col_gap),
             ]),
+            TemplateKind::Table(_) => {}
         }
         for (f, v) in vals {
             let e = self.input(f).clone();
             set(&e, fmt_num(v), window, cx);
+        }
+        for (i, w) in column_widths_of(&t).into_iter().enumerate() {
+            let e = self.col_widths[i].clone();
+            set(&e, fmt_num(w), window, cx);
         }
         self.draft = Some(t);
         self.loading = false;
@@ -175,14 +197,23 @@ impl TemplatesView {
         t.margins = (n(F::Left, l), n(F::Top, top), n(F::Right, r), n(F::Bottom, b));
         match &mut t.kind {
             TemplateKind::Blank => {}
-            TemplateKind::Ruled { rows_min, rows_max, dual_line, columns, column_gap, .. } => {
+            TemplateKind::Ruled { rows_min, rows_max, dual_line, columns, column_gap, column_widths, .. } => {
                 *rows_min = n(F::RowsMin, *rows_min as f32).clamp(1.0, 200.0) as u32;
                 *rows_max = (n(F::RowsMax, *rows_max as f32).clamp(1.0, 200.0) as u32).max(*rows_min);
                 if dual_line.is_some() {
                     *dual_line = Some(n(F::Band, dual_line.unwrap_or(2.5)));
                 }
-                *columns = n(F::Columns, *columns as f32).clamp(1.0, 6.0) as u32;
+                *columns = n(F::Columns, *columns as f32).clamp(1.0, MAX_COLUMNS as f32) as u32;
                 *column_gap = n(F::ColumnGap, *column_gap);
+                if !column_widths.is_empty() {
+                    let widths: Vec<f32> = (0..*columns as usize)
+                        .map(|i| {
+                            let old = column_widths.get(i).copied().unwrap_or(10.0);
+                            self.col_widths[i].read(cx).value().trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v >= 1.0).unwrap_or(old)
+                        })
+                        .collect();
+                    *column_widths = widths;
+                }
             }
             TemplateKind::Grid { rows, cols, cell_w, cell_h, row_gap, col_gap } => {
                 *rows = n(F::GridRows, *rows as f32).clamp(1.0, 100.0) as u32;
@@ -192,6 +223,7 @@ impl TemplatesView {
                 *row_gap = n(F::RowGap, *row_gap);
                 *col_gap = n(F::ColGap, *col_gap);
             }
+            TemplateKind::Table(_) => {}
         }
         if matches!(t.kind, TemplateKind::Grid { .. }) {
             t.margins = t.grid_margins();
@@ -214,8 +246,8 @@ impl TemplatesView {
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(t) = self.draft.clone() else { return };
         let st = cx.global_mut::<AppState>();
-        if t.name != self.original && st.templates.get(&t.name).is_some() {
-            window.push_notification(Notification::error(format!("已有同名模板「{}」", t.name)), cx);
+        if let Err(e) = st.templates.check(&t, Some(&self.original)) {
+            window.push_notification(Notification::error(e.to_string()), cx);
             return;
         }
         if t.name != self.original {
@@ -227,7 +259,7 @@ impl TemplatesView {
         let ix = st.templates.upsert(t.clone());
         // Keep the document's paper in step when the active template changed.
         if st.settings.page.template.as_deref() == Some(t.name.as_str()) {
-            st.settings.page.apply_template(&t);
+            t.apply_to(&mut st.settings.page);
             st.save_settings();
         }
         st.save_templates();
@@ -254,6 +286,18 @@ impl TemplatesView {
     }
 
     fn delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.original.clone();
+        let view = cx.entity();
+        window.open_alert_dialog(cx, move |a, _w, _cx| {
+            let view = view.clone();
+            a.title(format!("确认要删除模板「{name}」吗？")).description("删除后无法恢复。").confirm().ok_text("删除").on_ok(move |_, w, cx| {
+                view.update(cx, |v, cx| v.delete_now(w, cx));
+                true
+            })
+        });
+    }
+
+    fn delete_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let st = cx.global_mut::<AppState>();
         if st.templates.templates.len() <= 1 {
             return;
@@ -358,6 +402,9 @@ impl TemplatesView {
                     })))
                     .child(ribbon::small("new-blank", "新建空白", IconName::File).on_click(cx.listener(|v, _: &ClickEvent, w, cx| {
                         v.add(Template::blank("新空白页", (210.0, 297.0)), w, cx)
+                    })))
+                    .child(ribbon::small("new-table", "新建表格", IconName::LayoutGrid).on_click(cx.listener(|v, _: &ClickEvent, w, cx| {
+                        v.add(Template::table("新表格", (210.0, 297.0)), w, cx)
                     }))),
             )
             .child(v_flex().id("tpl-list").gap_0p5().max_h(px(360.)).overflow_y_scroll().children(rows))
@@ -399,7 +446,13 @@ impl TemplatesView {
                     .child(div().w(px(72.)))
                     .child(Button::new("q-a4").xsmall().outline().label("A4").on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.set_paper(210.0, 297.0, w, cx))))
                     .child(Button::new("q-b5").xsmall().outline().label("B5").on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.set_paper(176.0, 250.0, w, cx))))
-                    .child(Button::new("q-a5").xsmall().outline().label("A5").on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.set_paper(148.0, 210.0, w, cx)))),
+                    .child(Button::new("q-a5").xsmall().outline().label("A5").on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.set_paper(148.0, 210.0, w, cx))))
+                    .child(Button::new("q-swap").xsmall().ghost().label("横竖互换").on_click(cx.listener(|v, _: &ClickEvent, w, cx| {
+                        if let Some(t) = &v.draft {
+                            let (pw, ph) = t.paper;
+                            v.set_paper(ph, pw, w, cx);
+                        }
+                    }))),
             );
         match t.kind {
             TemplateKind::Blank | TemplateKind::Ruled { .. } => {
@@ -411,10 +464,13 @@ impl TemplatesView {
             TemplateKind::Grid { .. } => {
                 col = col.child(section("位置")).child(h_flex().gap_3().child(field("左边距", F::Left, "mm")).child(field("上边距", F::Top, "mm")));
             }
+            // A table form's frame is its tables.
+            TemplateKind::Table(_) => {}
         }
         match t.kind {
             TemplateKind::Blank => col = col.child(div().pt_2().text_xs().text_color(muted).child("空白页：行距在「开始 › 段落」中设置。")),
-            TemplateKind::Ruled { rows_min, rows_max, dual_line, dashed, columns, divider, .. } => {
+            TemplateKind::Ruled { rows_min, rows_max, dual_line, dashed, columns, divider, ref column_widths, write_upper, .. } => {
+                let equal = column_widths.is_empty();
                 let random = rows_max > rows_min;
                 col = col
                     .child(section("行"))
@@ -456,20 +512,40 @@ impl TemplatesView {
                                 })
                             }))),
                     )
-                    .when(dual_line.is_some(), |el| el.child(field("上线高度", F::Band, "mm")))
-                    .child(section("分栏"))
-                    .child(h_flex().gap_3().child(field("栏数", F::Columns, "栏")).child(field("栏间距", F::ColumnGap, "mm")))
-                    .when(columns > 1, |el| {
-                        el.child(h_flex().gap_2().child(div().w(px(72.))).child(
-                            Checkbox::new("divider").small().label("分隔线").checked(divider).on_click(cx.listener(|v, on: &bool, _w, cx| {
+                    .when(dual_line.is_some(), |el| {
+                        el.child(field("上线高度", F::Band, "mm")).child(h_flex().gap_2().child(div().w(px(72.))).child(
+                            Checkbox::new("upper").small().label("文字写在上侧行").checked(write_upper).on_click(cx.listener(|v, on: &bool, _w, cx| {
                                 let on = *on;
                                 v.edit_kind(cx, |k| {
-                                    if let TemplateKind::Ruled { divider, .. } = k {
-                                        *divider = on;
+                                    if let TemplateKind::Ruled { write_upper, .. } = k {
+                                        *write_upper = on;
                                     }
                                 })
                             })),
                         ))
+                    })
+                    .child(section("分栏"))
+                    .child(h_flex().gap_3().child(field("栏数", F::Columns, "栏")).child(field("栏间距", F::ColumnGap, "mm")))
+                    .when(columns > 1, |el| {
+                        el.child(
+                            h_flex()
+                                .gap_3()
+                                .child(div().w(px(72.)))
+                                .child(Checkbox::new("divider").small().label("分隔线").checked(divider).on_click(cx.listener(|v, on: &bool, _w, cx| {
+                                    let on = *on;
+                                    v.edit_kind(cx, |k| {
+                                        if let TemplateKind::Ruled { divider, .. } = k {
+                                            *divider = on;
+                                        }
+                                    })
+                                })))
+                                .child(Checkbox::new("equal").small().label("栏宽相等").checked(equal).on_click(cx.listener(|v, on: &bool, w, cx| v.set_equal_columns(*on, w, cx)))),
+                        )
+                        .when(!equal, |el| {
+                            el.child(h_flex().gap_1().flex_wrap().child(div().w(px(72.)).text_sm().text_color(muted).child("各栏宽度")).children(
+                                self.col_widths.iter().take(columns as usize).map(|e| div().w(px(96.)).child(NumberInput::new(e).small().suffix("mm"))),
+                            ))
+                        })
                     });
             }
             TemplateKind::Grid { .. } => {
@@ -479,6 +555,7 @@ impl TemplatesView {
                     .child(h_flex().gap_3().child(field("格宽", F::CellW, "mm")).child(field("格高", F::CellH, "mm")))
                     .child(h_flex().gap_3().child(field("行间距", F::RowGap, "mm")).child(field("列间距", F::ColGap, "mm")));
             }
+            TemplateKind::Table(_) => col = col.child(self.table_panel(cx)),
         }
         col.child(
             h_flex()
@@ -505,6 +582,21 @@ impl TemplatesView {
         self.read_form(cx);
     }
 
+    /// 栏宽相等 on: drop the widths; off: start from the equal split.
+    fn set_equal_columns(&mut self, equal: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(t) = self.draft.clone() else { return };
+        let widths = if equal { Vec::new() } else { column_widths_of(&t) };
+        for (i, w) in widths.iter().enumerate() {
+            let e = self.col_widths[i].clone();
+            e.update(cx, |s, cx| s.set_value(fmt_num(*w), window, cx));
+        }
+        self.edit_kind(cx, |k| {
+            if let TemplateKind::Ruled { column_widths, .. } = k {
+                *column_widths = widths;
+            }
+        });
+    }
+
     fn set_random_rows(&mut self, random: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(Template { kind: TemplateKind::Ruled { rows_min, .. }, .. }) = self.draft.clone() else { return };
         let max = if random { rows_min + 4 } else { rows_min };
@@ -518,6 +610,24 @@ impl TemplatesView {
     }
 }
 
+const MAX_COLUMNS: usize = 6;
+
+/// Each column's width (mm) as laid out: the custom widths, or the equal split.
+fn column_widths_of(t: &Template) -> Vec<f32> {
+    match &t.kind {
+        TemplateKind::Ruled { columns, column_gap, column_widths, .. } => {
+            let n = (*columns as usize).clamp(1, MAX_COLUMNS);
+            if column_widths.len() == n {
+                return column_widths.clone();
+            }
+            let (l, _, r, _) = t.margins;
+            let room = (t.paper.0 - l - r - column_gap * (n - 1) as f32).max(n as f32);
+            vec![(room / n as f32 * 10.0).round() / 10.0; n]
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn is_count(f: F) -> bool {
     matches!(f, F::RowsMin | F::RowsMax | F::Columns | F::GridRows | F::GridCols)
 }
@@ -527,6 +637,7 @@ pub fn kind_icon(k: &TemplateKind) -> IconName {
         TemplateKind::Blank => IconName::File,
         TemplateKind::Ruled { .. } => IconName::Rows3,
         TemplateKind::Grid { .. } => IconName::Grid3x3,
+        TemplateKind::Table(_) => IconName::LayoutGrid,
     }
 }
 
@@ -581,6 +692,12 @@ impl Render for TemplatesView {
             .items_start()
             .child(self.list(cx))
             .child(div().w(px(440.)).flex_none().child(self.form(cx)))
-            .child(div().flex_1().min_w(px(240.)).h(px(520.)).rounded_md().bg(desk).p_3().child(preview(self.draft.clone(), gpui_kit::white(), border)))
+            .child(div().flex_1().min_w(px(240.)).h(px(520.)).rounded_md().bg(desk).p_3().child(
+                if matches!(self.draft.as_ref().map(|t| &t.kind), Some(TemplateKind::Table(_))) {
+                    self.table_canvas(cx)
+                } else {
+                    preview(self.draft.clone(), gpui_kit::white(), border).into_any_element()
+                },
+            ))
     }
 }

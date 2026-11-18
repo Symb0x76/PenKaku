@@ -8,6 +8,7 @@ use chixie_rs_core::profile::DeviceProfile;
 use chixie_rs_output as gcode;
 use chixie_rs_output::Written;
 use chixie_rs_doc::EditDoc;
+use chixie_rs_doc::docx::TableShape;
 
 pub struct Loaded {
     pub doc: EditDoc,
@@ -16,8 +17,26 @@ pub struct Loaded {
 }
 
 /// Save as DOCX (atomic).
-pub fn save(path: &Path, doc: &EditDoc, seed: u64) -> std::io::Result<()> {
-    chixie_rs_doc::save(path, doc.document(), seed)
+pub fn save(path: &Path, doc: &EditDoc, seed: u64, tables: &[Vec<TableShape>]) -> std::io::Result<()> {
+    chixie_rs_doc::save(path, doc.document(), seed, tables)
+}
+
+/// Word table shapes of a table form template's pages (empty for other templates).
+pub fn table_shapes(t: Option<&chixie_rs_template::Template>) -> Vec<Vec<TableShape>> {
+    let Some(chixie_rs_template::TemplateKind::Table(tt)) = t.map(|t| &t.kind) else { return Vec::new() };
+    tt.pages
+        .iter()
+        .map(|p| {
+            p.tables
+                .iter()
+                .map(|t| TableShape {
+                    cols: t.cols.clone(),
+                    rows: t.rows.len() as u32,
+                    cells: t.reading_order().into_iter().map(|i| t.cells[i].span).map(|s| (s.r0, s.c0, s.r1, s.c1)).collect(),
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// Open `.docx`, `.chx` (migrated) or anything else as UTF-8 text.
@@ -70,7 +89,7 @@ mod tests {
         let mut d = EditDoc::from_text("你好");
         d.move_to(0, false);
         d.insert("啊"); // id 2 at the front: ids are no longer 0..n
-        save(&p, &d, 42).unwrap();
+        save(&p, &d, 42, &[]).unwrap();
         let l = open(&p).unwrap();
         assert_eq!(l.doc.text(), "啊你好");
         assert_eq!(l.doc.ids(), d.ids());
