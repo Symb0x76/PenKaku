@@ -12,7 +12,6 @@ use gpui_kit::*;
 
 use super::ChixieRsApp;
 use crate::state::AppState;
-use crate::templates_view::preview;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Stage {
@@ -78,7 +77,7 @@ impl ChixieRsApp {
             )
             .children(items);
         let (title, body) = match stage {
-            Stage::New => ("新建", self.bs_new(cx)),
+            Stage::New => ("新建", self.bs_gallery(cx)),
             Stage::Open => ("打开", self.bs_open(cx)),
             Stage::Export => ("导出", self.bs_export(cx)),
             Stage::Templates => ("模板管理", self.templates.clone().into_any_element()),
@@ -111,35 +110,6 @@ impl ChixieRsApp {
                     .child(div().text_3xl().child(title))
                     .child(body),
             )
-            .into_any_element()
-    }
-
-    #[inline(never)]
-    fn bs_new(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let (border, hover, muted) = (theme.border, theme.secondary, theme.muted_foreground);
-        let templates = cx.global::<AppState>().templates.templates.clone();
-        let card = |id: usize, name: String, t: Option<chixie_rs_template::Template>| {
-            v_flex()
-                .id(("bs-new", id))
-                .w(px(150.))
-                .gap_2()
-                .p_2()
-                .rounded_md()
-                .cursor_pointer()
-                .hover(|s| s.bg(hover))
-                .child(div().w(px(134.)).h(px(176.)).border_1().border_color(border).bg(gpui_kit::white()).child(preview(t, gpui_kit::white(), border)))
-                .child(div().text_sm().text_center().child(name))
-        };
-        let mut row = h_flex().gap_4().flex_wrap().child(card(0, "空白文档".into(), None).on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.new_doc(Some(None), w, cx))));
-        for (i, t) in templates.into_iter().enumerate() {
-            let name = t.name.clone();
-            row = row.child(card(i + 1, name.clone(), Some(t)).on_click(cx.listener(move |a, _: &ClickEvent, w, cx| a.new_doc(Some(Some(name.clone())), w, cx))));
-        }
-        v_flex()
-            .gap_3()
-            .child(div().text_sm().text_color(muted).child("新建空白文档，或用模板（信纸 / 作文格）开始。当前文档会被清空，草稿已自动保存。"))
-            .child(row)
             .into_any_element()
     }
 
@@ -229,6 +199,7 @@ impl ChixieRsApp {
                 t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
             })))
             .child(self.bs_font_options(cx))
+            .child(self.bs_template_options(cx))
             .child(div().pt_2().text_base().font_weight(FontWeight::SEMIBOLD).child("从炽写迁移"))
             .child(
                 h_flex()

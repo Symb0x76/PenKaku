@@ -27,6 +27,12 @@ pub struct Template {
     /// follow from the grid size (`Template::grid_margins`).
     pub margins: (f32, f32, f32, f32),
     pub kind: TemplateKind,
+    /// 标签 in the template gallery (全部模板 / 人物角色 / 教育学习 / …).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// 我的收藏.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub favourite: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -65,7 +71,7 @@ pub enum TemplateKind {
 
 impl Template {
     pub fn blank(name: &str, paper: (f32, f32)) -> Self {
-        Self { name: name.into(), paper, margins: (21.0, 20.0, 21.0, 20.0), kind: TemplateKind::Blank }
+        Self { name: name.into(), paper, margins: (21.0, 20.0, 21.0, 20.0), kind: TemplateKind::Blank, tags: Vec::new(), favourite: false }
     }
 
     /// Ruled letter paper with a fixed line count.
@@ -81,21 +87,21 @@ impl Template {
             divider: true,
             write_upper: false,
         };
-        Self { name: name.into(), paper, margins, kind }
+        Self { name: name.into(), paper, margins, kind, tags: Vec::new(), favourite: false }
     }
 
     /// Composition grid placed `left`/`top` from the paper edge.
     #[allow(clippy::too_many_arguments)]
     pub fn grid(name: &str, paper: (f32, f32), left: f32, top: f32, rows: u32, cols: u32, cell: (f32, f32), gap: (f32, f32)) -> Self {
         let kind = TemplateKind::Grid { rows, cols, cell_w: cell.0, cell_h: cell.1, row_gap: gap.1, col_gap: gap.0 };
-        let mut t = Self { name: name.into(), paper, margins: (left, top, 0.0, 0.0), kind };
+        let mut t = Self { name: name.into(), paper, margins: (left, top, 0.0, 0.0), kind, tags: Vec::new(), favourite: false };
         t.margins = t.grid_margins();
         t
     }
 
     /// An empty table form (one blank page; 插入表格 adds tables).
     pub fn table(name: &str, paper: (f32, f32)) -> Self {
-        Self { name: name.into(), paper, margins: (0.0, 0.0, 0.0, 0.0), kind: TemplateKind::Table(TableTemplate::new()) }
+        Self { name: name.into(), paper, margins: (0.0, 0.0, 0.0, 0.0), kind: TemplateKind::Table(TableTemplate::new()), tags: Vec::new(), favourite: false }
     }
 
     /// Margins for a grid: left/top as set, right/bottom = what the grid leaves of the paper.

@@ -45,7 +45,7 @@ fn note(name: &str, f: &Fields) -> Result<Template> {
         divider: f.bool("show_dividing_line").unwrap_or(true),
         write_upper: false,
     };
-    Ok(Template { name: name.into(), paper, margins, kind })
+    Ok(Template { name: name.into(), paper, margins, kind, tags: Vec::new(), favourite: false })
 }
 
 fn composition(name: &str, f: &Fields) -> Result<Template> {

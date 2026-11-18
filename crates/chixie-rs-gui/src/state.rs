@@ -40,6 +40,8 @@ pub struct AppState {
     /// Bumped whenever `font_set` changes, so views know to lay out again.
     pub font_set_gen: u64,
     pub templates: TemplateStore,
+    /// Where templates are kept: one SVG each (`Documents/chixie-rs/Templates` + extra folders).
+    pub template_lib: chixie_rs_template::library::TemplateLibrary,
     /// Downloaded fonts kept on this computer (work without login).
     pub fonts: std::sync::Arc<crate::font_lib::LibraryStore>,
     pub templates_path: PathBuf,
@@ -64,9 +66,16 @@ impl AppState {
         self.settings.page.template.as_ref().and_then(|n| self.templates.get(n)).cloned()
     }
 
+    /// Write the templates to the library's default folder (one SVG each; deleted ones removed).
     pub fn save_templates(&self) {
-        if let Err(e) = self.templates.save(&self.templates_path) {
-            log::warn!("saving templates to {}: {e}", self.templates_path.display());
+        if let Err(e) = self.template_lib.sync(&self.templates) {
+            log::warn!("saving templates to {}: {e}", self.template_lib.default_dir.display());
         }
+    }
+
+    /// Read the templates again from the library folders.
+    pub fn reload_templates(&mut self) {
+        let scanned: Vec<Template> = self.template_lib.scan().into_iter().map(|e| e.template).collect();
+        self.templates = TemplateStore { templates: scanned };
     }
 }

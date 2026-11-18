@@ -351,7 +351,7 @@ fn reveal(path: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
-fn open_dir(dir: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn open_dir(dir: &std::path::Path) -> std::io::Result<()> {
     let cmd = if cfg!(target_os = "windows") {
         "explorer"
     } else if cfg!(target_os = "macos") {

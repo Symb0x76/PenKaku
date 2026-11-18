@@ -1,7 +1,7 @@
 //! 导入 PDF/图片 into a table form: detect the frames locally (`chixie-rs-import`), confirm the
 //! scale and place them, keep the scan as the page background, and 内边距识别 from it.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use chixie_rs_import::{DetectedPage, DetectedTable};
@@ -27,8 +27,7 @@ pub struct BgImage {
 
 /// Where page backgrounds live: `template_assets/` next to `templates.toml`.
 fn assets_dir(cx: &App) -> PathBuf {
-    let p = &cx.global::<AppState>().templates_path;
-    p.parent().unwrap_or(Path::new(".")).join("template_assets")
+    cx.global::<AppState>().template_lib.assets.clone()
 }
 
 fn render_grey(grey: &GrayImage, opacity: f32) -> Arc<RenderImage> {

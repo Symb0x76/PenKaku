@@ -65,8 +65,10 @@ fn main() {
     });
     let config_dir = settings_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     if fake {
-        // The demo never touches the real font library in Documents.
+        // The demo never touches the real font and template libraries in Documents.
         settings.fonts.library_dir = Some(config_dir.join("Fonts"));
+        settings.templates.library_dir = Some(config_dir.join("Templates"));
+        settings.templates.extra_dirs.clear();
     }
     // Fonts used to live in `<config>/fonts` as JSON; move them into the library once.
     let library = settings.fonts.library();
@@ -96,8 +98,14 @@ fn main() {
         gpui_kit::init(cx);
         doc_view::bind_keys(cx);
         ribbon::set_theme(settings.ui.dark, None, cx);
+        // Templates: one SVG each in the library folders; the old templates.toml migrates once.
         let templates_path = TemplateStore::path_next_to(&settings_path);
-        let templates = TemplateStore::load(&templates_path).unwrap_or_else(|e| {
+        let template_lib = chixie_rs_template::library::TemplateLibrary::new(
+            settings.templates.library_dir.clone().unwrap_or_else(chixie_rs_template::library::default_dir),
+            settings.templates.extra_dirs.clone(),
+            templates_path.parent().map_or_else(|| PathBuf::from("template_assets"), |p| p.join("template_assets")),
+        );
+        let templates = template_lib.load_store(&templates_path).unwrap_or_else(|e| {
             log::warn!("{e}; using built-in templates");
             TemplateStore::builtins()
         });
@@ -111,6 +119,7 @@ fn main() {
             font_set: Default::default(),
             font_set_gen: 0,
             templates,
+            template_lib,
             templates_path,
             fonts,
             previews: Default::default(),
@@ -582,6 +591,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             cx.update(|cx| {
                 let st = cx.global_mut::<AppState>();
                 st.templates.remove("自测表格");
+                st.save_templates();
                 st.settings = saved_settings;
                 view.update(cx, |v, cx| v.replace_doc(saved_doc, cx));
             });
@@ -626,6 +636,58 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             });
             let _ = cx.update_window(handle, |_, window, cx| templates.update(cx, |v, cx| v.select(0, window, cx)));
             println!("AUTOTEST_DETECT pdf_cells={:?} photo_cells={:?} background={background}", cells.first(), cells.get(1));
+        }
+        // Template library: a table template with a background goes out as a ZIP, is deleted, comes
+        // back in (same cells, same background bytes), and the gallery filters it by tag.
+        {
+            use chixie_rs_template::table::{Background, ColWidth};
+            use chixie_rs_template::{Template, TemplateKind};
+            let (roundtrip, background, gallery) = cx.update(|cx| {
+                let assets = cx.global::<AppState>().template_lib.assets.clone();
+                let _ = std::fs::create_dir_all(&assets);
+                let png = {
+                    let img = image::GrayImage::from_fn(40, 30, |x, y| image::Luma([((x * 5 + y * 9) % 255) as u8]));
+                    let mut b = std::io::Cursor::new(Vec::new());
+                    let _ = img.write_to(&mut b, image::ImageFormat::Png);
+                    b.into_inner()
+                };
+                let _ = std::fs::write(assets.join("autotest-bg.png"), &png);
+                let mut t = Template::table("自测库", (210.0, 297.0));
+                t.tags = vec!["教育学习".into()];
+                if let TemplateKind::Table(tt) = &mut t.kind {
+                    let _ = tt.insert_table(0, 2, 3, ColWidth::Fixed(30.0), 210.0, 20.0);
+                    tt.pages[0].background = Some(Background { file: "autotest-bg.png".into(), x: 0.0, y: 0.0, w: 100.0, h: 75.0, opacity: 0.5 });
+                }
+                let zip = std::env::temp_dir().join("chixie-autotest-templates.zip");
+                let st = cx.global_mut::<AppState>();
+                st.templates.upsert(t.clone());
+                st.save_templates();
+                let saved = st.template_lib.path_of("自测库").exists();
+                let exported = st.template_lib.export(std::slice::from_ref(&t), &zip).is_ok();
+                st.templates.remove("自测库");
+                st.save_templates();
+                let gone = !st.template_lib.path_of("自测库").exists();
+                let _ = std::fs::remove_file(assets.join("autotest-bg.png"));
+                let imported = st.template_lib.import(&[zip]).unwrap_or_default();
+                st.reload_templates();
+                let back = st.templates.get("自测库").cloned();
+                let cells = |t: &Template| match &t.kind {
+                    TemplateKind::Table(tt) => tt.pages[0].tables[0].cells.len(),
+                    _ => 0,
+                };
+                let roundtrip = saved && exported && gone && imported == vec!["自测库".to_string()] && back.as_ref().is_some_and(|b| cells(b) == 6);
+                let background = back.as_ref().and_then(|b| match &b.kind {
+                    TemplateKind::Table(tt) => tt.pages[0].background.clone(),
+                    _ => None,
+                }).is_some_and(|bg| std::fs::read(assets.join(bg.file)).ok() == Some(png.clone()));
+                let names = |tag: usize, cx: &App| crate::app::templates_ctl::gallery_list(1, tag, 0, "", cx).into_iter().map(|t| t.name).collect::<Vec<_>>();
+                let gallery = names(2, cx).contains(&"自测库".to_string()) && !names(1, cx).contains(&"自测库".to_string());
+                let st = cx.global_mut::<AppState>();
+                st.templates.remove("自测库");
+                st.save_templates();
+                (roundtrip, background, gallery)
+            });
+            println!("AUTOTEST_LIBRARY roundtrip={roundtrip} background={background} gallery={gallery}");
         }
         // Fonts: a file dropped into the library folder is picked up by the watcher, can take the
         // 英文字体 role, and survives export + import.

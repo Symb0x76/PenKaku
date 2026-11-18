@@ -7,6 +7,7 @@ mod backstage;
 pub(crate) mod fonts_ctl;
 mod resume;
 mod sd;
+pub(crate) mod templates_ctl;
 mod tune;
 mod ribbon_tabs;
 
@@ -98,6 +99,10 @@ pub struct ChixieRsApp {
     tune_open: bool,
     /// Library folders watched for added / removed fonts.
     library_watch: Option<fonts_ctl::LibraryWatch>,
+    /// Template folders watched for added / changed / removed templates.
+    template_watch: Option<templates_ctl::TemplateWatch>,
+    /// 文件 › 新建 gallery filters.
+    pub(crate) gallery: templates_ctl::Gallery,
     _tasks: Vec<Task<()>>,
     _subs: Vec<Subscription>,
 }
@@ -144,6 +149,8 @@ impl ChixieRsApp {
         let style_dialog = cx.new(|cx| StyleDialog::new(window, cx));
         let device = cx.new(|cx| DevicePanel::new(device, window, cx));
         let zoom_slider = cx.new(|_| SliderState::new().min(0.0).max(100.0).step(0.5).default_value(50.0));
+        let gallery = templates_ctl::Gallery::new(window, cx);
+        let gallery_search = gallery.search.clone();
 
         let pump = cx.spawn_in(window, async move |this, cx| {
             while let Ok(ev) = events.recv().await {
@@ -179,6 +186,11 @@ impl ChixieRsApp {
                 }
             }),
             cx.observe(&device, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&gallery_search, window, |_this, _s, ev: &InputEvent, _w, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
             // The 断点续写 card shows the selected character.
             cx.observe(&doc, |t, _, cx| {
                 if t.resume.open {
@@ -229,6 +241,7 @@ impl ChixieRsApp {
             this.sync_font_select(window, cx);
             this.reload_fonts(window, cx);
             this.watch_library(window, cx);
+            this.watch_templates(window, cx);
         });
         Self {
             tab: 0,
@@ -253,6 +266,8 @@ impl ChixieRsApp {
             resume: Default::default(),
             tune_open: false,
             library_watch: None,
+            template_watch: None,
+            gallery,
             _tasks: vec![pump, dev_pump, autosave],
             _subs: subs,
         }

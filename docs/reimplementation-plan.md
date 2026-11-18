@@ -100,7 +100,7 @@ milestone that needs it, never as a big-bang move.
 | `chixie-rs-doc` | Document model (flows, runs, paragraphs, cells, papers), edit commands + undo, DOCX read/write with the custom XML part, `.chx` v1 migration | M2 |
 | `chixie-rs-font` | font parsing/decrypt, local store, roles + mixing + fallback, glyph clean-ups | M4 (moves `font.rs`, `font_store.rs`) |
 | `chixie-rs-layout` | typesetting (kinsoku, alignment, indent, width classes, grid, cells, overflow), handwriting effects, deformation | M3 (moves `layout.rs`, `handwriting.rs`, `deformation.rs`) |
-| `chixie-rs-template` | template kinds (ruled, grid, table), editor ops, `.cx` / xlsx import, data sources | M7a (moved `template.rs`, `chixie3_templates.rs`; core keeps only the template name, `page_params_with` takes a `Ruling`) |
+| `chixie-rs-template` | template kinds (ruled, grid, table), editor ops, data sources, the template library (SVG files, ZIP, XLSX in / out), `.cx` / xlsx import | M7a (moved `template.rs`, `chixie3_templates.rs`; core keeps only the template name, `page_params_with` takes a `Ruling`) |
 | `chixie-rs-output` | stroke pipeline: transform → order/plan → pen/colour segments → G-code dialects; job description | M6 (moved the emitter out of `gcode.rs`; the device settings stay in core as `profile.rs` because `config.rs` stores them, and `calibration.rs` stays in core because it fits layout scale) |
 | `chixie-rs-device` | transports (serial, Telnet, ESP3D HTTP), Grbl streamer, device actor, discovery, firmware dialects (Grbl_ESP32, ChiXie N1) | M1 (moves `transport.rs`, `grbl.rs`, `device.rs`, `esp3d.rs`, `discovery.rs`) |
 | `chixie-rs-cloud` | API client, session, cloud fonts, cloud template library, parameter sync | M4 (moves `api.rs`, `session.rs`, `credentials.rs`) |
@@ -403,6 +403,10 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   PDFs (threshold, perspective fix, line runs; no `imageproc`) → one grid builder with merged cells.
   Import into the table editor (dialog, drop, backgrounds in `template_assets/`, 内边距识别). Done-when
   met on 10 synthetic forms; real forms: `tests/forms-real/` + `chixie-rs-cli detect-table`.
+- **M7c (branch `m7c-library`):** template library folder (one SVG per template, TOML in
+  `<metadata>`, backgrounds embedded), watched, extra read-only folders, `templates.toml` migrated
+  once; 文件 › 新建 gallery (tabs, 标签, 排序, search, 收藏); 导入 / 导出 SVG / ZIP / XLSX
+  (`rust_xlsxwriter` 0.102). **M7 is done** apart from the cloud library (backend, M10).
 
 ### M8 Files and editor UX (3–4 wk) — spec R3 (UX part)
 - Find/replace with options; Word-style context menu.

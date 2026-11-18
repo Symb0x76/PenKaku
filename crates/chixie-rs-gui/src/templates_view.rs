@@ -3,7 +3,6 @@
 
 use std::path::PathBuf;
 
-use chixie_rs_template::chixie3_templates;
 use chixie_rs_core::font::Font;
 use chixie_rs_core::layout::{self, PageBox, PageParams};
 use chixie_rs_template::{Template, TemplateKind};
@@ -313,12 +312,24 @@ impl TemplatesView {
         self.select(ix, window, cx);
     }
 
+    /// A template is being edited and not saved.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// The list changed on disk: show it again, keeping the selected template when it is still there.
+    pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ix = cx.global::<AppState>().templates.templates.iter().position(|t| t.name == self.original).unwrap_or(0);
+        self.select(ix, window, cx);
+    }
+
+    /// 导入…: template SVGs, a ZIP of them, an Excel form (.xlsx) or ChiXie3's .cx files.
     fn import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("选择炽写模板文件（conf 下的 note_template.cx / composition_template.cx）".into()),
+            prompt: Some("导入模板（.svg / .zip / .xlsx / 炽写 .cx）".into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = rx.await else { return };
@@ -328,30 +339,36 @@ impl TemplatesView {
     }
 
     pub fn import_files(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
-        let mut added = 0;
-        let mut errors = Vec::new();
-        for p in paths {
-            match std::fs::read(&p).map_err(|e| e.to_string()).and_then(|b| chixie3_templates::import(&b).map_err(|e| e.to_string())) {
-                Ok(ts) => {
-                    let st = cx.global_mut::<AppState>();
-                    for mut t in ts {
-                        t.name = st.templates.unique_name(&t.name);
-                        st.templates.upsert(t);
-                        added += 1;
-                    }
+        let st = cx.global_mut::<AppState>();
+        match st.template_lib.import(&paths) {
+            Ok(names) => {
+                st.reload_templates();
+                if let Some(last) = names.last() {
+                    let ix = st.templates.templates.iter().position(|t| &t.name == last).unwrap_or(0);
+                    self.select(ix, window, cx);
                 }
-                Err(e) => errors.push(format!("{}：{e}", p.display())),
+                let msg = if names.is_empty() { Notification::warning("没有找到模板") } else { Notification::success(format!("已导入 {} 个模板", names.len())) };
+                window.push_notification(msg, cx);
             }
+            Err(e) => window.push_notification(Notification::error(format!("导入失败：{e}")), cx),
         }
-        cx.global::<AppState>().save_templates();
-        let n = cx.global::<AppState>().templates.templates.len();
-        if added > 0 {
-            self.select(n - 1, window, cx);
-            window.push_notification(Notification::success(format!("已导入 {added} 个炽写模板")), cx);
-        }
-        for e in errors {
-            window.push_notification(Notification::error(format!("导入失败 {e}")), cx);
-        }
+    }
+
+    /// 导出…: the selected template as an SVG (or an Excel form when `xlsx`); 导出全部: a ZIP.
+    fn export(&mut self, all: bool, xlsx: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let st = cx.global::<AppState>();
+        let templates: Vec<Template> = if all { st.templates.templates.clone() } else { st.templates.get(&self.original).cloned().into_iter().collect() };
+        let Some(first) = templates.first() else { return };
+        let suggested = if all { "模板.zip".to_string() } else { format!("{}.{}", first.name, if xlsx { "xlsx" } else { "svg" }) };
+        let rx = cx.prompt_for_new_path(&crate::file_ops::documents_dir(), Some(&suggested));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = rx.await else { return };
+            let _ = this.update_in(cx, |_v, window, cx| match cx.global::<AppState>().template_lib.export(&templates, &path) {
+                Ok(()) => window.push_notification(Notification::success(format!("已导出到 {}", path.display())), cx),
+                Err(e) => window.push_notification(Notification::error(format!("导出失败：{e}")), cx),
+            });
+        })
+        .detach();
     }
 
     // ---- render ----
@@ -387,6 +404,7 @@ impl TemplatesView {
             })
             .collect();
         let can_delete = st.templates.templates.len() > 1;
+        let is_table = matches!(self.draft.as_ref().map(|t| &t.kind), Some(TemplateKind::Table(_)));
         v_flex()
             .w(px(240.))
             .flex_none()
@@ -419,7 +437,12 @@ impl TemplatesView {
                             .disabled(!can_delete)
                             .on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.delete(w, cx))),
                     )
-                    .child(ribbon::small("imp", "从炽写导入…", IconName::Import).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.import(w, cx)))),
+                    .child(ribbon::small("imp", "导入…", IconName::Import).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.import(w, cx))))
+                    .child(ribbon::small("exp", "导出…", IconName::FileDown).disabled(self.dirty).tooltip("先保存再导出").on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.export(false, false, w, cx))))
+                    .when(is_table, |el| {
+                        el.child(ribbon::small("exp-x", "导出 Excel…", IconName::FileDown).disabled(self.dirty).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.export(false, true, w, cx))))
+                    })
+                    .child(ribbon::small("exp-all", "导出全部…", IconName::Download).on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.export(true, false, w, cx)))),
             )
             .into_any_element()
     }
@@ -439,6 +462,24 @@ impl TemplatesView {
             .gap_1p5()
             .child(h_flex().gap_2().child(div().w(px(72.)).text_sm().text_color(muted).child("模板名称")).child(div().w(px(340.)).child(Input::new(&self.name).small())))
             .child(div().text_xs().text_color(muted).child(format!("类型：{}", t.kind_label())))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .child(div().w(px(72.)).text_sm().text_color(muted).child("标签"))
+                    .children(crate::app::templates_ctl::TAGS.iter().skip(1).enumerate().map(|(i, tag)| {
+                        let on = t.tags.iter().any(|x| x == tag);
+                        Button::new(("tpl-tag", i)).xsmall().label(*tag).when(on, |b| b.primary()).when(!on, |b| b.ghost()).on_click(cx.listener(move |v, _: &ClickEvent, _w, cx| v.toggle_tag(tag, cx)))
+                    }))
+                    .child(Checkbox::new("tpl-fav").small().label("收藏").checked(t.favourite).on_click(cx.listener(|v, on: &bool, _w, cx| {
+                        let on = *on;
+                        if let Some(t) = &mut v.draft {
+                            t.favourite = on;
+                            v.dirty = true;
+                            cx.notify();
+                        }
+                    }))),
+            )
             .child(section("纸张"))
             .child(h_flex().gap_3().child(field("宽", F::PaperW, "mm")).child(field("高", F::PaperH, "mm")))
             .child(
@@ -573,6 +614,19 @@ impl TemplatesView {
                 ))),
         )
         .into_any_element()
+    }
+
+    fn toggle_tag(&mut self, tag: &str, cx: &mut Context<Self>) {
+        if let Some(t) = &mut self.draft {
+            match t.tags.iter().position(|x| x == tag) {
+                Some(i) => {
+                    t.tags.remove(i);
+                }
+                None => t.tags.push(tag.to_string()),
+            }
+            self.dirty = true;
+            cx.notify();
+        }
     }
 
     fn set_paper(&mut self, w: f32, h: f32, window: &mut Window, cx: &mut Context<Self>) {
