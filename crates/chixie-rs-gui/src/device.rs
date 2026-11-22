@@ -839,3 +839,30 @@ impl Render for DevicePanel {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[core::prelude::v1::test]
+    fn history_recall_walks_newest_first_and_restores_the_live_line() {
+        // Empty history: nothing to recall.
+        assert_eq!(history_step(0, None, true), None);
+        // ↑ from the live line lands on the newest entry, then clamps at the oldest.
+        assert_eq!(history_step(3, None, true), Some(0));
+        assert_eq!(history_step(3, Some(0), true), Some(1));
+        assert_eq!(history_step(3, Some(1), true), Some(2));
+        assert_eq!(history_step(3, Some(2), true), Some(2));
+        // ↓ walks back toward newest, and past it returns to the live line.
+        assert_eq!(history_step(3, Some(2), false), Some(1));
+        assert_eq!(history_step(3, Some(0), false), None);
+        // ↓ on the live line stays there.
+        assert_eq!(history_step(3, None, false), None);
+    }
+
+    #[core::prelude::v1::test]
+    fn command_lines_skip_blanks_and_trim_in_order() {
+        assert_eq!(command_lines("  G21 \n\n$H\n   \nG90"), vec!["G21", "$H", "G90"]);
+        assert!(command_lines(" \n\t\n").is_empty());
+    }
+}
