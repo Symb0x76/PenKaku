@@ -103,21 +103,21 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Area | Feature | Description | chixie-rs | Pri | Effort |
 |---|---|---|---|---|---|
 | Editor | 页面编辑器 | WYSIWYG pages, caret, selection, mouse, keys | Done (`editor.rs`, `doc_view.rs`) | P0 | — |
-| Editor | 剪切/复制/粘贴 | internal items + plain text; Excel XML; WPS RTF super/sub | Partial (plain text) | P1 | M |
+| Editor | 剪切/复制/粘贴 | internal items + plain text; Excel XML; WPS RTF super/sub | Done (M8: our copies keep formats; Excel / WPS tab text fills cells; WPS RTF not readable through gpui) | P1 | M |
 | Editor | 全选 | Ctrl+A per template type | Done | P0 | — |
 | Editor | 撤销 | ChiXie3: not implemented | Done (undo/redo, better) | P0 | — |
 | Editor | 删除/退格 | incl. "清空所选单元格" confirm for tables | Partial (no tables) | P0 | S |
 | Editor | 方向键/Shift 选择 | caret and selection movement | Done (text); tables missing | P0 | S |
 | Editor | 半格空格 | modifier+Space inserts half space | Done (M3, Shift+Space) | P2 | S |
-| Editor | 查找和替换 | plain substring find / replace / replace all | Missing | P1 | S |
-| Editor | 右键菜单 | page / origin / table / base menus | Missing | P1 | M |
+| Editor | 查找和替换 | plain substring find / replace / replace all | Done (M8: Ctrl+F / Ctrl+H bar, 区分大小写, 全角半角等同) | P1 | S |
+| Editor | 右键菜单 | page / origin / table / base menus | Done (M8: edit, 查找, 书写此页, 巡边, 框架线, 断点续写, table tools; origin menu M6) | P1 | M |
 | Editor | 插入菜单 | 表格 公式 图表 图片 文本框 形状 内容块 思维导图 (mostly stubs) | Missing | P3 | L |
-| Editor | 字符格式 | 倾斜 下划线 删除线 颜色 上/下标 标题 清除格式 | Missing | P2 | M |
-| Editor | 格式刷 | copy format (UI only) | Missing | P3 | S |
-| Editor | 字体/字号 per selection | font and size of selected characters | Partial (document-wide) | P1 | M |
+| Editor | 字符格式 | 倾斜 下划线 删除线 颜色 上/下标 标题 清除格式 | Done (M8; factors VERIFY, docs/protocol.md) | P2 | M |
+| Editor | 格式刷 | copy format (UI only) | Done (M8: click once, double-click sticky) | P3 | S |
+| Editor | 字体/字号 per selection | font and size of selected characters | Done (M8) | P1 | M |
 | Editor | 对齐 | left / centre / right / justify; vertical in cells | Done (M3; vertical in cells with tables) | P1 | M |
-| Editor | 缩放/单双页 | Ctrl+wheel zoom, single/double page preview | Partial (zoom; no double page) | P2 | S |
-| Editor | 显示框线/行号/页码 | toggles | Partial (template grid toggle) | P2 | S |
+| Editor | 缩放/单双页 | Ctrl+wheel zoom, single/double page preview | Done (M8) | P2 | S |
+| Editor | 显示框线/行号/页码 | toggles | Done (M8) | P2 | S |
 | Editor | 大文本模式 | visible-item culling for big docs | Not needed (native) | P3 | — |
 | Templates | 笔记 (信纸) | ruled rows, fixed/random count, margins | Done (`template.rs` Ruled) | P0 | — |
 | Templates | 双线文档 | dual-line rows, dashed partition | Done (M7a: upper / lower band; placement VERIFY) | P2 | S |
@@ -232,9 +232,9 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Cloud | 缺字上报 / 退出信息 | `user/collect_*` | Not planned | P3 | S |
 | Settings | 设置 dialog (7 pages) | 常规 写字偏好 多色 绘图 变形 主题 页面旋转 | Partial (`style_dialog.rs`, options) | P1 | M |
 | Files | `.cdoc` | ChiXie document | Missing (`.chx` instead) | P2 | M |
-| Files | 导入 txt/docx/pdf/xlsx | parsers + overwrite/append | Partial (txt) | P1 | M |
+| Files | 导入 txt/docx/pdf/xlsx | parsers + overwrite/append | Done (M8: 覆盖 / 追加 / 在光标处插入; GB18030; PDF text via lopdf) | P1 | M |
 | Files | 批量导入 (批量建页) | one page per list line | Done (M7a: list and xlsx) | P2 | S |
-| Files | 打印文字/打印背景图 | QPrinter | Missing | P3 | M |
+| Files | 打印文字/打印背景图 | QPrinter | Done (M8: vector PDF, OS viewer prints) | P3 | M |
 | Files | 草稿自动保存 | ChiXie3 has none | Done (better) | P1 | — |
 | Shell | ribbon / QAT / status bar | Word-like chrome | Done (`ribbon.rs`, `app.rs`) | P0 | — |
 | Shell | 主页 backstage | fonts, templates, tutorial, account, settings, feedback | Partial (`backstage.rs`) | P1 | S |

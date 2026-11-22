@@ -16,7 +16,7 @@ use crate::state::AppState;
 
 impl ChixieRsApp {
     /// The document as PDF bytes, or a message when there is nothing to print.
-    fn pdf_bytes(&self, cx: &App) -> Result<Vec<u8>, &'static str> {
+    pub(crate) fn pdf_bytes(&self, cx: &App) -> Result<Vec<u8>, &'static str> {
         let st = cx.global::<AppState>();
         let (page, ui) = (&st.settings.page, &st.settings.ui);
         if !ui.print_text && !ui.print_background {
