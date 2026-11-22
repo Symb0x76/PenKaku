@@ -4,12 +4,14 @@
 pub mod chx;
 pub mod docx;
 pub mod edit;
+pub mod find;
 pub mod model;
 
 use std::path::Path;
 
 pub use docx::Loaded;
 pub use edit::EditDoc;
+pub use find::FindOpts;
 pub use model::{Align, Attrs, Char, Command, Document, Para};
 
 /// Open a document by extension: `.docx`, `.chx` (v1, migrated), anything else as UTF-8 text

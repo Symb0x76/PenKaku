@@ -553,6 +553,16 @@ impl DocView {
         self.doc.insert("");
         self.edited(cx);
     }
+    /// Select chars `r` and scroll to them (查找).
+    pub fn select(&mut self, r: Range<usize>, cx: &mut Context<Self>) {
+        self.doc.select_range(r);
+        self.after_move(cx);
+    }
+    /// Replace several ranges (替换 / 全部替换, one undo step).
+    pub fn replace_ranges(&mut self, edits: Vec<(Range<usize>, String)>, cx: &mut Context<Self>) {
+        self.doc.replace_many(edits);
+        self.edited(cx);
+    }
     /// How segment `seg` would be set on template `t` (a trial layout; nothing changes).
     pub fn trial_cell(&self, t: &Template, seg: usize, cx: &App) -> Option<layout::CellInfo> {
         let st = cx.global::<AppState>();

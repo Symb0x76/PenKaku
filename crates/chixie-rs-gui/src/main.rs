@@ -18,6 +18,7 @@ mod device_params;
 mod doc_view;
 mod fake;
 mod file_ops;
+mod find_bar;
 mod cloud_preview;
 mod font_preview;
 mod font_lib;
@@ -97,6 +98,7 @@ fn main() {
     gpui_kit::application().with_assets(icons::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         doc_view::bind_keys(cx);
+        find_bar::bind_keys(cx);
         ribbon::set_theme(settings.ui.dark, None, cx);
         // Templates: one SVG each in the library folders; the old templates.toml migrates once.
         let templates_path = TemplateStore::path_next_to(&settings_path);

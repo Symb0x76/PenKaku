@@ -99,6 +99,9 @@ pub struct ChixieRsApp {
     pub(crate) resume: resume::Resume,
     /// The 字符微调 card is shown in the task pane.
     tune_open: bool,
+    /// 查找 / 替换 bar above the page.
+    find_bar: Entity<crate::find_bar::FindBar>,
+    find_open: bool,
     /// Library folders watched for added / removed fonts.
     library_watch: Option<fonts_ctl::LibraryWatch>,
     /// Template folders watched for added / changed / removed templates.
@@ -143,6 +146,7 @@ impl ChixieRsApp {
         let fonts = cx.new(|cx| FontsView::new(window, cx));
         let initial = file_ops::open_draft(&cx.global::<AppState>().settings_path).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
         let doc = cx.new(|cx| DocView::new(initial, window, cx));
+        let find_bar = cx.new(|cx| crate::find_bar::FindBar::new(doc.clone(), window, cx));
         let page = cx.global::<AppState>().settings.page.clone();
         let font_size = cx.new(|cx| InputState::new(window, cx).step(5.0).min(5.0).max(1000.0).default_value(fmt_num(page.font_size)));
         let line_height = cx.new(|cx| InputState::new(window, cx).step(0.25).min(1.0).max(200.0).default_value(fmt_num(page.line_height)));
@@ -237,6 +241,12 @@ impl ChixieRsApp {
                     this.open_backstage(Stage::Account, window, cx);
                 }
             }),
+            cx.subscribe(&find_bar, |this, _b, ev: &crate::find_bar::FindBarEvent, cx| match ev {
+                crate::find_bar::FindBarEvent::Close => {
+                    this.find_open = false;
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(&templates, window, |this, _v, ev: &TemplateEvent, window, cx| match ev {
                 TemplateEvent::Apply(name) => {
                     this.apply_template(Some(name.clone()), cx);
@@ -274,6 +284,8 @@ impl ChixieRsApp {
             win_title: String::new(),
             resume: Default::default(),
             tune_open: false,
+            find_bar,
+            find_open: false,
             library_watch: None,
             template_watch: None,
             gallery,
@@ -370,6 +382,16 @@ impl ChixieRsApp {
                 window.push_notification(Notification::error(msg), cx);
             }
         }
+        cx.notify();
+    }
+
+    /// 查找 (or 替换): show the bar and focus its search box.
+    pub(crate) fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.backstage.is_some() {
+            return;
+        }
+        self.find_open = true;
+        self.find_bar.update(cx, |b, cx| b.open(replace, window, cx));
         cx.notify();
     }
 
@@ -1277,7 +1299,14 @@ impl Render for ChixieRsApp {
                         .min_h_0()
                         .border_t_1()
                         .border_color(border.opacity(0.6))
-                        .child(div().flex_1().h_full().min_w_0().child(self.doc.clone()))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .h_full()
+                                .min_w_0()
+                                .when(self.find_open, |el| el.child(self.find_bar.clone()))
+                                .child(div().flex_1().min_h_0().w_full().child(self.doc.clone())),
+                        )
                         .when(self.show_pane, |el| el.child(self.task_pane(cx))),
                 )
                 .child(self.status_bar(cx))
@@ -1288,6 +1317,8 @@ impl Render for ChixieRsApp {
             .bg(bg)
             .text_color(fg)
             .on_action(cx.listener(|t, _: &doc_view::Save, w, cx| t.save_doc(false, w, cx)))
+            .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_find(false, w, cx)))
+            .on_action(cx.listener(|t, _: &crate::find_bar::OpenReplace, w, cx| t.open_find(true, w, cx)))
             .child(title_bar)
             .child(body);
         if cfg!(target_os = "linux") {

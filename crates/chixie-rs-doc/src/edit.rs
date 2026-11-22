@@ -215,7 +215,8 @@ impl EditDoc {
     /// Replace `range` with `text` (new ids, formatting of the text before), leaving the caret
     /// after the insertion.
     fn splice(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
-        let attrs = self.doc.attrs_at(range.start);
+        // Replacing takes the formatting of what it replaces (Word); inserting, of the char before.
+        let attrs = if range.is_empty() { self.doc.attrs_at(range.start) } else { self.doc.attrs(range.start).clone() };
         let new = self.doc.new_chars(text, &attrs);
         let n = new.len();
         let start = range.start;
