@@ -282,7 +282,7 @@ chixie-rs draws 字符格式 with its own factors until a ChiXie3 capture of one
 | 下划线 | one stroke per run per line, 0.12 em below the foot | depth, one stroke or per char |
 | 删除线 | one stroke per run per line at 0.55 em | height |
 | 上标 / 下标 | 0.6 × size; foot raised 0.35 em / lowered 0.15 em | size, shift |
-| 标题 | 1.5 × size | factor (or a bolder pen pass) |
+| 标题 | 1.5 × size; the row keeps its pitch, so on ruled templates the glyph tops reach into the line above | factor (or a bolder pen pass); whether ChiXie3 grows the row, shrinks to fit, or overlaps |
 | 字号 | size relative to the page's (字号 100 = 20 pt in DOCX) | that advances scale with size |
 
 Rules waver a little with handwriting on (their own random stream, keyed by the run's last char).

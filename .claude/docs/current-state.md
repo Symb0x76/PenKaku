@@ -295,7 +295,8 @@
   - 15 ribbon icons rendered blank (format buttons, align, indent, 合并内容, 字符微调): added to `icons.rs`.
   - Find bar pre-fill is now selected, so typing replaces it.
   - 页码 label moved into the gap under the page (it sat on the template's last ruled line).
-  - Open question for BOSS: 标题 (1.5×) glyphs overlap the line above on ruled templates (rows keep their pitch).
+  - 标题 (1.5×) glyphs overlap the line above on ruled templates (rows keep their pitch). BOSS: wait for the
+    ChiXie3 capture (noted in `docs/protocol.md` › Character formats).
   - agent-desktop notes: the gpui window has no useful UIA tree; drive with `--headed mouse-click --xy` from
     screenshots (window origin + (9, 0)); `press shift+right` does not extend selections (use Shift+click);
     text goes in via `clipboard-set` + `press ctrl+v`.
