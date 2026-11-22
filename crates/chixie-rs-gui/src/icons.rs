@@ -44,6 +44,21 @@ gpui_kit::assets::icon_assets!(
         AArrowUp,
         AArrowDown,
         ChevronUp,
+        Paintbrush,
+        Italic,
+        Underline,
+        Strikethrough,
+        Superscript,
+        Subscript,
+        Heading,
+        RemoveFormatting,
+        TextAlignStart,
+        TextAlignCenter,
+        TextAlignEnd,
+        TextAlignJustify,
+        ListIndentIncrease,
+        Combine,
+        Move,
     ]
 );
 
