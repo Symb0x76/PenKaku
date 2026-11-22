@@ -417,7 +417,7 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   ChiXie3, wired device only.
   - **Editor speed.** Deformed-glyph cache between relayouts (`layout::DeformCache`); paint only
     visible pages, with page paths cached across frames; dependencies optimised in debug builds.
-    16 styled pages, debug, CI: relayout ≈ 500 → 40 ms, paint ≈ 140 → 15 ms per frame.
+    16 styled pages, debug, CI: relayout ≈ 500 → 40 ms, paint ≈ 140 → 4 ms per frame.
   - **中英文分开设置.** English letters and digits get their own size, baseline, 上下浮动 and
     字符变形 (`HandwritingStyle::{english, number}`).
   - **固件参数.** `$` editor with numeric and named keys, and a typed-confirm `$RST=*`.

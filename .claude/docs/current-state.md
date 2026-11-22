@@ -310,6 +310,7 @@
     | before | ~500 ms (mac 690) | ~140 ms |
     | visible pages + path cache (`doc_view.rs` `PathCache`, `PagePaths`) | ~500 | ~15 |
     | `layout::DeformCache` (core, passed in `Flow`) | ~40 (mac 58) | ~15 |
+    | deps `opt-level = 2` in debug | ~37 (mac 74) | ~3–5 |
 
     Core timing: styled 8000 chars 262 → 7.6 ms debug, 15.7 → 1.6 ms release. Incremental reflow
     (plan step 3b) not needed after the cache; not done. `[profile.dev.package."*"] opt-level = 2`

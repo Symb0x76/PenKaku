@@ -2138,7 +2138,7 @@ the source language and en as the first translation.
    and a slow Python TPS warp (its own TODO asks for numpy/JIT/C). chixie-rs relayouts from a flat
    model and paints only visible pages; a TPS solve per glyph is microseconds in Rust. Done in M9:
    deformed glyphs are cached between relayouts and page paths between frames (16 styled pages,
-   debug build: relayout ≈ 500 → 40 ms, paint ≈ 140 → 15 ms per frame).
+   debug build: relayout ≈ 500 → 40 ms, paint ≈ 140 → 4 ms per frame).
 8. **Documents that reproduce output.** Template, origin, page rotation and per-character tweaks
    belong to the document, not to global settings, so a `.chx` file plus a font id is a complete
    job description.
