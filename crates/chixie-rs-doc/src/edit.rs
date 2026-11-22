@@ -320,6 +320,35 @@ impl EditDoc {
         self.exec(Command::SetAttrs { at: sel.start, attrs });
     }
 
+    /// One property of the selected chars when they all share it (`None` when they differ: the
+    /// ribbon shows it blank). Without a selection, the property new text at the caret takes.
+    pub fn common<T: PartialEq>(&self, f: impl Fn(&Attrs) -> T) -> Option<T> {
+        let sel = self.selection();
+        if sel.is_empty() {
+            return Some(f(&self.doc.attrs_at(self.caret)));
+        }
+        let first = f(self.doc.attrs(sel.start));
+        sel.skip(1).all(|i| f(self.doc.attrs(i)) == first).then_some(first)
+    }
+
+    /// Turn a format on for the selection, or off when every selected char already has it
+    /// (下划线, 删除线, 标题, …; one undo step).
+    pub fn toggle_attr(&mut self, has: impl Fn(&Attrs) -> bool, set: impl Fn(&mut Attrs, bool)) {
+        let on = self.common(&has) != Some(true);
+        self.set_attrs(|a| set(a, on));
+    }
+
+    /// 清除格式: the selection's character formats back to the document's (colour, 合并内容
+    /// and 字符微调 stay).
+    pub fn clear_format(&mut self) {
+        self.set_attrs(|a| *a = a.cleared());
+    }
+
+    /// 格式刷: give the selection `src`'s character formats.
+    pub fn paint_format(&mut self, src: &Attrs) {
+        self.set_attrs(|a| *a = a.with_formats_of(src));
+    }
+
     /// Align the paragraphs touched by the selection (or holding the caret).
     pub fn set_align(&mut self, align: Align) {
         self.set_paras(|_, p| p.align = align);
@@ -744,5 +773,43 @@ mod tests {
         assert!(d.undo());
         assert_eq!(d.text(), "ab-cd-ef");
         assert!(!d.undo());
+    }
+
+    #[test]
+    fn formats_common_toggle_clear_and_paint() {
+        let mut d = EditDoc::from_text("abcd");
+        d.select_range(0..2);
+        assert_eq!(d.common(|a| a.underline), Some(false));
+        d.toggle_attr(|a| a.underline, |a, on| a.underline = on);
+        d.select_range(1..3);
+        // Mixed: blank in the ribbon; toggling turns it on for all.
+        assert_eq!(d.common(|a| a.underline), None);
+        d.toggle_attr(|a| a.underline, |a, on| a.underline = on);
+        assert_eq!(d.common(|a| a.underline), Some(true));
+        d.toggle_attr(|a| a.underline, |a, on| a.underline = on);
+        assert_eq!(d.common(|a| a.underline), Some(false));
+        assert!(d.document().attrs(0).underline);
+        // 清除格式 keeps colour and tuning.
+        d.select_range(0..4);
+        d.set_attrs(|a| {
+            a.size_pt = Some(30.0);
+            a.colour = Some([1, 2, 3]);
+            a.tilt = -1;
+        });
+        d.clear_format();
+        let a = d.document().attrs(0).clone();
+        assert_eq!((a.size_pt, a.tilt, a.underline, a.colour), (None, 0, false, Some([1, 2, 3])));
+        // 格式刷: formats move, tuning stays.
+        let src = Attrs { title: true, font: Some("楷体".into()), ..Attrs::default() };
+        d.select_range(2..3);
+        d.tune(|t| t.dx_mm = 1.0);
+        d.paint_format(&src);
+        let a = d.document().attrs(2);
+        assert!(a.title && a.font.as_deref() == Some("楷体") && a.tuning.is_some());
+        assert!(d.undo());
+        assert!(!d.document().attrs(2).title);
+        // No selection: the caret's formats.
+        d.select_range(3..3);
+        assert_eq!(d.common(|a| a.colour), Some(Some([1, 2, 3])));
     }
 }

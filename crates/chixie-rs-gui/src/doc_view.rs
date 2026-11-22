@@ -22,6 +22,7 @@ use chixie_rs_core::font::fontset::RunFonts;
 use chixie_rs_core::layout::{self, Document};
 use chixie_rs_doc::model::PT_PER_SIZE;
 use gpui_kit::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::notification::Notification;
@@ -36,6 +37,9 @@ pub const ZOOM_100: f32 = 96.0 / 25.4;
 pub const ZOOM_MIN: f32 = 0.4;
 pub const ZOOM_MAX: f32 = 6.0;
 pub const KEY_CONTEXT: &str = "ChixieRsEditor";
+
+mod format;
+pub use format::*;
 
 actions!(
     chixie_editor,
@@ -53,6 +57,7 @@ actions!(
 pub fn bind_keys(cx: &mut App) {
     let c = Some(KEY_CONTEXT);
     cx.bind_keys([KeyBinding::new(if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" }, Save, None)]);
+    format::bind_keys(cx);
     // Tab toggles the paragraph indent; Shift+Space types a half space (Ctrl+Space is the IME
     // toggle on Windows).
     // On a table form Tab goes to the next cell and Shift+Tab back.
@@ -176,6 +181,8 @@ pub struct DocView {
     reveal_caret: bool,
     /// 书写原点 marker being dragged: its layout point (mm).
     origin_drag: Option<(f32, f32)>,
+    /// 格式刷 armed: the formats to give the next mouse selection, and whether it stays armed.
+    painter: Option<(chixie_rs_doc::model::Attrs, bool)>,
     /// What the current layout was computed from, to skip needless relayouts.
     /// What the layout was made from: font set generation, page and style settings, template.
     layout_key: Option<(u64, PageSettings, StyleFile, Option<Template>)>,
@@ -213,6 +220,7 @@ impl DocView {
             caret_visible: true,
             reveal_caret: false,
             origin_drag: None,
+            painter: None,
             layout_key: None,
             dirty_draft: false,
             _tasks: vec![blink],
@@ -661,7 +669,9 @@ impl DocView {
         }
     }
     fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.selecting = false;
+        if std::mem::take(&mut self.selecting) {
+            self.apply_painter(cx);
+        }
         if let Some(p) = self.origin_drag.take() {
             let st = cx.global_mut::<AppState>();
             st.settings.page.origin = sheet(&st.settings.page).snap_origin(p, ORIGIN_SNAP_MM);
@@ -805,6 +815,7 @@ impl Render for DocView {
             .bg(desk)
             .overflow_scroll()
             .track_scroll(&scroll)
+            .map(|el| Self::format_actions(el, cx))
             .on_action(cx.listener(Self::move_left))
             .on_action(cx.listener(Self::move_right))
             .on_action(cx.listener(Self::move_up))

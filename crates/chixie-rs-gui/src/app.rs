@@ -84,6 +84,8 @@ pub struct ChixieRsApp {
     font_select: Entity<SelectState<Vec<FontItem>>>,
     /// Font ids, parallel to the font select's items.
     font_ids: Vec<i64>,
+    /// What the font / size boxes last showed (selection?, font, size): see `sync_format_boxes`.
+    format_shown: Option<(bool, Option<Option<String>>, Option<f32>)>,
     /// Local fonts whose preview is being built in the background.
     previews_pending: std::collections::HashSet<i64>,
     style_dialog: Entity<StyleDialog>,
@@ -191,15 +193,21 @@ impl ChixieRsApp {
                     cx.notify();
                 }
             }),
-            // The 断点续写 card shows the selected character.
-            cx.observe(&doc, |t, _, cx| {
+            // The 断点续写 card shows the selected character; the font and size boxes show the
+            // selection's.
+            cx.observe_in(&doc, window, |t, _, window, cx| {
                 if t.resume.open {
                     cx.notify();
                 }
+                t.sync_format_boxes(window, cx);
             }),
             cx.subscribe_in(&font_size, window, |this, s, ev: &InputEvent, _w, cx| {
                 if let (InputEvent::Change, Some(v)) = (ev, parse_in(s, cx, 5.0, 1000.0)) {
-                    this.edit_settings(cx, |st| st.settings.page.font_size = v);
+                    if this.doc.read(cx).doc().selection().is_empty() {
+                        this.edit_settings(cx, |st| st.settings.page.font_size = v);
+                    } else {
+                        this.doc.update(cx, |d, cx| d.set_run_size(v, cx));
+                    }
                 }
             }),
             cx.subscribe_in(&line_height, window, |this, s, ev: &InputEvent, _w, cx| {
@@ -257,6 +265,7 @@ impl ChixieRsApp {
             line_height,
             font_select,
             font_ids: Vec::new(),
+            format_shown: None,
             previews_pending: Default::default(),
             style_dialog,
             backstage_focus: cx.focus_handle(),
@@ -364,6 +373,34 @@ impl ChixieRsApp {
         cx.notify();
     }
 
+    /// The font select and size box show the selection's font and size (blank when mixed), or
+    /// the document's without a selection. Only touched when that changes.
+    fn sync_format_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let fs = self.doc.read(cx).format_state(cx);
+        let key = (fs.selected, fs.font.clone(), fs.size);
+        if self.format_shown.as_ref() == Some(&key) {
+            return;
+        }
+        self.format_shown = Some(key);
+        let st = cx.global::<AppState>();
+        let main = st.active_font.as_ref().map(|f| f.id);
+        let (font, size) = if fs.selected {
+            let font = match &fs.font {
+                Some(Some(name)) => st.fonts.id_of(name),
+                Some(None) => main,
+                None => None,
+            };
+            (font, fs.size.map(fmt_num).unwrap_or_default())
+        } else {
+            (main, fmt_num(st.settings.page.font_size))
+        };
+        let selected = font.and_then(|id| self.font_ids.iter().position(|&x| x == id)).map(IndexPath::new);
+        self.font_select.update(cx, |s, cx| s.set_selected_index(selected, window, cx));
+        if self.font_size.read(cx).value().as_ref() != size {
+            self.font_size.update(cx, |s, cx| s.set_value(size, window, cx));
+        }
+    }
+
     /// Font picker items = downloaded fonts, then collected fonts not yet downloaded (marked
     /// 云端, login needed); selection = the active font.
     fn sync_font_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -440,6 +477,17 @@ impl ChixieRsApp {
     }
 
     fn choose_font(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.doc.read(cx).doc().selection().is_empty() {
+            // The selection's own font: a downloaded one; the main font = the document's.
+            let st = cx.global::<AppState>();
+            let main = st.active_font.as_ref().map(|f| f.id) == Some(id);
+            match st.fonts.name_of(id) {
+                _ if main => self.doc.update(cx, |d, cx| d.set_run_font(None, cx)),
+                Some(name) => self.doc.update(cx, |d, cx| d.set_run_font(Some(name), cx)),
+                None => window.push_notification(Notification::info("请先下载这个字体，再设为所选文字的字体"), cx),
+            }
+            return;
+        }
         if cx.global::<AppState>().active_font.as_ref().map(|f| f.id) != Some(id) {
             self.use_font_id(id, window, cx);
         }

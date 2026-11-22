@@ -70,6 +70,12 @@ impl Attrs {
     pub fn cleared(&self) -> Attrs {
         Attrs { colour: self.colour, combine_next: self.combine_next, tuning: self.tuning, ..Attrs::default() }
     }
+
+    /// This char with `src`'s character formats (格式刷: font, size, colour, tilt, rules, script,
+    /// 标题); its 合并内容 and 字符微调 stay.
+    pub fn with_formats_of(&self, src: &Attrs) -> Attrs {
+        Attrs { combine_next: self.combine_next, tuning: self.tuning, ..src.clone() }
+    }
 }
 
 /// Paragraph formatting lives in core so layout reads it directly.
