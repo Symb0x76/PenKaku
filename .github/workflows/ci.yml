@@ -46,6 +46,18 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+      # 导出 PDF: a ruled sample page per OS, to open and check by eye.
+      - name: Sample PDF
+        shell: bash
+        run: ./target/debug/chixie-rs-cli pdf "你好你好" --font-json crates/chixie-rs-core/tests/fixtures/font_fixture.json --out sample-${{ runner.os }}.pdf
+
+      - name: Upload sample PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-pdf-${{ runner.os }}
+          path: sample-${{ runner.os }}.pdf
+          if-no-files-found: error
+
       # Scripted GUI run against the fake backend and simulated Grbl (see crates/chixie-rs-gui/src/main.rs).
       # Non-blocking until it has passed on each runner once (GPU/display availability differs).
       - name: GUI autotest

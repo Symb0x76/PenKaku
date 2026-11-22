@@ -157,6 +157,26 @@ impl ChixieRsApp {
                     .label("导出 G-code…")
                     .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.export(w, cx))),
             )
+            .child(div().pt_4().text_sm().text_color(muted).child("导出 PDF 或打印：按实际尺寸输出，可打印笔迹，也可只打印模板框线（自制作文纸、表格）。"))
+            .child({
+                let ui = cx.global::<AppState>().settings.ui.clone();
+                h_flex()
+                    .gap_4()
+                    .child(Checkbox::new("pdf-text").label("打印文字").checked(ui.print_text).on_click(cx.listener(|t, v: &bool, _w, cx| {
+                        let v = *v;
+                        t.edit_settings(cx, |st| st.settings.ui.print_text = v);
+                    })))
+                    .child(Checkbox::new("pdf-bg").label("打印背景图").checked(ui.print_background).on_click(cx.listener(|t, v: &bool, _w, cx| {
+                        let v = *v;
+                        t.edit_settings(cx, |st| st.settings.ui.print_background = v);
+                    })))
+            })
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Button::new("bs-pdf").large().icon(Icon::new(IconName::FileDown)).label("导出 PDF…").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.export_pdf(w, cx))))
+                    .child(Button::new("bs-print").large().icon(Icon::new(IconName::Printer)).label("打印…").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.print_doc(w, cx)))),
+            )
             .into_any_element()
     }
 

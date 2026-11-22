@@ -4,6 +4,7 @@
 //! Session and device events are pumped here and fanned out to views + toasts.
 
 mod backstage;
+mod print;
 pub(crate) mod menu;
 pub(crate) mod fonts_ctl;
 mod resume;

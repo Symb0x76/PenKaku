@@ -127,6 +127,26 @@ enum Cmd {
         #[arg(long)]
         ip: Option<String>,
     },
+    /// Lay text out on a ruled A4 page and write it as PDF (导出 PDF; offline, glyph JSON font)
+    Pdf {
+        text: String,
+        #[arg(long)]
+        font_json: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// ChiXie3 font size
+        #[arg(long, default_value_t = 100.0)]
+        font_size: f32,
+        /// Ruled rows per page (the 打印背景图 ruling)
+        #[arg(long, default_value_t = 24)]
+        rows: u32,
+        /// Leave the handwriting out (打印背景图 only)
+        #[arg(long)]
+        no_ink: bool,
+        /// Leave the ruling out (打印文字 only)
+        #[arg(long)]
+        no_background: bool,
+    },
     /// Fit mm-per-glyph-unit from G-code captured from ChiXie3 (see docs/protocol.md)
     Calibrate {
         /// Captured G-code (one line per command, as ChiXie3 streamed it)
@@ -460,6 +480,16 @@ fn main() -> chixie_rs_core::Result<()> {
                 let adv = f.placements.get(i + 1).map(|n| format!("{:.3}", n.offset.0 - p.offset.0)).unwrap_or_default();
                 println!("{}\t{:.3}\t{:.3}\t{adv}\t{:.4}", p.ch, p.offset.0, p.offset.1, p.rms);
             }
+        }
+        Cmd::Pdf { text, font_json, out, font_size, rows, no_ink, no_background } => {
+            let font = chixie_rs_core::font::Font::from_json(&std::fs::read(&font_json)?)?;
+            let mut settings = chixie_rs_core::config::Settings::default();
+            settings.page.font_size = font_size;
+            let ruling = layout::Ruling::Rows { rows: (rows, rows), columns: 1, column_gap: 0.0, widths: vec![], band: None, upper: false, dashed: false, divider: false };
+            let doc = layout::layout(&text, &font, &settings.page_params_with(ruling));
+            let o = gcode::pdf::PdfOptions { ink: !no_ink, background: !no_background, paper: settings.page.paper, margins: settings.page.margins, ..Default::default() };
+            std::fs::write(&out, gcode::pdf::pdf(&doc, &o))?;
+            eprintln!("{} page(s), {} strokes → {}", doc.pages.len(), doc.stroke_count(), out.display());
         }
         Cmd::Write {
             text, font_id, blob_file, key_file, font_json, out, scale, font_size, style, seed, no_jitter, deform, origin_x, origin_y, zero, port, ip,

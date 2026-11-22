@@ -1114,6 +1114,7 @@ name = "chixie-rs-output"
 version = "0.1.0"
 dependencies = [
  "chixie-rs-core",
+ "lopdf",
  "serde",
 ]
 
