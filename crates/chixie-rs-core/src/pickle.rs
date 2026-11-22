@@ -248,7 +248,7 @@ impl Vm {
                     if kv.len() % 2 != 0 {
                         return Err(bad("SETITEMS with an odd count"));
                     }
-                    let pairs: Vec<(usize, usize)> = kv.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+                    let pairs: Vec<(usize, usize)> = kv.as_chunks::<2>().0.iter().map(|&[k, v]| (k, v)).collect();
                     let d = self.top()?;
                     self.set_items(d, &pairs)?
                 }
