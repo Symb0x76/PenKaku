@@ -1011,7 +1011,7 @@ impl Render for DocView {
                         }
                         drop(cache);
                         // 内容溢出: a warning badge in each overflowing cell's top-left corner.
-                        for c in layout_doc.overflowing().into_iter().filter(|c| on_screen(c.page)) {
+                        for c in layout_doc.overflowing().filter(|c| on_screen(c.page)) {
                             let a = g.screen(c.page, c.rect.0, c.rect.1);
                             let side = px(BADGE_MM * g.zoom);
                             window.paint_quad(fill(Bounds::new(a, size(side, side)), missing_color));
@@ -1252,9 +1252,9 @@ impl PagePaths {
 /// `p` moved by `by` (a cached page-local path put in place for this frame).
 fn translated(p: &Path<Pixels>, by: Point<Pixels>) -> Path<Pixels> {
     let mut p = p.clone();
-    p.bounds.origin = p.bounds.origin + by;
+    p.bounds.origin += by;
     for v in &mut p.vertices {
-        v.xy_position = v.xy_position + by;
+        v.xy_position += by;
     }
     p
 }
