@@ -4,6 +4,7 @@
 //! Session and device events are pumped here and fanned out to views + toasts.
 
 mod backstage;
+pub(crate) mod menu;
 pub(crate) mod fonts_ctl;
 mod resume;
 mod sd;
@@ -1317,6 +1318,7 @@ impl Render for ChixieRsApp {
             .bg(bg)
             .text_color(fg)
             .on_action(cx.listener(|t, _: &doc_view::Save, w, cx| t.save_doc(false, w, cx)))
+            .map(|el| self.menu_actions(el, cx))
             .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_find(false, w, cx)))
             .on_action(cx.listener(|t, _: &crate::find_bar::OpenReplace, w, cx| t.open_find(true, w, cx)))
             .child(title_bar)

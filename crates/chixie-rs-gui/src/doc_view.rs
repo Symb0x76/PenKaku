@@ -588,20 +588,37 @@ impl DocView {
         self.doc.select_all();
         self.after_move(cx);
     }
+    /// The selection as plain text plus each char's formatting (JSON metadata, read back by
+    /// our own paste; other programs see the text).
+    fn copy_selection(&self, cx: &mut Context<Self>) {
+        let clip = RichClip { v: 1, attrs: self.doc.selected_attrs() };
+        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(self.doc.selected_text(), clip));
+    }
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if self.doc.has_selection() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.doc.selected_text()));
+            self.copy_selection(cx);
         }
     }
     pub fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
         if self.doc.has_selection() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.doc.selected_text()));
+            self.copy_selection(cx);
             self.doc.insert("");
             self.edited(cx);
         }
     }
     pub fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|i| i.text()) {
+        let Some(item) = cx.read_from_clipboard() else { return };
+        // Our own copy keeps its formatting.
+        let rich = item.entries().iter().find_map(|e| match e {
+            ClipboardEntry::String(s) => s.metadata_json::<RichClip>().filter(|c| c.v == 1).map(|c| (s.text().clone(), c.attrs)),
+            _ => None,
+        });
+        if let Some((text, attrs)) = rich {
+            self.doc.insert_with_attrs(&text, &attrs);
+            self.edited(cx);
+            return;
+        }
+        if let Some(text) = item.text() {
             // Tab-separated text (from a spreadsheet) fills cells on a table form.
             let text = if table_mode(cx) { text.replace('\t', &layout::CELL_BREAK.to_string()) } else { text };
             self.type_text(&text, cx);
@@ -997,7 +1014,7 @@ impl Render for DocView {
                 .min_w(px(total_w))
                 .h(px(total_h)),
             )
-            .context_menu(move |m, window, _cx| {
+            .context_menu(move |m, window, cx| {
                 // On the 书写原点 marker: ChiXie3's origin menu; elsewhere the edit commands.
                 let near_origin = menu_geom.get().is_some_and(|g| {
                     let (_, x, y) = g.unproject(window.mouse_position(), pages);
@@ -1019,10 +1036,37 @@ impl Render for DocView {
                         .item(PopupMenuItem::new("移至框线起点").on_click(set(Origin::Frame)))
                         .item(PopupMenuItem::new("自定义原点位置：拖动蓝色圆圈").disabled(true))
                 } else {
-                    m.menu("剪切", Box::new(Cut)).menu("复制", Box::new(Copy)).menu("粘贴", Box::new(Paste)).separator().menu("全选", Box::new(SelectAll))
+                    use crate::app::menu as am;
+                    let table = table_mode(cx);
+                    let m = m
+                        .menu("剪切", Box::new(Cut))
+                        .menu("复制", Box::new(Copy))
+                        .menu("粘贴", Box::new(Paste))
+                        .separator()
+                        .menu("全选", Box::new(SelectAll))
+                        .menu("查找…", Box::new(crate::find_bar::OpenFind))
+                        .separator()
+                        .submenu("书写此页", window, cx, |m, _w, _cx| m.menu("直接书写", Box::new(am::WritePage)).menu("上传SD卡书写", Box::new(am::WritePageSd)))
+                        .menu("工作区巡边", Box::new(am::PatrolPage))
+                        .menu("绘制框架线", Box::new(am::DrawFrame))
+                        .menu("从这里断点续写", Box::new(am::ResumeHere));
+                    if table {
+                        m.separator()
+                            .submenu("刷新数据", window, cx, |m, _w, _cx| m.menu("本页", Box::new(am::RefreshPage)).menu("所有页", Box::new(am::RefreshAll)))
+                            .menu("批量溢出", Box::new(am::BatchOverflow))
+                    } else {
+                        m
+                    }
                 }
             })
     }
+}
+
+/// Clipboard metadata of a copy from the editor: each char's formatting.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RichClip {
+    v: u32,
+    attrs: Vec<chixie_rs_doc::model::Attrs>,
 }
 
 /// The 书写原点 marker: grab radius and corner snap (mm).

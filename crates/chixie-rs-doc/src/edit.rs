@@ -109,6 +109,32 @@ impl EditDoc {
         self.chars()[self.selection()].iter().collect()
     }
 
+    /// The selected chars' formatting, one entry per char (rich copy).
+    pub fn selected_attrs(&self) -> Vec<Attrs> {
+        self.selection().map(|i| self.doc.attrs(i).clone()).collect()
+    }
+
+    /// Paste `text` over the selection with one `attrs` entry per char (rich paste from our own
+    /// copy). Falls back to plain [`insert`](Self::insert) when the counts differ.
+    pub fn insert_with_attrs(&mut self, text: &str, attrs: &[Attrs]) {
+        if text.chars().count() != attrs.len() {
+            self.insert(text);
+            return;
+        }
+        self.checkpoint(LastEdit::None);
+        let sel = self.selection();
+        let mut new = self.doc.new_chars(text, &Attrs::default());
+        for (c, a) in new.iter_mut().zip(attrs) {
+            c.attrs = a.clone();
+        }
+        let n = new.len();
+        let cmd = self.doc.splice_cmd(sel.clone(), new);
+        self.exec(cmd);
+        self.caret = sel.start + n;
+        self.anchor = None;
+        self.marked = None;
+    }
+
     /// Move the caret; `extend` keeps/starts a selection from the current anchor.
     pub fn move_to(&mut self, i: usize, extend: bool) {
         let i = i.min(self.len());
@@ -812,5 +838,25 @@ mod tests {
         // No selection: the caret's formats.
         d.select_range(3..3);
         assert_eq!(d.common(|a| a.colour), Some(Some([1, 2, 3])));
+    }
+
+    #[test]
+    fn rich_paste_keeps_each_chars_formats() {
+        let mut d = EditDoc::from_text("ab");
+        d.select_range(1..2);
+        d.set_attrs(|a| a.underline = true);
+        d.select_range(0..2);
+        let (text, attrs) = (d.selected_text(), d.selected_attrs());
+        d.select_range(2..2);
+        d.insert_with_attrs(&text, &attrs);
+        assert_eq!(d.text(), "abab");
+        let u: Vec<bool> = (0..4).map(|i| d.document().attrs(i).underline).collect();
+        assert_eq!(u, vec![false, true, false, true]);
+        assert_eq!(d.caret(), 4);
+        assert!(d.undo());
+        assert_eq!(d.text(), "ab");
+        // A count mismatch pastes plain text.
+        d.insert_with_attrs("xyz", &attrs);
+        assert_eq!(d.text(), "abxyz");
     }
 }
