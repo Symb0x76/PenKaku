@@ -79,6 +79,7 @@ jobs:
           grep -q 'AUTOTEST_LIBRARY roundtrip=true background=true gallery=true' autotest.log
           grep -q 'AUTOTEST_FORMAT underline=true paste=true replace_keeps_ids=true import_txt=true pdf=true restored=true' autotest.log
           grep -q 'AUTOTEST_SCRIPT english_scaled=true' autotest.log
+          grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
           grep -q 'AUTOTEST_PERF pages=' autotest.log
 
       - name: Upload build

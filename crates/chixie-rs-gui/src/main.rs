@@ -18,6 +18,7 @@ mod device_params;
 mod doc_view;
 mod fake;
 mod file_ops;
+mod firmware;
 mod find_bar;
 mod import_ui;
 mod cloud_preview;
@@ -419,6 +420,26 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             );
         });
         shot("PARAMS");
+        // 固件参数: write one setting, read it back, then restore it.
+        let value_of = |cx: &mut AsyncApp, key: &str| {
+            cx.update(|cx| device.read(cx).params.read(cx).machine.as_ref().and_then(|m| m.all.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())))
+        };
+        let old = value_of(cx, "112");
+        cx.update(|cx| device.read(cx).send(chixie_rs_device::device::Command::WriteSettings(vec![("112".into(), "4321".into())])));
+        cx.background_executor().timer(pause(600)).await;
+        let written = value_of(cx, "112").as_deref() == Some("4321");
+        if let Some(v) = old.clone() {
+            cx.update(|cx| device.read(cx).send(chixie_rs_device::device::Command::WriteSettings(vec![("112".into(), v)])));
+            cx.background_executor().timer(pause(600)).await;
+        }
+        let restored = value_of(cx, "112") == old;
+        let dialog_rows = cx
+            .update_window(handle, |_, window, cx| {
+                let view = cx.new(|cx| firmware::FirmwareView::new(device.clone(), window, cx));
+                view.read(cx).row_count()
+            })
+            .unwrap_or(0);
+        println!("AUTOTEST_FIRMWARE written={written} restored={restored} rows={dialog_rows}");
         cx.background_executor().timer(pause(2500)).await;
         cx.update(|cx| {
             let st = cx.global_mut::<AppState>();

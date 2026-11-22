@@ -59,6 +59,10 @@ gpui_kit::assets::icon_assets!(
         ListIndentIncrease,
         Combine,
         Move,
+        Settings2,
+        Dot,
+        FileInput,
+        FolderInput,
     ]
 );
 

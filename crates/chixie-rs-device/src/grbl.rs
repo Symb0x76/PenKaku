@@ -91,21 +91,29 @@ pub struct MachineSettings {
     pub travel: Option<(f32, f32)>,
     /// Every `$n=value` line, in order.
     pub raw: Vec<(u16, String)>,
+    /// Every `$key=value` line, in order: numeric (`110`) and Grbl_ESP32 named
+    /// (`X/StepsPerMm`) keys, without the `$`. This is what 固件参数 edits.
+    pub all: Vec<(String, String)>,
 }
 
 impl MachineSettings {
-    /// Parse `$n=value` lines (other lines are ignored).
+    /// Parse `$key=value` lines (other lines are ignored).
     pub fn parse<'a>(lines: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut raw = Vec::new();
+        let (mut raw, mut all) = (Vec::new(), Vec::new());
         for l in lines {
             let Some((k, v)) = l.trim().strip_prefix('$').and_then(|r| r.split_once('=')) else { continue };
-            if let Ok(n) = k.trim().parse::<u16>() {
-                raw.push((n, v.trim().to_string()));
+            if k.is_empty() || k.contains(char::is_whitespace) {
+                continue;
             }
+            let v = v.trim();
+            if let Ok(n) = k.parse::<u16>() {
+                raw.push((n, v.to_string()));
+            }
+            all.push((k.to_string(), v.to_string()));
         }
         let get = |n: u16| raw.iter().find(|(k, _)| *k == n).and_then(|(_, v)| v.parse::<f32>().ok());
         let pair = |a: u16, b: u16| Some((get(a)?, get(b)?));
-        Self { steps_per_mm: pair(100, 101), max_rate: pair(110, 111), accel: pair(120, 121), travel: pair(130, 131), raw }
+        Self { steps_per_mm: pair(100, 101), max_rate: pair(110, 111), accel: pair(120, 121), travel: pair(130, 131), raw, all }
     }
 
     /// The slower axis' max rate (mm/min), if known.

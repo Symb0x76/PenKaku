@@ -78,6 +78,11 @@ pub enum Command {
     SetProfile(DeviceProfile),
     /// Read the machine's `$$` settings; answered with `Event::Machine`.
     QueryMachine,
+    /// 固件参数: write `$key=value` for each pair in order, stopping at the first error, then
+    /// read `$$` again (answered with `Event::Machine` either way).
+    WriteSettings(Vec<(String, String)>),
+    /// 恢复默认: `$RST=*`, then read `$$` again.
+    ResetSettings,
     Run(Job),
     /// Next sheet (or pen) is in place; continue after `AwaitingSheet` / `AwaitingPen`.
     NextSheet,
@@ -397,6 +402,13 @@ impl Actor {
         Ok(())
     }
 
+    fn query_machine(&mut self) -> Result<()> {
+        self.emit(Event::Log { dir: Dir::Tx, line: "$$".into() });
+        let lines = grbl::command(self.link_mut().as_mut(), "$$", COMMAND_TIMEOUT)?;
+        self.emit(Event::Machine(MachineSettings::parse(lines.iter().map(String::as_str))));
+        Ok(())
+    }
+
     fn require_link(&self) -> Result<()> {
         if self.link.is_none() {
             return Err(Error::Api(NOT_CONNECTED.into()));
@@ -429,10 +441,16 @@ impl Actor {
                     Command::Jog { dx, dy, feed } => self.cmd(&format!("$J=G21G91X{dx:.3}Y{dy:.3}F{feed:.0}"))?,
                     Command::Pen(p) => self.cmd(&self.pen_line(p))?,
                     Command::Unlock => self.cmd("$X")?,
-                    Command::QueryMachine => {
-                        self.emit(Event::Log { dir: Dir::Tx, line: "$$".into() });
-                        let lines = grbl::command(self.link_mut().as_mut(), "$$", COMMAND_TIMEOUT)?;
-                        self.emit(Event::Machine(MachineSettings::parse(lines.iter().map(String::as_str))));
+                    Command::QueryMachine => self.query_machine()?,
+                    Command::WriteSettings(pairs) => {
+                        let written = pairs.iter().try_for_each(|(k, v)| self.cmd(&format!("${k}={v}")));
+                        self.query_machine()?;
+                        written?;
+                    }
+                    Command::ResetSettings => {
+                        let reset = self.cmd("$RST=*");
+                        self.query_machine()?;
+                        reset?;
                     }
                     Command::BackOrigin => {
                         self.cmd(&self.pen_line(Pen::Up))?;
@@ -833,6 +851,38 @@ mod tests {
             }
             _ => unreachable!(),
         }
+        h.send(Command::Shutdown);
+    }
+
+    #[test]
+    fn parses_named_esp32_settings() {
+        let m = MachineSettings::parse(["$110=12000.000", "$X/StepsPerMm=80.000", "$Sta/SSID=home net", "ok", "$ bad=1"]);
+        assert_eq!(m.raw, vec![(110, "12000.000".to_string())]);
+        assert_eq!(m.all, vec![("110".into(), "12000.000".into()), ("X/StepsPerMm".into(), "80.000".into()), ("Sta/SSID".into(), "home net".into())]);
+    }
+
+    #[test]
+    fn write_settings_sends_each_then_rereads() {
+        let (h, ev, fake) = start(Fake { respond: vec![("$$".into(), vec!["$110=5000.000".into()])], ..Default::default() });
+        wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
+        h.send(Command::WriteSettings(vec![("110".into(), "5000".into()), ("X/StepsPerMm".into(), "80".into())]));
+        match wait_for(&ev, |e| matches!(e, Event::Machine(_))) {
+            Event::Machine(m) => assert_eq!(m.all, vec![("110".into(), "5000.000".into())]),
+            _ => unreachable!(),
+        }
+        assert_eq!(fake.lock().unwrap().lines, ["$I", "$110=5000", "$X/StepsPerMm=80", "$$"]);
+        h.send(Command::Shutdown);
+    }
+
+    #[test]
+    fn write_settings_stops_at_an_error_but_still_rereads() {
+        // Line 3 (the second write) answers error:20.
+        let (h, ev, fake) = start(Fake { fail_on: Some(3), ..Default::default() });
+        wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
+        h.send(Command::WriteSettings(["110", "111", "112"].map(|k| (k.to_string(), "1".to_string())).to_vec()));
+        wait_for(&ev, |e| matches!(e, Event::Machine(_)));
+        wait_for(&ev, |e| matches!(e, Event::Error(_)));
+        assert_eq!(fake.lock().unwrap().lines, ["$I", "$110=1", "$111=1", "$$"]);
         h.send(Command::Shutdown);
     }
 
