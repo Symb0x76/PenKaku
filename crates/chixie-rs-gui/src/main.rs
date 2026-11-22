@@ -658,6 +658,24 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 v.relayout_now(cx);
             });
         });
+        // 中英文分开设置: English at 80 % gets a narrower box; Chinese boxes stay put.
+        let script = cx.update(|cx| {
+            let view = app.read(cx).doc.clone();
+            let widths = |cx: &App| {
+                let v = view.read(cx);
+                let (chars, d) = (v.doc().chars().to_vec(), v.document());
+                let w = |c: char| chars.iter().position(|&x| x == c).map(|i| d.boxes[i].x1 - d.boxes[i].x0);
+                (w('A'), w('你'))
+            };
+            let before = widths(cx);
+            cx.global_mut::<AppState>().settings.style.handwriting.english.scale_pct = 80.0;
+            view.update(cx, |v, cx| v.relayout_now(cx));
+            let after = widths(cx);
+            cx.global_mut::<AppState>().settings.style.handwriting.english.scale_pct = 100.0;
+            view.update(cx, |v, cx| v.relayout_now(cx));
+            matches!((before, after), ((Some(a0), Some(z0)), (Some(a1), Some(z1))) if (a1 - 0.8 * a0).abs() < 0.05 && (z1 - z0).abs() < 1e-3)
+        });
+        println!("AUTOTEST_SCRIPT english_scaled={script}");
         println!("AUTOTEST_PERF pages={pages} relayout_ms={relayout_max:.1} type_paint_ms={type_paint:.1} scroll_paint_ms={scroll_paint:.1} scroll_frames={scroll_frames}");
         // Table forms: a 2×2 form; Tab adds a cell; a clipped cell overflows and 批量溢出
         // (shrink) fixes it; a 30-name list makes 30 pages; DOCX keeps the text through Word

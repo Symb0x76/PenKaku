@@ -293,6 +293,19 @@ fn parse_ini(text: &str) -> HashMap<(String, String), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn script_styles_round_trip_and_old_files_load() {
+        let mut s = Settings::default();
+        s.style.handwriting.english.scale_pct = 85.0;
+        s.style.handwriting.number.baseline_mm = 0.5;
+        s.style.handwriting.english.deformation = Some(crate::deformation::Deformation::recommended());
+        let back: Settings = toml::from_str(&toml::to_string_pretty(&s).unwrap()).unwrap();
+        assert_eq!(back.style.handwriting, s.style.handwriting);
+        // A file from before 中英文分开设置 gets the neutral defaults.
+        let old: Settings = toml::from_str("[style.handwriting]\nenabled = true\n").unwrap();
+        assert!(!old.style.handwriting.english.moves_glyph() && old.style.handwriting.number.deformation.is_none());
+    }
+
     /// Shape of a real ChiXie3 config.ini (values from the verified install; login is fake).
     const INI: &str = r#"[LoginConfig]
 Account=10000000000

@@ -10,8 +10,6 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use crate::deformation::Deformation;
-
 type Strokes = Arc<Vec<Vec<(f32, f32)>>>;
 
 /// (glyph address, deformation stream id, vertical scale bits, CJK).
@@ -51,11 +49,12 @@ impl DeformCache {
         self.len() == 0
     }
 
-    /// Clear the cache when `d` or `seed` differ from the settings it was filled with.
-    pub(super) fn begin(&self, d: &Deformation, seed: u64) {
+    /// Clear the cache when the deformation settings (Chinese, English, digits) or the seed
+    /// differ from the ones it was filled with.
+    pub(super) fn begin(&self, p: &super::PageParams) {
         let mut h = DefaultHasher::new();
-        format!("{d:?}").hash(&mut h);
-        seed.hash(&mut h);
+        format!("{:?}{:?}{:?}", p.deformation, p.style.english.deformation, p.style.number.deformation).hash(&mut h);
+        p.style.seed.hash(&mut h);
         let fp = h.finish();
         if let Ok(mut i) = self.inner.lock()
             && i.fingerprint != fp

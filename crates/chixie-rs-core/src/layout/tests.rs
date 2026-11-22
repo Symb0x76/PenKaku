@@ -692,3 +692,57 @@ fn deform_cache_matches_uncached_layout() {
     assert_eq!(lay(text, &p, Some(&cache)), lay(text, &p, None));
     assert!(cache.len() <= filled);
 }
+
+fn script_params(f: impl FnOnce(&mut crate::handwriting::ScriptStyle)) -> PageParams {
+    let mut p = PageParams::default();
+    f(&mut p.style.english);
+    p
+}
+
+#[test]
+fn english_scale_shrinks_letters_and_their_advance() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let plain = layout("AA你", &font, &PageParams::default());
+    let small = layout("AA你", &font, &script_params(|s| s.scale_pct = 80.0));
+    let adv = |d: &Document| d.boxes[1].x0 - d.boxes[0].x0;
+    assert!((adv(&small) - 0.8 * adv(&plain)).abs() < 1e-4, "{} vs {}", adv(&small), adv(&plain));
+    // 你 keeps its size: same stroke shape, only moved left.
+    let shape = |d: &Document, k: usize| {
+        let s = &d.pages[0].strokes;
+        let ix: Vec<usize> = (0..s.len()).filter(|&i| d.pages[0].stroke_chars[i] == k).collect();
+        let o = s[ix[0]][0];
+        ix.iter().flat_map(|&i| s[i].iter().map(move |&(x, y)| (x - o.0, y - o.1))).collect::<Vec<_>>()
+    };
+    let (a, b) = (shape(&plain, 2), shape(&small, 2));
+    assert!(a.iter().zip(&b).all(|(p, q)| (p.0 - q.0).abs() < 1e-4 && (p.1 - q.1).abs() < 1e-4));
+}
+
+#[test]
+fn english_baseline_raises_only_letters() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let plain = layout("你A", &font, &PageParams::default());
+    let raised = layout("你A", &font, &script_params(|s| s.baseline_mm = 2.0));
+    let pts = |d: &Document, k: usize| -> Vec<(f32, f32)> {
+        let pg = &d.pages[0];
+        (0..pg.strokes.len()).filter(|&i| pg.stroke_chars[i] == k).flat_map(|i| pg.strokes[i].clone()).collect()
+    };
+    assert_eq!(pts(&plain, 0), pts(&raised, 0));
+    for (p, q) in pts(&plain, 1).iter().zip(pts(&raised, 1)) {
+        assert!((q.1 - p.1 - 2.0).abs() < 1e-4 && (q.0 - p.0).abs() < 1e-4);
+    }
+}
+
+#[test]
+fn english_only_deformation_leaves_chinese_alone() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let on = Deformation { enabled: true, base: true, shape: true, ..Default::default() };
+    let plain = layout("你A你", &font, &PageParams::default());
+    let de = layout("你A你", &font, &script_params(|s| s.deformation = Some(on)));
+    let of = |d: &Document, k: usize| -> Vec<Vec<(f32, f32)>> {
+        let pg = &d.pages[0];
+        (0..pg.strokes.len()).filter(|&i| pg.stroke_chars[i] == k).map(|i| pg.strokes[i].clone()).collect()
+    };
+    assert_eq!(of(&plain, 0), of(&de, 0));
+    assert_eq!(of(&plain, 2), of(&de, 2));
+    assert_ne!(of(&plain, 1), of(&de, 1));
+}
