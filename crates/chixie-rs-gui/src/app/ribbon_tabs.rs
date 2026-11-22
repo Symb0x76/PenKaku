@@ -605,9 +605,25 @@ impl ChixieRsApp {
     #[inline(never)]
     fn tab_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let dark = cx.theme().mode == ThemeMode::Dark;
-        let show_guides = cx.global::<AppState>().settings.ui.show_guides;
+        let ui = cx.global::<AppState>().settings.ui.clone();
+        let show_guides = ui.show_guides;
+        let double = ui.double_page;
         h_flex()
             .h_full()
+            .child(group(
+                cx,
+                "pages",
+                "页面",
+                h_flex()
+                    .gap_1()
+                    .child(big("single", "单页", IconName::File).selected(!double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = false)
+                    })))
+                    .child(big("double", "双页", IconName::Columns2).selected(double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = true)
+                    }))),
+                None,
+            ))
             .child(group(
                 cx,
                 "zoom",
@@ -630,15 +646,35 @@ impl ChixieRsApp {
                 cx,
                 "show",
                 "显示",
-                stack([Checkbox::new("guides")
-                    .small()
-                    .label("模板格线")
-                    .checked(show_guides)
-                    .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                        let v = *v;
-                        t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
-                    }))
-                    .into_any_element()]),
+                stack([
+                    Checkbox::new("guides")
+                        .small()
+                        .label("模板格线")
+                        .checked(show_guides)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
+                        }))
+                        .into_any_element(),
+                    Checkbox::new("line-numbers")
+                        .small()
+                        .label("行号")
+                        .checked(ui.line_numbers)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.ui.line_numbers = v);
+                        }))
+                        .into_any_element(),
+                    Checkbox::new("page-numbers")
+                        .small()
+                        .label("页码")
+                        .checked(ui.page_numbers)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.ui.page_numbers = v);
+                        }))
+                        .into_any_element(),
+                ]),
                 None,
             ))
             .child(group(

@@ -27,7 +27,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, Selectable as _, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -1179,6 +1179,16 @@ impl ChixieRsApp {
                 )
             })
             .child(div().flex_1())
+            .child({
+                let double = cx.global::<AppState>().settings.ui.double_page;
+                h_flex()
+                    .child(ribbon::icon_btn("sb-single", IconName::File, "单页").selected(!double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = false)
+                    })))
+                    .child(ribbon::icon_btn("sb-double", IconName::Columns2, "双页").selected(double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = true)
+                    })))
+            })
             .child(ribbon::icon_btn("sb-zout", IconName::Minus, "缩小").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.zoom_by(1.0 / 1.1, cx))))
             .child(div().w(px(110.)).px_1().child(Slider::new(&self.zoom_slider)))
             .child(ribbon::icon_btn("sb-zin", IconName::Plus, "放大").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.zoom_by(1.1, cx))))
