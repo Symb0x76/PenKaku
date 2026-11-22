@@ -2,17 +2,20 @@
 //! (port choice, jog pad, pen/unlock/zero, live position, console, job progress).
 //! Job start / sheet change / stop prompts live in `app.rs` because they need the document.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::time::Duration;
 
-use chixie_rs_core::config::CONSOLE_HISTORY_MAX;
+use chixie_rs_core::config::{CONSOLE_HISTORY_MAX, CustomCommand};
 use chixie_rs_device::device::{Command, DeviceHandle, Dir, Event, Job, JobOutcome, Pen, Target};
 use chixie_rs_device::grbl::{self, GrblStatus};
 use chixie_rs_device::transport::{self, PortInfo};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -604,6 +607,156 @@ impl DevicePanel {
             )
             .into_any_element()
     }
+
+    /// 自定义命令 buttons under the console; the ⚙ button opens the editor.
+    #[inline(never)]
+    fn custom_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let enabled = self.console_enabled();
+        let commands = cx.global::<AppState>().settings.device.custom_commands.clone();
+        let grid = if commands.is_empty() {
+            div().text_xs().text_color(muted).child("尚未添加，点 ⚙ 新建按钮").into_any_element()
+        } else {
+            h_flex()
+                .flex_wrap()
+                .gap_1()
+                .children(commands.iter().enumerate().map(|(i, c)| {
+                    Button::new(("custom-cmd", i))
+                        .small()
+                        .label(c.name.clone())
+                        .disabled(!enabled)
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| t.run_custom_command(i, cx)))
+                }))
+                .into_any_element()
+        };
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("自定义命令"))
+                    .child(Button::new("custom-edit").small().label("⚙").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_command_editor(w, cx)))),
+            )
+            .child(grid)
+            .into_any_element()
+    }
+
+    /// Send each non-blank line of a 自定义命令 in order; the actor replies to each before the next.
+    fn run_custom_command(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.console_enabled() {
+            return;
+        }
+        let Some(cmd) = cx.global::<AppState>().settings.device.custom_commands.get(index).cloned() else {
+            return;
+        };
+        for line in command_lines(&cmd.lines) {
+            self.send(Command::Send(line));
+        }
+        cx.notify();
+    }
+
+    /// 自定义命令 editor: pick a button to edit, 添加/保存, 删除 or 新建. Edits go straight to settings.
+    fn open_command_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = cx.entity();
+        let sel: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("例如：归零"));
+        let lines = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 10));
+        window.open_dialog(cx, move |d, _w, cx| {
+            let muted = cx.theme().muted_foreground;
+            let commands = cx.global::<AppState>().settings.device.custom_commands.clone();
+            let cur = sel.get();
+            let picks: Vec<Button> = commands
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let (sel, name, lines) = (sel.clone(), name.clone(), lines.clone());
+                    let b = Button::new(("cmd-pick", i)).small().label(c.name.clone());
+                    let b = if cur == Some(i) { b.primary() } else { b };
+                    b.on_click(move |_: &ClickEvent, w, cx| {
+                        sel.set(Some(i));
+                        let c = cx.global::<AppState>().settings.device.custom_commands.get(i).cloned().unwrap_or_default();
+                        set_editor(&name, &lines, &c.name, &c.lines, w, cx);
+                        cx.refresh_windows();
+                    })
+                })
+                .collect();
+            let (sel_s, name_s, lines_s, panel_s) = (sel.clone(), name.clone(), lines.clone(), panel.clone());
+            let save = Button::new("cmd-save").small().primary().label("添加/保存").on_click(move |_: &ClickEvent, w, cx| {
+                let title = name_s.read(cx).value().trim().to_string();
+                let body = command_lines(&lines_s.read(cx).value());
+                if title.is_empty() {
+                    w.push_notification(Notification::warning("请输入按钮名称"), cx);
+                    return;
+                }
+                if body.is_empty() {
+                    w.push_notification(Notification::warning("请输入按钮命令"), cx);
+                    return;
+                }
+                let mut cmds = cx.global::<AppState>().settings.device.custom_commands.clone();
+                let cmd = CustomCommand { name: title, lines: body.join("\n") };
+                let at = match sel_s.get() {
+                    Some(i) if i < cmds.len() => {
+                        cmds[i] = cmd;
+                        i
+                    }
+                    _ => {
+                        cmds.push(cmd);
+                        cmds.len() - 1
+                    }
+                };
+                sel_s.set(Some(at));
+                store_custom_commands(&panel_s, cmds, cx);
+                w.push_notification(Notification::success("已保存"), cx);
+            });
+            let (sel_d, name_d, lines_d, panel_d) = (sel.clone(), name.clone(), lines.clone(), panel.clone());
+            let del = Button::new("cmd-delete").small().danger().label("删除").disabled(cur.is_none()).on_click(move |_: &ClickEvent, w, cx| {
+                let Some(i) = sel_d.get() else { return };
+                let mut cmds = cx.global::<AppState>().settings.device.custom_commands.clone();
+                if i < cmds.len() {
+                    cmds.remove(i);
+                }
+                sel_d.set(None);
+                set_editor(&name_d, &lines_d, "", "", w, cx);
+                store_custom_commands(&panel_d, cmds, cx);
+            });
+            let (sel_n, name_n, lines_n) = (sel.clone(), name.clone(), lines.clone());
+            let new = Button::new("cmd-new").small().label("新建").on_click(move |_: &ClickEvent, w, cx| {
+                sel_n.set(None);
+                set_editor(&name_n, &lines_n, "", "", w, cx);
+                cx.refresh_windows();
+            });
+            let close = Button::new("cmd-close").small().label("关闭").on_click(|_: &ClickEvent, w, cx| w.close_dialog(cx));
+            d.title("自定义命令").w(px(460.)).child(
+                v_flex()
+                    .gap_3()
+                    .child(div().text_xs().text_color(muted).child("点按钮载入编辑。每行一条 G-code 或 $ 命令，按顺序发送。"))
+                    .child(h_flex().flex_wrap().gap_1().children(picks))
+                    .child(h_flex().gap_2().child(div().text_sm().child("按钮名称")).child(div().flex_1().child(Input::new(&name).small())))
+                    .child(v_flex().gap_1().child(div().text_sm().child("按钮命令")).child(Textarea::new(&lines))),
+            )
+            .footer(h_flex().gap_2().justify_end().child(del).child(new).child(save).child(close))
+        });
+    }
+}
+
+/// Replace the editor fields (name and command lines) with the given text.
+fn set_editor(name: &Entity<InputState>, lines: &Entity<TextareaState>, title: &str, body: &str, w: &mut Window, cx: &mut App) {
+    name.update(cx, |s, cx| s.set_value(title.to_string(), w, cx));
+    lines.update(cx, |s, cx| s.set_value(body.to_string(), w, cx));
+}
+
+/// Write the custom command list to settings, then redraw the panel and open dialogs.
+fn store_custom_commands(panel: &Entity<DevicePanel>, cmds: Vec<CustomCommand>, cx: &mut App) {
+    let st = cx.global_mut::<AppState>();
+    st.settings.device.custom_commands = cmds;
+    st.save_settings();
+    panel.update(cx, |_, cx| cx.notify());
+    cx.refresh_windows();
+}
+
+/// The non-blank lines of a 自定义命令, trimmed, in order.
+pub fn command_lines(text: &str) -> Vec<String> {
+    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
 }
 
 /// Console ↑/↓ over `len` entries, newest first. `pos` is the shown entry (`None` = the live
@@ -681,6 +834,8 @@ impl Render for DevicePanel {
                     .child(self.job_section(cx))
                     .child(sep())
                     .child(self.console_section(cx))
+                    .child(sep())
+                    .child(self.custom_section(cx))
             })
     }
 }
