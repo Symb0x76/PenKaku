@@ -9,6 +9,10 @@
   - layout/gcode split; Grbl pause/status; device actor;
   - calibration; handwriting jitter; deformation; style TOML; CLI flags.
 - Tests: 52 core (+1 opt-in keyring) + 2 goldens; GUI autotest passes; clippy clean.
+- M9 Step 7 (`.cset` import) on `claude/upbeat-engelbart-aa9c11`: core `pickle.rs` (safe reader,
+  shared with templates), `chixie3_devices::import_cset`, 从炽写导入 menu (config.ini | .cset) with a
+  device picker. gpui's file prompt has no extension filter, so the picker is unfiltered. Workspace
+  tests: 283 passed, 2 ignored; clippy clean. GUI dialogs not yet clicked through.
 
 ## Open / VERIFY
 - Space width; wrap rule (glyph origin vs right edge); first-line indent mode; `row_offset_style`
