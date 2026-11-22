@@ -606,8 +606,9 @@ impl DocView {
     /// The selection as plain text plus each char's formatting (JSON metadata, read back by
     /// our own paste; other programs see the text).
     fn copy_selection(&self, cx: &mut Context<Self>) {
-        let clip = RichClip { v: 1, attrs: self.doc.selected_attrs() };
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(self.doc.selected_text(), clip));
+        let (text, attrs) = (self.doc.selected_text(), self.doc.selected_attrs());
+        cx.set_global(LastRichClip(Some((text.clone(), attrs.clone()))));
+        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, RichClip { v: 1, attrs }));
     }
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if self.doc.has_selection() {
@@ -623,11 +624,20 @@ impl DocView {
     }
     pub fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = cx.read_from_clipboard() else { return };
-        // Our own copy keeps its formatting.
-        let rich = item.entries().iter().find_map(|e| match e {
-            ClipboardEntry::String(s) => s.metadata_json::<RichClip>().filter(|c| c.v == 1).map(|c| (s.text().clone(), c.attrs)),
-            _ => None,
-        });
+        // Our own copy keeps its formatting. Clipboard tools (Windows clipboard history,
+        // PowerToys) may re-put the text without our metadata: then the same text as our last
+        // copy still gets that copy's formatting.
+        let rich = item
+            .entries()
+            .iter()
+            .find_map(|e| match e {
+                ClipboardEntry::String(s) => s.metadata_json::<RichClip>().filter(|c| c.v == 1).map(|c| (s.text().clone(), c.attrs)),
+                _ => None,
+            })
+            .or_else(|| {
+                let text = item.text()?;
+                cx.try_global::<LastRichClip>().and_then(|l| l.0.clone()).filter(|(t, _)| *t == text)
+            });
         if let Some((text, attrs)) = rich {
             self.doc.insert_with_attrs(&text, &attrs);
             self.edited(cx);
@@ -936,7 +946,7 @@ impl Render for DocView {
                             }
                         }
                         // 行号 / 页码 (preview only).
-                        paint_numbers(window, cx, &g, &layout_doc, pages, page.margins, ui.line_numbers, ui.page_numbers);
+                        paint_numbers(window, cx, &g, &layout_doc, pages, ui.line_numbers, ui.page_numbers);
                         // Template ruling (pre-printed on the paper; never plotted).
                         if show_guides {
                             for (k, p) in layout_doc.pages.iter().enumerate() {
@@ -1090,11 +1100,11 @@ impl Render for DocView {
 
 /// 行号 in the left margin (counted per page) and 第 n 页 under each page.
 #[allow(clippy::too_many_arguments)]
-fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, pages: usize, margins: (f32, f32, f32, f32), lines: bool, page_nums: bool) {
+fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, pages: usize, lines: bool, page_nums: bool) {
     if !lines && !page_nums {
         return;
     }
-    let size = px((3.0 * g.zoom).clamp(8.0, 14.0));
+    let size = px((3.0 * g.zoom).clamp(8.0, 12.0));
     let colour = hsla(0.0, 0.0, 0.55, 1.0);
     let font = window.text_style().font();
     let mut text = |window: &mut Window, s: String, at: Point<Pixels>, right: bool| {
@@ -1119,7 +1129,8 @@ fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, page
     if page_nums {
         for k in 0..pages {
             let o = g.page_origin(k);
-            let at = o + point(px(g.page_w / 2.0), px(g.page_h - margins.3 * g.zoom / 2.0));
+            // In the gap under the page, where the template's ruling can't cover it.
+            let at = o + point(px(g.page_w / 2.0), px(g.page_h + GAP / 2.0));
             text(window, format!("第 {} 页", k + 1), at, false);
         }
     }
@@ -1131,6 +1142,12 @@ struct RichClip {
     v: u32,
     attrs: Vec<chixie_rs_doc::model::Attrs>,
 }
+
+/// The editor's last copy (text and formatting), for when the clipboard comes back without
+/// our metadata.
+struct LastRichClip(Option<(String, Vec<chixie_rs_doc::model::Attrs>)>);
+
+impl Global for LastRichClip {}
 
 /// The 书写原点 marker: grab radius and corner snap (mm).
 const ORIGIN_GRAB_MM: f32 = 2.5;

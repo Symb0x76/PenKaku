@@ -286,5 +286,16 @@
     (`app/menu.rs`), 单页 / 双页 (`Geom.cols`), 行号 / 页码 (`paint_numbers`), `import_ui.rs` (+ drop), `app/print.rs`
     (export / print via the OS viewer). Settings `ui.{double_page, line_numbers, page_numbers, print_text,
     print_background}`. Autotest `AUTOTEST_FORMAT`; CI uploads `sample-pdf-<OS>`.
-  - Open: ChiXie3 format capture (needs BOSS AFK), BOSS checks the 3 sample PDFs + checklist 13i; the GUI autotest
-    has not run locally (needs AFK; CI runs it).
+  - Open: ChiXie3 format capture (needs BOSS AFK), BOSS checks the 3 sample PDFs + checklist 13i.
+- **M8 local GUI pass (2026-11-22, agent-desktop, BOSS AFK):** autotest green locally; formats, find / replace,
+  context menu, 单页 / 双页, 行号 / 页码 driven by hand in FAKE mode. Fixed:
+  - Paste lost formats when a clipboard tool (PowerToys / Windows clipboard history) re-puts plain text:
+    `LastRichClip` global restores the last copy's attrs when the text matches. The autotest's `paste=` flaked
+    false 4 of 5 runs on this machine before the fix.
+  - 15 ribbon icons rendered blank (format buttons, align, indent, 合并内容, 字符微调): added to `icons.rs`.
+  - Find bar pre-fill is now selected, so typing replaces it.
+  - 页码 label moved into the gap under the page (it sat on the template's last ruled line).
+  - Open question for BOSS: 标题 (1.5×) glyphs overlap the line above on ruled templates (rows keep their pitch).
+  - agent-desktop notes: the gpui window has no useful UIA tree; drive with `--headed mouse-click --xy` from
+    screenshots (window origin + (9, 0)); `press shift+right` does not extend selections (use Shift+click);
+    text goes in via `clipboard-set` + `press ctrl+v`.

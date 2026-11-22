@@ -72,6 +72,8 @@ impl FindBar {
         }
         let focus = self.find.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
+        // Word: the search text comes selected, so typing replaces it.
+        self.find.update(cx, |s, cx| s.select_all(window, cx));
         cx.notify();
     }
 
