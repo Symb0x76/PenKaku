@@ -301,7 +301,7 @@ impl DocView {
         let fonts = st.font_set.clone();
         self.has_font = !fonts.is_empty();
         self.load_run_fonts(cx);
-        self.layout = Arc::new(self.lay_out(&params, cx));
+        self.layout = Arc::new(crate::perf::time(crate::perf::Kind::Relayout, || self.lay_out(&params, cx)));
         cx.notify();
     }
 
@@ -563,6 +563,13 @@ impl DocView {
         self.edited(cx);
     }
     /// Select chars `r` and scroll to them (查找).
+    /// Scroll the desk to `y` px from the top (autotest).
+    pub fn scroll_to(&mut self, y: f32, cx: &mut Context<Self>) {
+        let x = self.scroll.offset().x;
+        self.scroll.set_offset(point(x, px(-y)));
+        cx.notify();
+    }
+
     pub fn select(&mut self, r: Range<usize>, cx: &mut Context<Self>) {
         self.doc.select_range(r);
         self.after_move(cx);
@@ -928,6 +935,7 @@ impl Render for DocView {
                         g
                     },
                     move |bounds, g, window, cx| {
+                        let _timer = crate::perf::PaintTimer::start();
                         // Pages.
                         for k in 0..pages {
                             let o = g.page_origin(k);

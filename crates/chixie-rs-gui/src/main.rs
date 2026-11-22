@@ -26,6 +26,7 @@ mod font_lib;
 mod fonts;
 mod icons;
 mod login;
+mod perf;
 mod ribbon;
 mod sim;
 mod state;
@@ -606,6 +607,58 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             (pdf, a.doc.read(cx).doc().text() == text_before)
         });
         println!("AUTOTEST_FORMAT underline={underline} paste={paste} replace_keeps_ids={replace} import_txt={import} pdf={pdf} restored={restored}");
+        // Perf (M9): a styled 20-page document; ten keystrokes at the end, then scrolling.
+        let style0 = cx.update(|cx| {
+            let st = cx.global_mut::<AppState>();
+            let old = st.settings.style.clone();
+            let s = &mut st.settings.style;
+            s.handwriting.enabled = true;
+            (s.deformation.enabled, s.deformation.base, s.deformation.shape) = (true, true, true);
+            old
+        });
+        let unit = ['你', '好', 'A', '你', '好', '.', ' '];
+        let long: String = (0..8000).map(|i| if i % 300 == 299 { '\n' } else { unit[i % unit.len()] }).collect();
+        let n0 = cx.update(|cx| app.read(cx).doc.read(cx).doc().len());
+        let pages = cx.update(|cx| {
+            let view = app.read(cx).doc.clone();
+            view.update(cx, |v, cx| {
+                let n = n0;
+                v.replace_ranges(vec![(n..n, long)], cx);
+                v.relayout_now(cx);
+            });
+            view.read(cx).document().pages.len()
+        });
+        cx.background_executor().timer(pause(500)).await;
+        perf::reset();
+        let mut relayout_max = 0f64;
+        for _ in 0..10 {
+            cx.update(|cx| {
+                let view = app.read(cx).doc.clone();
+                view.update(cx, |v, cx| {
+                    let n = v.doc().len();
+                    v.replace_ranges(vec![(n..n, "好".into())], cx);
+                });
+            });
+            cx.background_executor().timer(pause(80)).await;
+            relayout_max = relayout_max.max(perf::snapshot().0);
+        }
+        let type_paint = perf::snapshot().2;
+        perf::reset();
+        for k in 0..30 {
+            cx.update(|cx| app.read(cx).doc.clone().update(cx, |v, cx| v.scroll_to(k as f32 * 400.0, cx)));
+            cx.background_executor().timer(pause(40)).await;
+        }
+        let (_, _, scroll_paint, scroll_frames) = perf::snapshot();
+        cx.update(|cx| {
+            cx.global_mut::<AppState>().settings.style = style0;
+            app.read(cx).doc.clone().update(cx, |v, cx| {
+                let n = v.doc().len();
+                v.replace_ranges(vec![(n0..n, String::new())], cx);
+                v.scroll_to(0.0, cx);
+                v.relayout_now(cx);
+            });
+        });
+        println!("AUTOTEST_PERF pages={pages} relayout_ms={relayout_max:.1} type_paint_ms={type_paint:.1} scroll_paint_ms={scroll_paint:.1} scroll_frames={scroll_frames}");
         // Table forms: a 2×2 form; Tab adds a cell; a clipped cell overflows and 批量溢出
         // (shrink) fixes it; a 30-name list makes 30 pages; DOCX keeps the text through Word
         // tables. Template, settings and text are put back.
