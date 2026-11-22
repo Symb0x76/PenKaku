@@ -183,6 +183,8 @@ pub struct DocView {
     ink_of: Arc<Vec<Option<chixie_rs_core::profile::Rgb>>>,
     /// Built page paths, reused across frames (scroll, caret blink) while layout and zoom stay.
     paths: Rc<RefCell<PathCache>>,
+    /// Deformed glyphs kept between relayouts (one per font set).
+    deform_cache: Arc<layout::DeformCache>,
     has_font: bool,
     focus: FocusHandle,
     scroll: ScrollHandle,
@@ -225,6 +227,7 @@ impl DocView {
             layout: Arc::new(Document::default()),
             ink_of: Arc::default(),
             paths: Rc::default(),
+            deform_cache: Arc::default(),
             has_font: false,
             focus,
             scroll: ScrollHandle::new(),
@@ -296,6 +299,10 @@ impl DocView {
         let st = cx.global::<AppState>();
         let key = (st.font_set_gen, st.settings.page.clone(), st.settings.style.clone(), st.active_template());
         if self.layout_key.as_ref() != Some(&key) {
+            if self.layout_key.as_ref().is_none_or(|k| k.0 != key.0) {
+                // New fonts: cached glyphs are keyed by address, start over.
+                self.deform_cache = Arc::default();
+            }
             self.layout_key = Some(key);
             self.relayout(cx);
         }
@@ -322,7 +329,7 @@ impl DocView {
         let styles = self.doc.styles(st.settings.page.font_size * PT_PER_SIZE);
         let by_id = self.doc.char_fonts().into_iter().filter_map(|(id, n)| st.run_fonts.get(n).cloned().flatten().map(|f| (id, f))).collect();
         let fonts = RunFonts { base: &*st.font_set, by_id };
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning, styles: &styles };
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning, styles: &styles, deform_cache: Some(&self.deform_cache) };
         layout::layout_flow(&flow, &fonts, params)
     }
 

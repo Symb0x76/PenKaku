@@ -41,7 +41,19 @@ fn layout_timing() {
     let rows = settings.page_params_with(Ruling::Rows { rows: (22, 22), columns: 1, column_gap: 0.0, widths: vec![], band: None, upper: false, dashed: false, divider: false });
     let grid = settings.page_params_with(Ruling::Grid { rows: 20, cols: 20, cell: (8.0, 8.0), gap: (1.0, 2.0) });
     time("free, plain", 5, || layout::layout(&text, &font, &plain).pages.len());
+    let mut hand = plain.clone();
+    hand.style.enabled = true;
+    time("free, handwriting only", 5, || layout::layout(&text, &font, &hand).pages.len());
+    let mut deform = plain.clone();
+    (deform.deformation.enabled, deform.deformation.base, deform.deformation.shape) = (true, true, true);
+    time("free, deformation only", 5, || layout::layout(&text, &font, &deform).pages.len());
     time("free, handwriting+deform", 5, || layout::layout(&text, &font, &styled).pages.len());
+    // The editor's case: the cache is warm from the previous keystroke.
+    let cache = layout::DeformCache::new();
+    let chars: Vec<char> = text.chars().collect();
+    let ids: Vec<u64> = (0..chars.len() as u64).collect();
+    let flow = layout::Flow { chars: &chars, ids: &ids, deform_cache: Some(&cache), ..Default::default() };
+    time("free, styled, warm cache", 5, || layout::layout_flow(&flow, &font, &styled).pages.len());
     time("信纸 22 rows", 5, || layout::layout(&text, &font, &rows).pages.len());
     time("作文格 20x20", 5, || layout::layout(&text, &font, &grid).pages.len());
 }

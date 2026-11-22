@@ -23,6 +23,8 @@ mod segment;
 mod tests;
 
 pub use pen::glyph_for;
+mod cache;
+pub use cache::DeformCache;
 use pen::{Pen, draw_char};
 
 /// One pen-down polyline in machine mm.
@@ -500,6 +502,8 @@ pub struct Flow<'a> {
     pub tuning: &'a [Option<Tuning>],
     /// 字符格式 per char; missing or `None` = plain.
     pub styles: &'a [Option<CharStyle>],
+    /// Deformed glyphs from earlier layouts (the editor keeps one per font set).
+    pub deform_cache: Option<&'a DeformCache>,
 }
 
 /// Half-width in a grid: two in a row share one cell. Digits and the half space always;
@@ -573,7 +577,10 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
 
 /// One layout pass; `fits[seg]` overrides a table cell's size and rows.
 fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[Option<CellFit>]) -> Document {
-    let Flow { chars, ids, paras, joins, tuning, styles } = *f;
+    let Flow { chars, ids, paras, joins, tuning, styles, deform_cache } = *f;
+    if let Some(c) = deform_cache {
+        c.begin(&p.deformation, p.style.seed);
+    }
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
     let join = |k: usize| joins.get(k).copied().unwrap_or(false);
@@ -593,6 +600,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
     };
     let mut pen = Pen {
         p,
+        deform_cache,
         chars,
         ids,
         styles,
@@ -849,9 +857,13 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
             pen.cx += glyph.advance * s + p.char_spacing;
         } else {
             let voff = if jitter_on { jit.vertical(id, pen.cx, pen.line_w) } else { 0.0 };
-            let mut drng = rng_for(p.style.seed, SALT_DEFORM, id);
-            let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), s, &mut drng);
-            for stroke in &strokes {
+            let cjk = is_cjk(ch);
+            let make = || p.deformation.apply(&glyph.strokes, cjk, s, &mut rng_for(p.style.seed, SALT_DEFORM, id));
+            let strokes = match deform_cache.filter(|_| deform_on) {
+                Some(c) => c.get_or((std::ptr::from_ref(glyph) as usize, id, s.to_bits(), cjk), make),
+                None => std::sync::Arc::new(make()),
+            };
+            for stroke in strokes.iter() {
                 pen.page.strokes.push(
                     stroke
                         .iter()

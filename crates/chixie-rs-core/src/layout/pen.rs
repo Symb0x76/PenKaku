@@ -30,6 +30,7 @@ pub(crate) fn column_spans(page_w: f32, columns: u32, gap: f32, widths: &[f32]) 
 /// Pen state while laying out; owns the line/page bookkeeping.
 pub(super) struct Pen<'p> {
     pub(super) p: &'p PageParams,
+    pub(super) deform_cache: Option<&'p super::DeformCache>,
     pub(super) chars: &'p [char],
     pub(super) ids: &'p [u64],
     /// 字符格式 per char (missing = plain): underline / strike-through are drawn per line.
@@ -535,8 +536,15 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
     let row_w = pen.line_w;
     let voff = voff + if p.style.enabled { jit.vertical(id, x, row_w) } else { 0.0 };
     if p.deformation.is_active() {
-        let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), sy, &mut rng_for(p.style.seed, SALT_DEFORM, deform_id));
-        draw_scaled(pen, &strokes, x, voff, sx, sy, st.shear());
+        let cjk = is_cjk(ch);
+        let make = || p.deformation.apply(&glyph.strokes, cjk, sy, &mut rng_for(p.style.seed, SALT_DEFORM, deform_id));
+        match pen.deform_cache {
+            Some(c) => {
+                let strokes = c.get_or((std::ptr::from_ref(glyph) as usize, deform_id, sy.to_bits(), cjk), make);
+                draw_scaled(pen, &strokes, x, voff, sx, sy, st.shear());
+            }
+            None => draw_scaled(pen, &make(), x, voff, sx, sy, st.shear()),
+        }
     } else {
         draw_scaled(pen, &glyph.strokes, x, voff, sx, sy, st.shear());
     }
