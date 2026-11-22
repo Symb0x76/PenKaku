@@ -5,6 +5,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use chixie_rs_core::config::CONSOLE_HISTORY_MAX;
 use chixie_rs_device::device::{Command, DeviceHandle, Dir, Event, Job, JobOutcome, Pen, Target};
 use chixie_rs_device::grbl::{self, GrblStatus};
 use chixie_rs_device::transport::{self, PortInfo};
@@ -73,6 +74,10 @@ pub struct DevicePanel {
     /// Outcome of the last finished job (status bar / autotest).
     pub last_end: Option<JobOutcome>,
     console: Entity<InputState>,
+    /// Console ↑/↓ recall: index into `console_history` (newest first); `None` = the live line.
+    history_pos: Option<usize>,
+    /// The live line, kept while ↑ recalls older commands.
+    history_draft: String,
     /// 0 = 连接与控制, 1 = 参数设置.
     pub tab: usize,
     pub params: Entity<DeviceParams>,
@@ -100,7 +105,10 @@ impl DevicePanel {
             if let InputEvent::PressEnter { .. } = ev {
                 let line = s.read(cx).value().trim().to_string();
                 if !line.is_empty() {
-                    this.handle.send(Command::Send(line));
+                    this.handle.send(Command::Send(line.clone()));
+                    remember_console_line(&line, cx);
+                    this.history_pos = None;
+                    this.history_draft.clear();
                     s.update(cx, |s, cx| s.set_value("", window, cx));
                 }
             }
@@ -119,6 +127,8 @@ impl DevicePanel {
             job: None,
             last_end: None,
             console,
+            history_pos: None,
+            history_draft: String::new(),
             tab: 0,
             params,
             alarm: false,
@@ -169,6 +179,40 @@ impl DevicePanel {
     }
     pub fn busy(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// The console and 自定义命令 buttons work only while connected with no job running: the
+    /// device actor does not service `Send` mid-job.
+    pub fn console_enabled(&self) -> bool {
+        self.is_connected() && !self.busy()
+    }
+
+    /// ↑/↓ in the console recall earlier lines; ↓ past the newest restores the live line.
+    fn console_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let up = match ev.keystroke.key.as_str() {
+            "up" => true,
+            "down" => false,
+            _ => return,
+        };
+        if !self.console_enabled() || (self.history_pos.is_none() && !up) {
+            return;
+        }
+        let history = cx.global::<AppState>().settings.device.console_history.clone();
+        if history.is_empty() {
+            return; // nothing to recall: leave the key to the input
+        }
+        let next = history_step(history.len(), self.history_pos, up);
+        if self.history_pos.is_none() {
+            self.history_draft = self.console.read(cx).value().to_string();
+        }
+        let text = match next {
+            Some(i) => history[i].clone(),
+            None => std::mem::take(&mut self.history_draft),
+        };
+        self.history_pos = next;
+        self.console.update(cx, |s, cx| s.set_value(text, window, cx));
+        cx.stop_propagation();
+        cx.notify();
     }
 
     pub fn refresh_ports(&mut self, cx: &mut Context<Self>) {
@@ -552,9 +596,38 @@ impl DevicePanel {
                     .text_xs()
                     .children(lines),
             )
-            .child(Input::new(&self.console).small().disabled(!self.is_connected()))
+            .child(
+                // Capture phase, so ↑/↓ reach here before the input's own cursor-up/down handling.
+                div()
+                    .capture_key_down(cx.listener(|t, ev: &KeyDownEvent, window, cx| t.console_key(ev, window, cx)))
+                    .child(Input::new(&self.console).small().disabled(!self.console_enabled())),
+            )
             .into_any_element()
     }
+}
+
+/// Console ↑/↓ over `len` entries, newest first. `pos` is the shown entry (`None` = the live
+/// line); the result is the next one, back to `None` once ↓ passes the newest.
+pub fn history_step(len: usize, pos: Option<usize>, up: bool) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    match (up, pos) {
+        (true, None) => Some(0),
+        (true, Some(i)) => Some((i + 1).min(len - 1)),
+        (false, Some(i)) if i > 0 => Some(i - 1),
+        (false, _) => None,
+    }
+}
+
+/// Move a sent console line to the top of the history (no repeats), capped and saved.
+fn remember_console_line(line: &str, cx: &mut App) {
+    let st = cx.global_mut::<AppState>();
+    let history = &mut st.settings.device.console_history;
+    history.retain(|l| l != line);
+    history.insert(0, line.to_string());
+    history.truncate(CONSOLE_HISTORY_MAX);
+    st.save_settings();
 }
 
 pub fn state_zh(s: &str) -> &'static str {
