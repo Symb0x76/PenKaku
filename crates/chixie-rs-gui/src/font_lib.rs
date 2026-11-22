@@ -74,6 +74,11 @@ impl LibraryStore {
         self.get(id).map(|f| f.name)
     }
 
+    /// The first local font called `name`.
+    pub fn id_of(&self, name: &str) -> Option<i64> {
+        self.entries.read().expect("entries lock").iter().map(LocalFont::from).find(|f| f.name == name).map(|f| f.id)
+    }
+
     /// The default library folder.
     pub fn dir(&self) -> PathBuf {
         self.library().default_dir

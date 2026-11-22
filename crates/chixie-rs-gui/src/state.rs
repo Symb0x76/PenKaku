@@ -39,6 +39,8 @@ pub struct AppState {
     pub font_set: Arc<FontSet>,
     /// Bumped whenever `font_set` changes, so views know to lay out again.
     pub font_set_gen: u64,
+    /// Fonts named by characters' own 字体 (`None`: no such local font), loaded on first use.
+    pub run_fonts: HashMap<String, Option<Arc<Font>>>,
     pub templates: TemplateStore,
     /// Where templates are kept: one SVG each (`Documents/chixie-rs/Templates` + extra folders).
     pub template_lib: chixie_rs_template::library::TemplateLibrary,

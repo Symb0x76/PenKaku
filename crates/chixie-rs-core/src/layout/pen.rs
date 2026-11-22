@@ -1,9 +1,9 @@
 //! Line and page bookkeeping while laying out.
 
-use super::{Align, CELL_BREAK, CellBox, CellFit, CellInfo, CharBox, Document, EM_UNITS, Guide, LineInfo, Page, PageBox, PageParams, Ruling, Tuning, VAlign};
+use super::{Align, CELL_BREAK, CellBox, CellFit, CellInfo, CharBox, CharStyle, Document, EM_UNITS, Guide, LineInfo, Page, PageBox, PageParams, Ruling, SUB_DROP, SUPER_RAISE, Script, Tuning, VAlign};
 use crate::font::fontset::Glyphs;
 use crate::font::{Font, Glyph};
-use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, is_cjk, rng_for};
+use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, SALT_RULE, is_cjk, rng_for};
 
 /// Ruled columns as (left x, width) in mm: `widths` when it names every column (scaled down if
 /// they overrun the page), else `columns` equal columns `gap` apart.
@@ -31,6 +31,9 @@ pub(crate) fn column_spans(page_w: f32, columns: u32, gap: f32, widths: &[f32]) 
 pub(super) struct Pen<'p> {
     pub(super) p: &'p PageParams,
     pub(super) chars: &'p [char],
+    pub(super) ids: &'p [u64],
+    /// 字符格式 per char (missing = plain): underline / strike-through are drawn per line.
+    pub(super) styles: &'p [Option<CharStyle>],
     /// Alignment of the paragraph the current line belongs to.
     pub(super) align: Align,
     /// Index into `page.strokes` of the current line's first stroke.
@@ -347,6 +350,7 @@ impl Pen<'_> {
 
     pub(super) fn close_line(&mut self, end: usize, wrapped: bool) {
         self.align_line(wrapped);
+        self.rule_strokes();
         let (_, oy) = self.p.origin;
         self.doc.lines.push(LineInfo {
             page: self.page_ix,
@@ -355,6 +359,61 @@ impl Pen<'_> {
             start: self.line_start,
             end,
         });
+    }
+
+    /// 下划线 / 删除线 on the line being closed: one hand-drawn stroke per run of chars that has
+    /// it, at the glyph foot / mid-height, written like ink and tagged to the run's last char.
+    fn rule_strokes(&mut self) {
+        type Pick = fn(&CharStyle) -> bool;
+        if self.styles.iter().all(|s| s.is_none_or(|s| !s.underline && !s.strike)) {
+            return;
+        }
+        let li = self.doc.lines.len();
+        let n = self.doc.boxes.len();
+        let on = |k: usize, f: Pick| {
+            self.styles.get(k).copied().flatten().is_some_and(|s| f(&s)) && self.doc.boxes[k].line == li && !matches!(self.chars[k], '\n' | CELL_BREAK)
+        };
+        let oy = self.p.origin.1;
+        let mut add = Vec::new();
+        let picks: [(Pick, f32); 2] = [(|s| s.underline, 1.12), (|s| s.strike, 0.55)];
+        for (f, depth) in picks {
+            let y = oy - (self.text_top + depth * self.em);
+            let mut k = self.line_start.min(n);
+            while k < n {
+                if !on(k, f) {
+                    k += 1;
+                    continue;
+                }
+                let first = k;
+                while k + 1 < n && on(k + 1, f) {
+                    k += 1;
+                }
+                let (x0, x1) = (self.doc.boxes[first].x0, self.doc.boxes[k].x1);
+                add.push((self.rule_line(x0, x1, y, self.ids.get(k).copied().unwrap_or(k as u64)), k));
+                k += 1;
+            }
+        }
+        for (s, k) in add {
+            self.page.strokes.push(s);
+            self.page.stroke_chars.push(k);
+        }
+    }
+
+    /// A ruled stroke from `x0` to `x1` at `y` (machine mm); wavers a little with handwriting on.
+    fn rule_line(&self, x0: f32, x1: f32, y: f32, id: u64) -> Vec<(f32, f32)> {
+        if !self.p.style.enabled || x1 - x0 < 1.0 {
+            return vec![(x0, y), (x1, y)];
+        }
+        let mut rng = rng_for(self.p.style.seed, SALT_RULE, id);
+        let tilt = (rng.unit() - 0.5) * 0.4;
+        let n = ((x1 - x0) / 4.0).ceil().max(2.0) as usize;
+        (0..=n)
+            .map(|j| {
+                let t = j as f32 / n as f32;
+                let wobble = if j == 0 || j == n { 0.0 } else { (rng.unit() - 0.5) * 0.24 };
+                (x0 + (x1 - x0) * t, y + tilt * (t - 0.5) + wobble)
+            })
+            .collect()
     }
 
     /// Finish the line at caret index `end`; the next line starts at char `next`.
@@ -423,20 +482,27 @@ impl Pen<'_> {
 }
 
 /// Place one glyph's strokes with its left edge at `x` (mm from origin) on the current line,
-/// glyph units scaled `sx` across and `sy` down.
-fn draw_scaled(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, sx: f32, sy: f32) {
+/// glyph units scaled `sx` across and `sy` down; `shear` leans it about its foot.
+#[allow(clippy::too_many_arguments)]
+fn draw_scaled(pen: &mut Pen, strokes: &[Vec<(f32, f32)>], x: f32, voff: f32, sx: f32, sy: f32, shear: f32) {
     let (ox, oy) = pen.p.origin;
     let top = pen.text_top;
     for stroke in strokes {
-        pen.page.strokes.push(stroke.iter().map(|&(gx, gy)| (ox + x + gx * sx, oy - (top + voff + gy * sy))).collect());
+        let pts = if shear == 0.0 {
+            stroke.iter().map(|&(gx, gy)| (ox + x + gx * sx, oy - (top + voff + gy * sy))).collect()
+        } else {
+            stroke.iter().map(|&(gx, gy)| (ox + x + gx * sx + shear * (EM_UNITS - gy) * sy, oy - (top + voff + gy * sy))).collect()
+        };
+        pen.page.strokes.push(pts);
     }
 }
 
 /// Draw `ch` at `x` with glyph units scaled `sx` across and `sy` down, `voff` mm lower than the
-/// line's text top, plus its jitter and deformation as configured. A char the font lacks is
+/// line's text top, plus its jitter and deformation as configured, its 字符微调 `t` and its
+/// 字符格式 `st` (size, script, tilt; the foot stays on the line). A char the font lacks is
 /// listed as missing and draws nothing.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32, t: Tuning) {
+pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut Jitter, ch: char, id: u64, x: f32, sx: f32, sy: f32, voff: f32, t: Tuning, st: CharStyle) {
     // Spaces (a half space sharing a grid cell) draw nothing and are never missing.
     if ch.is_whitespace() {
         return;
@@ -450,6 +516,17 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
         return;
     };
     let p = pen.p;
+    let (sx, sy, voff) = if st.is_plain() {
+        (sx, sy, voff)
+    } else {
+        let (f, em) = (st.factor(), EM_UNITS * sy);
+        let lift = match st.script {
+            Script::None => 0.0,
+            Script::Super => -SUPER_RAISE * em,
+            Script::Sub => SUB_DROP * em,
+        };
+        (sx * f, sy * f, voff + (1.0 - f) * em + lift)
+    };
     // 字符微调: move, then scale about the glyph's bottom-left (the top moves, the foot stays).
     let (x, voff) = (x + t.dx_mm, voff + t.dy_mm + (1.0 - t.scale) * super::EM_UNITS * sy);
     let (sx, sy) = (sx * t.scale * t.width, sy * t.scale);
@@ -459,9 +536,9 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
     let voff = voff + if p.style.enabled { jit.vertical(id, x, row_w) } else { 0.0 };
     if p.deformation.is_active() {
         let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), sy, &mut rng_for(p.style.seed, SALT_DEFORM, deform_id));
-        draw_scaled(pen, &strokes, x, voff, sx, sy);
+        draw_scaled(pen, &strokes, x, voff, sx, sy, st.shear());
     } else {
-        draw_scaled(pen, &glyph.strokes, x, voff, sx, sy);
+        draw_scaled(pen, &glyph.strokes, x, voff, sx, sy, st.shear());
     }
 }
 

@@ -12,7 +12,7 @@ use std::ops::Range;
 use chixie_rs_core::handwriting::is_cjk;
 use chixie_rs_core::layout::CELL_BREAK;
 
-use crate::model::{Tuning, Align, Attrs, Command, Document, Para};
+use crate::model::{Tuning, Align, Attrs, CharStyle, Command, Document, Para};
 
 /// One undo (or redo) step: commands to apply in reverse order, and the selection to restore.
 #[derive(Debug, Clone)]
@@ -372,6 +372,16 @@ impl EditDoc {
     /// 字符微调 per char, for layout.
     pub fn tunings(&self) -> Vec<Option<Tuning>> {
         (0..self.len()).map(|i| self.doc.attrs(i).tuning).collect()
+    }
+
+    /// 字符格式 per char for layout; sizes relative to `base_pt` (the document's size).
+    pub fn styles(&self, base_pt: f32) -> Vec<Option<CharStyle>> {
+        (0..self.len()).map(|i| self.doc.attrs(i).char_style(base_pt)).collect()
+    }
+
+    /// (char id, font name) of every char with its own 字体.
+    pub fn char_fonts(&self) -> Vec<(u64, &str)> {
+        (0..self.len()).filter_map(|i| self.doc.attrs(i).font.as_deref().map(|f| (self.doc.ids()[i], f))).collect()
     }
 
     /// 字符微调 of the selected chars (one undo step); an identity result clears it.

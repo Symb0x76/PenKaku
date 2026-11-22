@@ -94,6 +94,8 @@ impl ChixieRsApp {
                 let pairs: Vec<(FontKey, Arc<Font>)> = loaded.iter().map(|(k, font, _)| (k.clone(), font.clone())).collect();
                 st.font_set = Arc::new(FontSet::build(&pairs, &f.roles, &f.mix, f.mix_salt));
                 st.font_set_gen += 1;
+                // 字体优化 may have changed: load the characters' own fonts again.
+                st.run_fonts.clear();
                 let main = f.roles.main.as_ref().and_then(|m| loaded.iter().find(|(k, ..)| k == m)).or(loaded.first());
                 st.active_font = main.map(|(k, font, name)| ActiveFont { id: k.local_id(), name: name.clone(), font: font.clone() });
                 if let Some(a) = &st.active_font

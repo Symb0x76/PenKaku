@@ -22,7 +22,7 @@ use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use chixie_rs_core::layout::CELL_BREAK;
 
-use crate::model::{Align, Attrs, Char, Document, Para};
+use crate::model::{Align, Attrs, Char, Document, Para, Script};
 
 /// Namespace of our custom XML part.
 pub const NS: &str = "urn:chixie-rs:doc:1";
@@ -159,6 +159,16 @@ fn run_props(a: &Attrs) -> String {
         let f = esc(f);
         p += &format!(r#"<w:rFonts w:ascii="{f}" w:hAnsi="{f}" w:eastAsia="{f}" w:cs="{f}"/>"#);
     }
+    // CT_RPr order: rFonts, b, i, strike, color, …, u, vertAlign.
+    if a.title {
+        p += "<w:b/>";
+    }
+    if a.tilt > 0 {
+        p += "<w:i/>";
+    }
+    if a.strike {
+        p += "<w:strike/>";
+    }
     if let Some(c) = a.colour {
         p += &format!(r#"<w:color w:val="{:02X}{:02X}{:02X}"/>"#, c[0], c[1], c[2]);
     }
@@ -168,6 +178,14 @@ fn run_props(a: &Attrs) -> String {
     }
     if let Some(v) = a.v_offset {
         p += &format!(r#"<w:position w:val="{}"/>"#, (v / MM_PER_PT * 2.0).round() as i64);
+    }
+    if a.underline {
+        p += r#"<w:u w:val="single"/>"#;
+    }
+    match a.script {
+        Script::None => {}
+        Script::Super => p += r#"<w:vertAlign w:val="superscript"/>"#,
+        Script::Sub => p += r#"<w:vertAlign w:val="subscript"/>"#,
     }
     if p.is_empty() { p } else { format!("<w:rPr>{p}</w:rPr>") }
 }
@@ -378,6 +396,11 @@ fn predefined(name: &str) -> Option<char> {
     })
 }
 
+/// A Word on/off property (`<w:b/>`, `<w:i w:val="0"/>`): on unless its value says off.
+fn on_off(e: &BytesStart) -> Result<bool, Error> {
+    Ok(!matches!(attr(e, "w:val")?.as_deref(), Some("0" | "false" | "off")))
+}
+
 /// Characters with their Word formatting, and the paragraph records.
 type Parsed = (Vec<(char, Attrs)>, Vec<Para>);
 
@@ -458,6 +481,17 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
                     });
                 }
                 b"w:sz" if in_rpr => run.size_pt = attr(&e, "w:val")?.and_then(|v| v.parse::<f32>().ok()).map(|hp| hp / 2.0),
+                b"w:b" if in_rpr => run.title = on_off(&e)?,
+                b"w:i" if in_rpr => run.tilt = i8::from(on_off(&e)?),
+                b"w:strike" if in_rpr => run.strike = on_off(&e)?,
+                b"w:u" if in_rpr => run.underline = !matches!(attr(&e, "w:val")?.as_deref(), Some("none")),
+                b"w:vertAlign" if in_rpr => {
+                    run.script = match attr(&e, "w:val")?.as_deref() {
+                        Some("superscript") => Script::Super,
+                        Some("subscript") => Script::Sub,
+                        _ => Script::None,
+                    };
+                }
                 b"w:position" if in_rpr => {
                     run.v_offset = attr(&e, "w:val")?.and_then(|v| v.parse::<f32>().ok()).map(|hp| hp / 2.0 * MM_PER_PT);
                 }
@@ -600,8 +634,11 @@ mod tests {
 
     fn sample() -> Document {
         let mut d = Document::from_text("你好，chixie-rs！\n第二段\t制表 & <符号>\n");
-        let red = Attrs { colour: Some([200, 0, 0]), size_pt: Some(14.5), font: Some("楷体".into()), v_offset: Some(-0.7), combine_next: false, tuning: None };
+        let red = Attrs { colour: Some([200, 0, 0]), size_pt: Some(14.5), font: Some("楷体".into()), v_offset: Some(-0.7), tilt: 1, underline: true, strike: true, script: Script::Super, title: true, ..Attrs::default() };
         d.apply(Command::SetAttrs { at: 0, attrs: vec![red; 2] });
+        // 左倾斜 and 下标 on "，".
+        let left = Attrs { tilt: -1, script: Script::Sub, ..Attrs::default() };
+        d.apply(Command::SetAttrs { at: 2, attrs: vec![left] });
         // 合并内容 on "ch" (custom part only).
         let joined = Attrs { combine_next: true, ..Attrs::default() };
         d.apply(Command::SetAttrs { at: 3, attrs: vec![joined] });
@@ -638,6 +675,12 @@ mod tests {
         assert_eq!(chars[0].1.colour, Some([200, 0, 0]));
         assert_eq!(chars[0].1.size_pt, Some(14.5));
         assert!((chars[0].1.v_offset.unwrap() + 0.7).abs() < 0.2);
+        let a = &chars[0].1;
+        assert_eq!((a.tilt, a.underline, a.strike, a.script, a.title), (1, true, true, Script::Super, true));
+        // Word has no left tilt: only the custom part keeps it.
+        assert_eq!((chars[3].1.tilt, chars[3].1.script), (0, Script::Sub)); // "啊" went in at 1
+        assert!(xml.contains("<w:b/><w:i/><w:strike/>"));
+        assert!(xml.contains(r#"<w:u w:val="single"/><w:vertAlign w:val="superscript"/>"#));
         assert_eq!(paras[1].align, Align::Center);
         assert!((paras[1].first_indent.unwrap() - 16.25).abs() < 0.02);
     }

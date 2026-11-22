@@ -16,7 +16,11 @@ use chixie_rs_core::config::{PageSettings, Settings};
 use chixie_rs_doc::EditDoc;
 use chixie_rs_core::handwriting::StyleFile;
 use chixie_rs_template::Template;
+use chixie_rs_core::font::Font;
+use chixie_rs_core::font::fix;
+use chixie_rs_core::font::fontset::RunFonts;
 use chixie_rs_core::layout::{self, Document};
+use chixie_rs_doc::model::PT_PER_SIZE;
 use gpui_kit::*;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
@@ -279,11 +283,44 @@ impl DocView {
         // Every font in use (roles, mix, fallbacks); empty until one is chosen.
         let fonts = st.font_set.clone();
         self.has_font = !fonts.is_empty();
-        let joins = self.doc.joins();
-        let tuning = self.doc.tunings();
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning };
-        self.layout = Arc::new(layout::layout_flow(&flow, &*fonts, &params));
+        self.load_run_fonts(cx);
+        self.layout = Arc::new(self.lay_out(&params, cx));
         cx.notify();
+    }
+
+    /// Lay the document out with `params`: text, paragraphs, 合并内容, 字符微调, 字符格式 and the
+    /// characters' own fonts.
+    fn lay_out(&self, params: &layout::PageParams, cx: &App) -> Document {
+        let st = cx.global::<AppState>();
+        let (joins, tuning) = (self.doc.joins(), self.doc.tunings());
+        let styles = self.doc.styles(st.settings.page.font_size * PT_PER_SIZE);
+        let by_id = self.doc.char_fonts().into_iter().filter_map(|(id, n)| st.run_fonts.get(n).cloned().flatten().map(|f| (id, f))).collect();
+        let fonts = RunFonts { base: &*st.font_set, by_id };
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning, styles: &styles };
+        layout::layout_flow(&flow, &fonts, params)
+    }
+
+    /// Load the fonts characters name (字体) that are not cached yet; the main font is the
+    /// document's own. A name with no local font is remembered as missing.
+    fn load_run_fonts(&self, cx: &mut App) {
+        let st = cx.global::<AppState>();
+        let main = st.active_font.as_ref().map(|a| a.name.as_str());
+        let mut names: Vec<String> = self.doc.char_fonts().into_iter().map(|(_, n)| n).filter(|n| Some(*n) != main && !st.run_fonts.contains_key(*n)).map(str::to_owned).collect();
+        names.sort();
+        names.dedup();
+        if names.is_empty() {
+            return;
+        }
+        let (store, fixes) = (st.fonts.clone(), st.settings.fonts.fix);
+        let loaded: Vec<(String, Option<Arc<Font>>)> = names
+            .into_iter()
+            .map(|n| {
+                let font = store.id_of(&n).and_then(|id| store.load(id).inspect_err(|e| log::warn!("loading font {n}: {e}")).ok());
+                let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }));
+                (n, font)
+            })
+            .collect();
+        cx.global_mut::<AppState>().run_fonts.extend(loaded);
     }
 
     /// After any text change: relayout, keep the caret visible, mark the draft dirty.
@@ -512,9 +549,7 @@ impl DocView {
     pub fn trial_cell(&self, t: &Template, seg: usize, cx: &App) -> Option<layout::CellInfo> {
         let st = cx.global::<AppState>();
         let params = st.settings.page_params_with(t.ruling());
-        let (joins, tuning) = (self.doc.joins(), self.doc.tunings());
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning };
-        layout::layout_flow(&flow, &*st.font_set, &params).cells.into_iter().find(|c| c.seg == seg)
+        self.lay_out(&params, cx).cells.into_iter().find(|c| c.seg == seg)
     }
     fn combine(&mut self, _: &Combine, window: &mut Window, cx: &mut Context<Self>) {
         match self.doc.toggle_combine() {

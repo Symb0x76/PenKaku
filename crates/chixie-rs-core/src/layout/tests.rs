@@ -314,7 +314,7 @@ fn combined_chars_share_one_cell_squeezed() {
     let chars: Vec<char> = "你好世界".chars().collect();
     let ids = [0, 1, 2, 3];
     let joins = [true, true, false, false];
-    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins, tuning: &[] }, &grid_font(), &grid_params(false));
+    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins, tuning: &[], styles: &[] }, &grid_font(), &grid_params(false));
     let w = 10.0 / 3.0;
     let want = [0.0, w, 2.0 * w, 10.0];
     assert!(box_x0s(&doc).iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4), "{:?}", box_x0s(&doc));
@@ -451,7 +451,7 @@ fn tuning_moves_resizes_and_rerolls_one_char() {
     let chars: Vec<char> = "你好你".chars().collect();
     let ids = [1, 2, 3];
     let p = PageParams { deformation: Deformation { enabled: true, base: true, ..Default::default() }, ..Default::default() };
-    let lay = |t: Option<Tuning>| layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &[], tuning: &[None, t, None] }, &font, &p);
+    let lay = |t: Option<Tuning>| layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &[], tuning: &[None, t, None], styles: &[] }, &font, &p);
     let plain = lay(None);
     let ink = |d: &Document, c: usize| -> Vec<(f32, f32)> {
         d.pages[0].strokes.iter().zip(&d.pages[0].stroke_chars).filter(|(_, k)| **k == c).flat_map(|(s, _)| s.iter().copied()).collect()
@@ -572,4 +572,95 @@ fn cell_break_is_a_line_break_outside_tables() {
     let doc = layout(&format!("X{CELL_BREAK}X"), &x_font(), &PageParams::default());
     assert_eq!(doc.lines.len(), 2);
     assert!(doc.cells.is_empty());
+}
+
+fn styled(text: &str, styles: &[Option<CharStyle>], font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
+    let chars: Vec<char> = text.chars().collect();
+    let ids: Vec<u64> = (0..chars.len() as u64).collect();
+    layout_flow(&Flow { chars: &chars, ids: &ids, styles, ..Default::default() }, font, p)
+}
+
+#[test]
+fn double_size_char_advances_twice_as_far() {
+    let big = Some(CharStyle { scale: 2.0, ..Default::default() });
+    let d = styled("XXX", &[None, big, None], &x_font(), &PageParams::default());
+    let w: Vec<f32> = d.boxes.iter().map(|b| b.x1 - b.x0).collect();
+    assert_eq!(w, vec![5.0, 10.0, 5.0]);
+    // Its foot stays on the line: the stroke ends at the plain char's foot height.
+    let foot = |k: usize| d.pages[0].strokes[k][1].1;
+    assert!((foot(1) - foot(0)).abs() < 1e-4, "{} {}", foot(0), foot(1));
+}
+
+#[test]
+fn plain_styles_change_nothing() {
+    let p = PageParams::default();
+    let a = layout("XX X", &x_font(), &p);
+    let b = styled("XX X", &[Some(CharStyle::default()); 4], &x_font(), &p);
+    assert_eq!(a, b);
+}
+
+#[test]
+fn underline_adds_one_stroke_spanning_the_run() {
+    let u = Some(CharStyle { underline: true, ..Default::default() });
+    let d = styled("XXXX", &[None, u, u, None], &x_font(), &PageParams::default());
+    let page = &d.pages[0];
+    assert_eq!(page.strokes.len(), 5);
+    let line = page.strokes.last().unwrap();
+    assert_eq!((line[0].0, line.last().unwrap().0), (d.boxes[1].x0, d.boxes[2].x1));
+    // Tagged to the run's last char, below the glyph foot.
+    assert_eq!(*page.stroke_chars.last().unwrap(), 2);
+    assert!(line[0].1 < page.strokes[0][1].1);
+    // Strike-through sits inside the glyph's height.
+    let s = Some(CharStyle { strike: true, ..Default::default() });
+    let d = styled("XX", &[s, s], &x_font(), &PageParams::default());
+    let y = d.pages[0].strokes.last().unwrap()[0].1;
+    assert!(y < 0.0 && y > -7.0, "{y}");
+}
+
+#[test]
+fn underline_breaks_at_line_ends() {
+    let u = Some(CharStyle { underline: true, ..Default::default() });
+    let p = PageParams { page: Some(PageBox { width: 11.0, height: 100.0 }), ..Default::default() };
+    let d = styled("XXXX", &[u; 4], &x_font(), &p);
+    // Two lines of two chars: one rule each.
+    assert_eq!(d.lines.len(), 2);
+    assert_eq!(d.pages[0].strokes.len(), 6);
+}
+
+#[test]
+fn tilt_keeps_the_foot_and_moves_the_top() {
+    let r = Some(CharStyle { tilt: 1, ..Default::default() });
+    let plain = layout("X", &x_font(), &PageParams::default());
+    let lean = styled("X", &[r], &x_font(), &PageParams::default());
+    let (a, b) = (&plain.pages[0].strokes[0], &lean.pages[0].strokes[0]);
+    // (0,0) is the top: moved right by tan(12°) × 7; (5,7) is the foot: unchanged.
+    assert!((b[0].0 - a[0].0 - 7.0 * TILT_DEG.to_radians().tan()).abs() < 1e-4);
+    assert_eq!(a[0].1, b[0].1);
+    assert_eq!(a[1], b[1]);
+    let l = styled("X", &[Some(CharStyle { tilt: -1, ..Default::default() })], &x_font(), &PageParams::default());
+    assert!(l.pages[0].strokes[0][0].0 < a[0].0);
+}
+
+#[test]
+fn scripts_shrink_and_shift() {
+    let plain = layout("X", &x_font(), &PageParams::default());
+    let sup = styled("X", &[Some(CharStyle { script: Script::Super, ..Default::default() })], &x_font(), &PageParams::default());
+    let sub = styled("X", &[Some(CharStyle { script: Script::Sub, ..Default::default() })], &x_font(), &PageParams::default());
+    let foot = |d: &Document| d.pages[0].strokes[0][1].1;
+    // y is up: superscript foot above the line, subscript foot below it.
+    assert!(foot(&sup) > foot(&plain) && foot(&sub) < foot(&plain));
+    assert!((sup.boxes[0].x1 - SCRIPT_SCALE * 5.0).abs() < 1e-4);
+    let title = styled("X", &[Some(CharStyle { title: true, ..Default::default() })], &x_font(), &PageParams::default());
+    assert!((title.boxes[0].x1 - TITLE_SCALE * 5.0).abs() < 1e-4);
+}
+
+#[test]
+fn run_font_override_picks_that_fonts_glyph() {
+    use crate::font::fontset::RunFonts;
+    let base = x_font();
+    let other = std::sync::Arc::new(font_with('X', Glyph { advance: 9.0, strokes: vec![vec![(0.0, 0.0)]] }));
+    let fonts = RunFonts { base: &base, by_id: HashMap::from([(1, other)]) };
+    let d = layout("XX", &fonts, &PageParams::default());
+    assert_eq!(d.boxes[0].x1 - d.boxes[0].x0, 5.0);
+    assert_eq!(d.boxes[1].x1 - d.boxes[1].x0, 9.0);
 }

@@ -118,6 +118,7 @@ fn main() {
             active_font: None,
             font_set: Default::default(),
             font_set_gen: 0,
+            run_fonts: Default::default(),
             templates,
             template_lib,
             templates_path,

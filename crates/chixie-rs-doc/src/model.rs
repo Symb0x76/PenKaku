@@ -6,6 +6,10 @@ use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
+/// Points per ChiXie3 font-size unit (字号 100 = 20 pt). `Attrs::size_pt` is in points; the UI
+/// shows ChiXie3 units.
+pub const PT_PER_SIZE: f32 = 0.2;
+
 /// Character formatting. `None` = inherit the document default (today's single font and size).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -24,10 +28,52 @@ pub struct Attrs {
     /// 字符微调 (custom XML part only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tuning: Option<Tuning>,
+    /// 倾斜: −1 left, 0 upright, +1 right (`w:i` = right; left lives in our custom part).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub tilt: i8,
+    /// 下划线 (`w:u`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub underline: bool,
+    /// 删除线 (`w:strike`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub strike: bool,
+    /// 上标 / 下标 (`w:vertAlign`).
+    #[serde(skip_serializing_if = "is_no_script")]
+    pub script: Script,
+    /// 标题 (`w:b`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub title: bool,
+}
+
+fn is_zero(v: &i8) -> bool {
+    *v == 0
+}
+
+fn is_no_script(s: &Script) -> bool {
+    *s == Script::None
+}
+
+impl Attrs {
+    /// How layout draws this char: size relative to `base_pt` (the document's size), tilt,
+    /// rules, script, title. `None` when plain.
+    pub fn char_style(&self, base_pt: f32) -> Option<CharStyle> {
+        let scale = match self.size_pt {
+            Some(s) if base_pt > 0.0 && s > 0.0 => s / base_pt,
+            _ => 1.0,
+        };
+        let st = CharStyle { scale, tilt: self.tilt.signum(), underline: self.underline, strike: self.strike, script: self.script, title: self.title };
+        (!st.is_plain()).then_some(st)
+    }
+
+    /// Only the character formats (字体, 字号, 倾斜, rules, script, 标题) cleared: 清除格式 keeps the
+    /// colour, 合并内容 and 字符微调.
+    pub fn cleared(&self) -> Attrs {
+        Attrs { colour: self.colour, combine_next: self.combine_next, tuning: self.tuning, ..Attrs::default() }
+    }
 }
 
 /// Paragraph formatting lives in core so layout reads it directly.
-pub use chixie_rs_core::layout::{Align, Para, Tuning};
+pub use chixie_rs_core::layout::{Align, CharStyle, Para, Script, Tuning};
 
 /// One character as stored: the glyph, its stable id (keys the handwriting randomness) and its
 /// formatting.
