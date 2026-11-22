@@ -407,6 +407,12 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   `<metadata>`, backgrounds embedded), watched, extra read-only folders, `templates.toml` migrated
   once; 文件 › 新建 gallery (tabs, 标签, 排序, search, 收藏); 导入 / 导出 SVG / ZIP / XLSX
   (`rust_xlsxwriter` 0.102). **M7 is done** apart from the cloud library (backend, M10).
+- **M8 (branch `m8-editor`):** character formats in the model and layout (tilt, rules, scripts,
+  标题, per-char font and size; factors VERIFY until a ChiXie3 capture), formatting ribbon and
+  格式刷, find / replace bar, rich clipboard, page context menu, 单页 / 双页, 行号, 页码, 导入 into
+  the document (txt / docx / pdf / xlsx), PDF export and print (`lopdf` in `chixie-rs-output`;
+  `chixie-rs-cli pdf`; CI sample per OS). Left: the format capture, BOSS's look at the 3 sample
+  PDFs and a printed page (checklist 13i).
 
 ### M8 Files and editor UX (3–4 wk) — spec R3 (UX part)
 - Find/replace with options; Word-style context menu.

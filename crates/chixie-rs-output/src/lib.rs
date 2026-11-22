@@ -2,6 +2,7 @@
 //! resume map. Settings live in `chixie_rs_core::{profile, config}`; this crate only computes.
 
 pub mod emit;
+pub mod pdf;
 pub mod plan;
 
 pub use emit::{PageCode, emit, emit_document, emit_mapped, emit_written, standalone};

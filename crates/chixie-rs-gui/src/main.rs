@@ -18,6 +18,8 @@ mod device_params;
 mod doc_view;
 mod fake;
 mod file_ops;
+mod find_bar;
+mod import_ui;
 mod cloud_preview;
 mod font_preview;
 mod font_lib;
@@ -97,6 +99,7 @@ fn main() {
     gpui_kit::application().with_assets(icons::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         doc_view::bind_keys(cx);
+        find_bar::bind_keys(cx);
         ribbon::set_theme(settings.ui.dark, None, cx);
         // Templates: one SVG each in the library folders; the old templates.toml migrates once.
         let templates_path = TemplateStore::path_next_to(&settings_path);
@@ -118,6 +121,7 @@ fn main() {
             active_font: None,
             font_set: Default::default(),
             font_set_gen: 0,
+            run_fonts: Default::default(),
             templates,
             template_lib,
             templates_path,
@@ -539,6 +543,69 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         cx.update(|cx| cx.global_mut::<AppState>().settings = saved);
         dispatch(cx, vec![Box::new(doc_view::Undo)]);
         println!("AUTOTEST_OUTPUT pens={} serpentine={} rotated={}", output.0, output.1, output.2);
+        // M8 editor: 下划线 adds one stroke; our own copy pastes with its formats; 全部替换 keeps
+        // the other chars' ids; a GB18030 .txt imports; the pages export as PDF. All undone after.
+        cx.background_executor().timer(pause(300)).await;
+        let text_before = cx.update(|cx| app.read(cx).doc.read(cx).doc().text());
+        let _ = cx.update_window(handle, |_, window, cx| {
+            let focus = app.read(cx).doc.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+        });
+        let strokes0 = |cx: &mut App| app.read(cx).doc.read(cx).document().pages.first().map_or(0, |p| p.strokes.len());
+        dispatch(cx, vec![Box::new(doc_view::DocStart), Box::new(doc_view::SelectRight)]);
+        cx.background_executor().timer(pause(300)).await;
+        let n0 = cx.update(strokes0);
+        dispatch(cx, vec![Box::new(doc_view::ToggleUnderline)]);
+        cx.background_executor().timer(pause(300)).await;
+        let underline = cx.update(|cx| strokes0(cx) == n0 + 1 && app.read(cx).doc.read(cx).doc().document().attrs(0).underline);
+        dispatch(cx, vec![Box::new(doc_view::Copy), Box::new(doc_view::DocEnd), Box::new(doc_view::Paste)]);
+        cx.background_executor().timer(pause(300)).await;
+        let paste = cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx).doc();
+            let n = d.len();
+            n > 1 && d.chars()[n - 1] == d.chars()[0] && d.document().attrs(n - 1).underline
+        });
+        dispatch(cx, vec![Box::new(doc_view::Undo), Box::new(doc_view::Undo)]);
+        cx.background_executor().timer(pause(300)).await;
+        let replace = cx.update(|cx| {
+            let view = app.read(cx).doc.clone();
+            let (text0, ids0) = {
+                let d = view.read(cx).doc();
+                (d.chars().to_vec(), d.ids().to_vec())
+            };
+            let Some(&c) = text0.iter().find(|c| !c.is_whitespace()) else { return false };
+            let hits = view.read(cx).doc().find_all(&c.to_string(), chixie_rs_doc::FindOpts::default());
+            let n = hits.len();
+            view.update(cx, |v, cx| v.replace_ranges(hits.into_iter().map(|r| (r, "Ж".to_string())).collect(), cx));
+            let d = view.read(cx).doc();
+            let kept: Vec<u64> = d.chars().iter().zip(d.ids()).filter(|(ch, _)| **ch != 'Ж').map(|(_, id)| *id).collect();
+            let expect: Vec<u64> = text0.iter().zip(&ids0).filter(|(ch, _)| **ch != c).map(|(_, id)| *id).collect();
+            n > 0 && kept == expect && d.chars().iter().filter(|&&ch| ch == 'Ж').count() == n
+        });
+        dispatch(cx, vec![Box::new(doc_view::Undo)]);
+        cx.background_executor().timer(pause(300)).await;
+        let import = cx.update(|cx| {
+            let p = std::env::temp_dir().join("chixie-autotest-import.txt");
+            // 你好 in GB18030.
+            let _ = std::fs::write(&p, [0xC4, 0xE3, 0xBA, 0xC3]);
+            match import_ui::read_import(&p, false) {
+                Ok(import_ui::ImportSource::Chars(c)) => {
+                    let view = app.read(cx).doc.clone();
+                    view.update(cx, |v, cx| v.import_chars(c, chixie_rs_doc::import::ImportMode::Append, cx));
+                    view.read(cx).doc().text().ends_with("你好")
+                }
+                _ => false,
+            }
+        });
+        dispatch(cx, vec![Box::new(doc_view::Undo)]);
+        cx.background_executor().timer(pause(300)).await;
+        let (pdf, restored) = cx.update(|cx| {
+            let a = app.read(cx);
+            let pages = a.doc.read(cx).document().pages.len();
+            let pdf = a.pdf_bytes(cx).ok().and_then(|b| chixie_rs_import::pdf::text(&b).ok()).is_some_and(|t| t.len() == pages);
+            (pdf, a.doc.read(cx).doc().text() == text_before)
+        });
+        println!("AUTOTEST_FORMAT underline={underline} paste={paste} replace_keeps_ids={replace} import_txt={import} pdf={pdf} restored={restored}");
         // Table forms: a 2×2 form; Tab adds a cell; a clipped cell overflows and 批量溢出
         // (shrink) fixes it; a 30-name list makes 30 pages; DOCX keeps the text through Word
         // tables. Template, settings and text are put back.

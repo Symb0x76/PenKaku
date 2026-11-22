@@ -12,7 +12,7 @@ use std::ops::Range;
 use chixie_rs_core::handwriting::is_cjk;
 use chixie_rs_core::layout::CELL_BREAK;
 
-use crate::model::{Tuning, Align, Attrs, Command, Document, Para};
+use crate::model::{Tuning, Align, Attrs, CharStyle, Command, Document, Para};
 
 /// One undo (or redo) step: commands to apply in reverse order, and the selection to restore.
 #[derive(Debug, Clone)]
@@ -107,6 +107,32 @@ impl EditDoc {
     }
     pub fn selected_text(&self) -> String {
         self.chars()[self.selection()].iter().collect()
+    }
+
+    /// The selected chars' formatting, one entry per char (rich copy).
+    pub fn selected_attrs(&self) -> Vec<Attrs> {
+        self.selection().map(|i| self.doc.attrs(i).clone()).collect()
+    }
+
+    /// Paste `text` over the selection with one `attrs` entry per char (rich paste from our own
+    /// copy). Falls back to plain [`insert`](Self::insert) when the counts differ.
+    pub fn insert_with_attrs(&mut self, text: &str, attrs: &[Attrs]) {
+        if text.chars().count() != attrs.len() {
+            self.insert(text);
+            return;
+        }
+        self.checkpoint(LastEdit::None);
+        let sel = self.selection();
+        let mut new = self.doc.new_chars(text, &Attrs::default());
+        for (c, a) in new.iter_mut().zip(attrs) {
+            c.attrs = a.clone();
+        }
+        let n = new.len();
+        let cmd = self.doc.splice_cmd(sel.clone(), new);
+        self.exec(cmd);
+        self.caret = sel.start + n;
+        self.anchor = None;
+        self.marked = None;
     }
 
     /// Move the caret; `extend` keeps/starts a selection from the current anchor.
@@ -215,7 +241,8 @@ impl EditDoc {
     /// Replace `range` with `text` (new ids, formatting of the text before), leaving the caret
     /// after the insertion.
     fn splice(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
-        let attrs = self.doc.attrs_at(range.start);
+        // Replacing takes the formatting of what it replaces (Word); inserting, of the char before.
+        let attrs = if range.is_empty() { self.doc.attrs_at(range.start) } else { self.doc.attrs(range.start).clone() };
         let new = self.doc.new_chars(text, &attrs);
         let n = new.len();
         let start = range.start;
@@ -320,6 +347,35 @@ impl EditDoc {
         self.exec(Command::SetAttrs { at: sel.start, attrs });
     }
 
+    /// One property of the selected chars when they all share it (`None` when they differ: the
+    /// ribbon shows it blank). Without a selection, the property new text at the caret takes.
+    pub fn common<T: PartialEq>(&self, f: impl Fn(&Attrs) -> T) -> Option<T> {
+        let sel = self.selection();
+        if sel.is_empty() {
+            return Some(f(&self.doc.attrs_at(self.caret)));
+        }
+        let first = f(self.doc.attrs(sel.start));
+        sel.skip(1).all(|i| f(self.doc.attrs(i)) == first).then_some(first)
+    }
+
+    /// Turn a format on for the selection, or off when every selected char already has it
+    /// (下划线, 删除线, 标题, …; one undo step).
+    pub fn toggle_attr(&mut self, has: impl Fn(&Attrs) -> bool, set: impl Fn(&mut Attrs, bool)) {
+        let on = self.common(&has) != Some(true);
+        self.set_attrs(|a| set(a, on));
+    }
+
+    /// 清除格式: the selection's character formats back to the document's (colour, 合并内容
+    /// and 字符微调 stay).
+    pub fn clear_format(&mut self) {
+        self.set_attrs(|a| *a = a.cleared());
+    }
+
+    /// 格式刷: give the selection `src`'s character formats.
+    pub fn paint_format(&mut self, src: &Attrs) {
+        self.set_attrs(|a| *a = a.with_formats_of(src));
+    }
+
     /// Align the paragraphs touched by the selection (or holding the caret).
     pub fn set_align(&mut self, align: Align) {
         self.set_paras(|_, p| p.align = align);
@@ -372,6 +428,16 @@ impl EditDoc {
     /// 字符微调 per char, for layout.
     pub fn tunings(&self) -> Vec<Option<Tuning>> {
         (0..self.len()).map(|i| self.doc.attrs(i).tuning).collect()
+    }
+
+    /// 字符格式 per char for layout; sizes relative to `base_pt` (the document's size).
+    pub fn styles(&self, base_pt: f32) -> Vec<Option<CharStyle>> {
+        (0..self.len()).map(|i| self.doc.attrs(i).char_style(base_pt)).collect()
+    }
+
+    /// (char id, font name) of every char with its own 字体.
+    pub fn char_fonts(&self) -> Vec<(u64, &str)> {
+        (0..self.len()).filter_map(|i| self.doc.attrs(i).font.as_deref().map(|f| (self.doc.ids()[i], f))).collect()
     }
 
     /// 字符微调 of the selected chars (one undo step); an identity result clears it.
@@ -734,5 +800,63 @@ mod tests {
         assert!(d.undo());
         assert_eq!(d.text(), "ab-cd-ef");
         assert!(!d.undo());
+    }
+
+    #[test]
+    fn formats_common_toggle_clear_and_paint() {
+        let mut d = EditDoc::from_text("abcd");
+        d.select_range(0..2);
+        assert_eq!(d.common(|a| a.underline), Some(false));
+        d.toggle_attr(|a| a.underline, |a, on| a.underline = on);
+        d.select_range(1..3);
+        // Mixed: blank in the ribbon; toggling turns it on for all.
+        assert_eq!(d.common(|a| a.underline), None);
+        d.toggle_attr(|a| a.underline, |a, on| a.underline = on);
+        assert_eq!(d.common(|a| a.underline), Some(true));
+        d.toggle_attr(|a| a.underline, |a, on| a.underline = on);
+        assert_eq!(d.common(|a| a.underline), Some(false));
+        assert!(d.document().attrs(0).underline);
+        // 清除格式 keeps colour and tuning.
+        d.select_range(0..4);
+        d.set_attrs(|a| {
+            a.size_pt = Some(30.0);
+            a.colour = Some([1, 2, 3]);
+            a.tilt = -1;
+        });
+        d.clear_format();
+        let a = d.document().attrs(0).clone();
+        assert_eq!((a.size_pt, a.tilt, a.underline, a.colour), (None, 0, false, Some([1, 2, 3])));
+        // 格式刷: formats move, tuning stays.
+        let src = Attrs { title: true, font: Some("楷体".into()), ..Attrs::default() };
+        d.select_range(2..3);
+        d.tune(|t| t.dx_mm = 1.0);
+        d.paint_format(&src);
+        let a = d.document().attrs(2);
+        assert!(a.title && a.font.as_deref() == Some("楷体") && a.tuning.is_some());
+        assert!(d.undo());
+        assert!(!d.document().attrs(2).title);
+        // No selection: the caret's formats.
+        d.select_range(3..3);
+        assert_eq!(d.common(|a| a.colour), Some(Some([1, 2, 3])));
+    }
+
+    #[test]
+    fn rich_paste_keeps_each_chars_formats() {
+        let mut d = EditDoc::from_text("ab");
+        d.select_range(1..2);
+        d.set_attrs(|a| a.underline = true);
+        d.select_range(0..2);
+        let (text, attrs) = (d.selected_text(), d.selected_attrs());
+        d.select_range(2..2);
+        d.insert_with_attrs(&text, &attrs);
+        assert_eq!(d.text(), "abab");
+        let u: Vec<bool> = (0..4).map(|i| d.document().attrs(i).underline).collect();
+        assert_eq!(u, vec![false, true, false, true]);
+        assert_eq!(d.caret(), 4);
+        assert!(d.undo());
+        assert_eq!(d.text(), "ab");
+        // A count mismatch pastes plain text.
+        d.insert_with_attrs("xyz", &attrs);
+        assert_eq!(d.text(), "abxyz");
     }
 }

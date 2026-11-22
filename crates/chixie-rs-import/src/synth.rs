@@ -281,6 +281,22 @@ pub fn pdf_forms(forms: &[Form], style: Style) -> Vec<u8> {
 }
 
 /// An A4 PDF holding only `img`, stretched over the page (a scanned form).
+/// One page per line of text in Helvetica (an empty line: a page without text).
+pub fn pdf_with_text(lines: &[&str]) -> Vec<u8> {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding" });
+    let kids = lines
+        .iter()
+        .map(|t| {
+            let ops = if t.is_empty() { String::new() } else { format!("BT /F1 12 Tf 72 700 Td ({t}) Tj ET") };
+            let c = doc.add_object(Stream::new(dictionary! {}, ops.into_bytes()));
+            doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id, "Contents" => c, "MediaBox" => media(), "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } } }).into()
+        })
+        .collect();
+    finish(doc, pages_id, kids)
+}
+
 pub fn pdf_with_image(img: &GrayImage) -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();

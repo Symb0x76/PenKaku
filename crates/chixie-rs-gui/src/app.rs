@@ -4,6 +4,8 @@
 //! Session and device events are pumped here and fanned out to views + toasts.
 
 mod backstage;
+mod print;
+pub(crate) mod menu;
 pub(crate) mod fonts_ctl;
 mod resume;
 mod sd;
@@ -26,7 +28,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, Selectable as _, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -84,6 +86,8 @@ pub struct ChixieRsApp {
     font_select: Entity<SelectState<Vec<FontItem>>>,
     /// Font ids, parallel to the font select's items.
     font_ids: Vec<i64>,
+    /// What the font / size boxes last showed (selection?, font, size): see `sync_format_boxes`.
+    format_shown: Option<(bool, Option<Option<String>>, Option<f32>)>,
     /// Local fonts whose preview is being built in the background.
     previews_pending: std::collections::HashSet<i64>,
     style_dialog: Entity<StyleDialog>,
@@ -97,6 +101,9 @@ pub struct ChixieRsApp {
     pub(crate) resume: resume::Resume,
     /// The 字符微调 card is shown in the task pane.
     tune_open: bool,
+    /// 查找 / 替换 bar above the page.
+    find_bar: Entity<crate::find_bar::FindBar>,
+    find_open: bool,
     /// Library folders watched for added / removed fonts.
     library_watch: Option<fonts_ctl::LibraryWatch>,
     /// Template folders watched for added / changed / removed templates.
@@ -141,6 +148,7 @@ impl ChixieRsApp {
         let fonts = cx.new(|cx| FontsView::new(window, cx));
         let initial = file_ops::open_draft(&cx.global::<AppState>().settings_path).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
         let doc = cx.new(|cx| DocView::new(initial, window, cx));
+        let find_bar = cx.new(|cx| crate::find_bar::FindBar::new(doc.clone(), window, cx));
         let page = cx.global::<AppState>().settings.page.clone();
         let font_size = cx.new(|cx| InputState::new(window, cx).step(5.0).min(5.0).max(1000.0).default_value(fmt_num(page.font_size)));
         let line_height = cx.new(|cx| InputState::new(window, cx).step(0.25).min(1.0).max(200.0).default_value(fmt_num(page.line_height)));
@@ -191,15 +199,21 @@ impl ChixieRsApp {
                     cx.notify();
                 }
             }),
-            // The 断点续写 card shows the selected character.
-            cx.observe(&doc, |t, _, cx| {
+            // The 断点续写 card shows the selected character; the font and size boxes show the
+            // selection's.
+            cx.observe_in(&doc, window, |t, _, window, cx| {
                 if t.resume.open {
                     cx.notify();
                 }
+                t.sync_format_boxes(window, cx);
             }),
             cx.subscribe_in(&font_size, window, |this, s, ev: &InputEvent, _w, cx| {
                 if let (InputEvent::Change, Some(v)) = (ev, parse_in(s, cx, 5.0, 1000.0)) {
-                    this.edit_settings(cx, |st| st.settings.page.font_size = v);
+                    if this.doc.read(cx).doc().selection().is_empty() {
+                        this.edit_settings(cx, |st| st.settings.page.font_size = v);
+                    } else {
+                        this.doc.update(cx, |d, cx| d.set_run_size(v, cx));
+                    }
                 }
             }),
             cx.subscribe_in(&line_height, window, |this, s, ev: &InputEvent, _w, cx| {
@@ -227,6 +241,12 @@ impl ChixieRsApp {
                 FontsEvent::Login => {
                     window.close_dialog(cx);
                     this.open_backstage(Stage::Account, window, cx);
+                }
+            }),
+            cx.subscribe(&find_bar, |this, _b, ev: &crate::find_bar::FindBarEvent, cx| match ev {
+                crate::find_bar::FindBarEvent::Close => {
+                    this.find_open = false;
+                    cx.notify();
                 }
             }),
             cx.subscribe_in(&templates, window, |this, _v, ev: &TemplateEvent, window, cx| match ev {
@@ -257,6 +277,7 @@ impl ChixieRsApp {
             line_height,
             font_select,
             font_ids: Vec::new(),
+            format_shown: None,
             previews_pending: Default::default(),
             style_dialog,
             backstage_focus: cx.focus_handle(),
@@ -265,6 +286,8 @@ impl ChixieRsApp {
             win_title: String::new(),
             resume: Default::default(),
             tune_open: false,
+            find_bar,
+            find_open: false,
             library_watch: None,
             template_watch: None,
             gallery,
@@ -364,6 +387,44 @@ impl ChixieRsApp {
         cx.notify();
     }
 
+    /// 查找 (or 替换): show the bar and focus its search box.
+    pub(crate) fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.backstage.is_some() {
+            return;
+        }
+        self.find_open = true;
+        self.find_bar.update(cx, |b, cx| b.open(replace, window, cx));
+        cx.notify();
+    }
+
+    /// The font select and size box show the selection's font and size (blank when mixed), or
+    /// the document's without a selection. Only touched when that changes.
+    fn sync_format_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let fs = self.doc.read(cx).format_state(cx);
+        let key = (fs.selected, fs.font.clone(), fs.size);
+        if self.format_shown.as_ref() == Some(&key) {
+            return;
+        }
+        self.format_shown = Some(key);
+        let st = cx.global::<AppState>();
+        let main = st.active_font.as_ref().map(|f| f.id);
+        let (font, size) = if fs.selected {
+            let font = match &fs.font {
+                Some(Some(name)) => st.fonts.id_of(name),
+                Some(None) => main,
+                None => None,
+            };
+            (font, fs.size.map(fmt_num).unwrap_or_default())
+        } else {
+            (main, fmt_num(st.settings.page.font_size))
+        };
+        let selected = font.and_then(|id| self.font_ids.iter().position(|&x| x == id)).map(IndexPath::new);
+        self.font_select.update(cx, |s, cx| s.set_selected_index(selected, window, cx));
+        if self.font_size.read(cx).value().as_ref() != size {
+            self.font_size.update(cx, |s, cx| s.set_value(size, window, cx));
+        }
+    }
+
     /// Font picker items = downloaded fonts, then collected fonts not yet downloaded (marked
     /// 云端, login needed); selection = the active font.
     fn sync_font_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -440,6 +501,17 @@ impl ChixieRsApp {
     }
 
     fn choose_font(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.doc.read(cx).doc().selection().is_empty() {
+            // The selection's own font: a downloaded one; the main font = the document's.
+            let st = cx.global::<AppState>();
+            let main = st.active_font.as_ref().map(|f| f.id) == Some(id);
+            match st.fonts.name_of(id) {
+                _ if main => self.doc.update(cx, |d, cx| d.set_run_font(None, cx)),
+                Some(name) => self.doc.update(cx, |d, cx| d.set_run_font(Some(name), cx)),
+                None => window.push_notification(Notification::info("请先下载这个字体，再设为所选文字的字体"), cx),
+            }
+            return;
+        }
         if cx.global::<AppState>().active_font.as_ref().map(|f| f.id) != Some(id) {
             self.use_font_id(id, window, cx);
         }
@@ -1108,6 +1180,16 @@ impl ChixieRsApp {
                 )
             })
             .child(div().flex_1())
+            .child({
+                let double = cx.global::<AppState>().settings.ui.double_page;
+                h_flex()
+                    .child(ribbon::icon_btn("sb-single", IconName::File, "单页").selected(!double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = false)
+                    })))
+                    .child(ribbon::icon_btn("sb-double", IconName::Columns2, "双页").selected(double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = true)
+                    })))
+            })
             .child(ribbon::icon_btn("sb-zout", IconName::Minus, "缩小").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.zoom_by(1.0 / 1.1, cx))))
             .child(div().w(px(110.)).px_1().child(Slider::new(&self.zoom_slider)))
             .child(ribbon::icon_btn("sb-zin", IconName::Plus, "放大").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.zoom_by(1.1, cx))))
@@ -1229,7 +1311,14 @@ impl Render for ChixieRsApp {
                         .min_h_0()
                         .border_t_1()
                         .border_color(border.opacity(0.6))
-                        .child(div().flex_1().h_full().min_w_0().child(self.doc.clone()))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .h_full()
+                                .min_w_0()
+                                .when(self.find_open, |el| el.child(self.find_bar.clone()))
+                                .child(div().flex_1().min_h_0().w_full().child(self.doc.clone())),
+                        )
                         .when(self.show_pane, |el| el.child(self.task_pane(cx))),
                 )
                 .child(self.status_bar(cx))
@@ -1240,6 +1329,9 @@ impl Render for ChixieRsApp {
             .bg(bg)
             .text_color(fg)
             .on_action(cx.listener(|t, _: &doc_view::Save, w, cx| t.save_doc(false, w, cx)))
+            .map(|el| self.menu_actions(el, cx))
+            .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_find(false, w, cx)))
+            .on_action(cx.listener(|t, _: &crate::find_bar::OpenReplace, w, cx| t.open_find(true, w, cx)))
             .child(title_bar)
             .child(body);
         if cfg!(target_os = "linux") {

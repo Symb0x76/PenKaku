@@ -112,6 +112,15 @@ pub struct UiSettings {
     pub locale: String,
     /// Draw template ruling (rows / grid) in the editor.
     pub show_guides: bool,
+    /// 双页: two pages side by side in the editor.
+    pub double_page: bool,
+    /// 行号 in the left margin (preview only).
+    pub line_numbers: bool,
+    /// 页码 under each page (preview only).
+    pub page_numbers: bool,
+    /// 导出 PDF / 打印: 打印文字 (the handwriting) and 打印背景图 (the template's ruling).
+    pub print_text: bool,
+    pub print_background: bool,
 }
 
 impl Default for DeviceSettings {
@@ -129,7 +138,7 @@ impl Default for PageSettings {
 
 impl Default for UiSettings {
     fn default() -> Self {
-        Self { dark: false, locale: "zh-CN".into(), show_guides: true }
+        Self { dark: false, locale: "zh-CN".into(), show_guides: true, double_page: false, line_numbers: false, page_numbers: false, print_text: true, print_background: true }
     }
 }
 

@@ -81,6 +81,18 @@ impl Resume {
 }
 
 impl ChixieRsApp {
+    /// 从这里断点续写 (page menu): the char at the caret becomes the pick, unless one is selected.
+    pub(crate) fn resume_here(&mut self, cx: &mut Context<Self>) {
+        self.doc.update(cx, |d, cx| {
+            let doc = d.doc();
+            if doc.selection().is_empty() && doc.caret() < doc.len() {
+                let i = doc.caret();
+                d.select(i..i + 1, cx);
+            }
+        });
+        self.open_resume(cx);
+    }
+
     pub(crate) fn open_resume(&mut self, cx: &mut Context<Self>) {
         (self.resume.open, self.show_pane) = (true, true);
         cx.notify();

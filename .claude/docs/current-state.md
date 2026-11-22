@@ -263,7 +263,7 @@
     `template_assets/`, 内边距识别, 透明度); `TablePage.background`. Autotest `AUTOTEST_DETECT` (CI uses grep -F).
   - Open: real forms from BOSS (photos with strong perspective are the risk), thumbnails, 截图生成, 占位符识别.
 - **M7b merged 2026-11-18** (`fc2076d`).
-- **M7c in progress (2026-11-18), branch `m7c-library`:**
+- **M7c merged 2026-11-18** (`120ba7e`). Details:
   - Template crate: `svg.rs` (template ↔ SVG; TOML in `<metadata id="chixie-template">`, backgrounds as data URIs
     restored into the assets folder by FNV hash), `library.rs` (TemplateLibrary: scan / save / remove / sync /
     import SVG-ZIP-XLSX-cx / export SVG-XLSX-ZIP / move_default / migrate_toml / load_store), `xlsx_template.rs`
@@ -272,3 +272,19 @@
     `app/templates_ctl.rs` (watch, folders, gallery `bs_gallery`, `gallery_list`), templates_view import / export /
     tags; 选项 › 模板. Demo / autotest use `<temp>/chixie-rs-demo/Templates`. `AUTOTEST_LIBRARY`.
   - Open: cloud library (M10), thumbnails, 同型 sync, 绘制表格 drag.
+- **M8 (2026-11-22), branch `m8-editor`** (plan `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
+  - Core: `layout::CharStyle` / `Script` / `Flow.styles` (size ratio, 12° tilt, 0.6× scripts, 1.5× 标题, rule
+    strokes per run per line in `pen.rs::rule_strokes`, salt `SALT_RULE`); `fontset::RunFonts` (per-char font by id).
+    Factors are VERIFY (docs/protocol.md "Character formats"); goldens unchanged.
+  - Doc: `Attrs.{tilt, underline, strike, script, title}` + DOCX (w:b/i/strike/u/vertAlign; left tilt custom only),
+    `PT_PER_SIZE` (字号 100 = 20 pt), `EditDoc::{common, toggle_attr, clear_format, paint_format, styles, char_fonts,
+    selected_attrs, insert_with_attrs}`, `find.rs` (FindOpts, find_all, replace_all), `import.rs` (decode_text with
+    encoding_rs GB18030, docx_chars, import_chars 覆盖/追加/插入). Replacing keeps the replaced text's formats.
+  - Output: `pdf.rs` (lopdf vector PDF; 打印文字 / 打印背景图). Import crate: `pdf::text`. CLI `pdf`.
+  - GUI: `doc_view/format.rs` (actions, FormatState, 格式刷), ribbon 字体 row + painter, font / size boxes follow the
+    selection (`sync_format_boxes`), `find_bar.rs`, rich clipboard (JSON metadata `RichClip`), page menu
+    (`app/menu.rs`), 单页 / 双页 (`Geom.cols`), 行号 / 页码 (`paint_numbers`), `import_ui.rs` (+ drop), `app/print.rs`
+    (export / print via the OS viewer). Settings `ui.{double_page, line_numbers, page_numbers, print_text,
+    print_background}`. Autotest `AUTOTEST_FORMAT`; CI uploads `sample-pdf-<OS>`.
+  - Open: ChiXie3 format capture (needs BOSS AFK), BOSS checks the 3 sample PDFs + checklist 13i; the GUI autotest
+    has not run locally (needs AFK; CI runs it).

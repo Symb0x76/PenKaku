@@ -272,6 +272,21 @@ and streamed to the fake Grbl (394 lines).
   `template::tests::table_cells_match_chixie3_capture` (tops within 0.6 mm, left edge within our
   padding .. padding + 2 mm).
 
+## Character formats (not captured yet: VERIFY)
+chixie-rs draws 字符格式 with its own factors until a ChiXie3 capture of one line with each format
+(倾斜, 下划线, 删除线, 上标, 下标, 标题, a size change) pins them (`layout/mod.rs` constants):
+
+| Format | chixie-rs | To pin from the capture |
+|---|---|---|
+| 倾斜 | shear 12° about the glyph foot, right or left | angle, pivot |
+| 下划线 | one stroke per run per line, 0.12 em below the foot | depth, one stroke or per char |
+| 删除线 | one stroke per run per line at 0.55 em | height |
+| 上标 / 下标 | 0.6 × size; foot raised 0.35 em / lowered 0.15 em | size, shift |
+| 标题 | 1.5 × size | factor (or a bolder pen pass) |
+| 字号 | size relative to the page's (字号 100 = 20 pt in DOCX) | that advances scale with size |
+
+Rules waver a little with handwriting on (their own random stream, keyed by the run's last char).
+
 ## Page templates (`%USERPROFILE%\ChiXie3\conf\*.cx`, decoded 2026-11-07)
 Python pickles (protocol 4) of `{name: object}`; the objects come from `core.DataModel.*` and carry
 their state as a plain `__dict__`. They are read by `chixie_rs_core::chixie3_templates`, a small pickle

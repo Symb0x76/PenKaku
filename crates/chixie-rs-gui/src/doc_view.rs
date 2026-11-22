@@ -16,8 +16,13 @@ use chixie_rs_core::config::{PageSettings, Settings};
 use chixie_rs_doc::EditDoc;
 use chixie_rs_core::handwriting::StyleFile;
 use chixie_rs_template::Template;
+use chixie_rs_core::font::Font;
+use chixie_rs_core::font::fix;
+use chixie_rs_core::font::fontset::RunFonts;
 use chixie_rs_core::layout::{self, Document};
+use chixie_rs_doc::model::PT_PER_SIZE;
 use gpui_kit::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::notification::Notification;
@@ -32,6 +37,9 @@ pub const ZOOM_100: f32 = 96.0 / 25.4;
 pub const ZOOM_MIN: f32 = 0.4;
 pub const ZOOM_MAX: f32 = 6.0;
 pub const KEY_CONTEXT: &str = "ChixieRsEditor";
+
+mod format;
+pub use format::*;
 
 actions!(
     chixie_editor,
@@ -49,6 +57,7 @@ actions!(
 pub fn bind_keys(cx: &mut App) {
     let c = Some(KEY_CONTEXT);
     cx.bind_keys([KeyBinding::new(if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" }, Save, None)]);
+    format::bind_keys(cx);
     // Tab toggles the paragraph indent; Shift+Space types a half space (Ctrl+Space is the IME
     // toggle on Windows).
     // On a table form Tab goes to the next cell and Shift+Tab back.
@@ -133,16 +142,20 @@ struct Geom {
     zoom: f32,
     margin_l: f32,
     margin_t: f32,
+    /// Pages per row: 1 (单页) or 2 (双页).
+    cols: usize,
 }
 
 impl Geom {
-    fn new(bounds: Bounds<Pixels>, page: &PageSettings, zoom: f32) -> Self {
+    fn new(bounds: Bounds<Pixels>, page: &PageSettings, zoom: f32, cols: usize) -> Self {
         let (page_w, page_h) = (page.paper.0 * zoom, page.paper.1 * zoom);
-        let x0 = ((f32::from(bounds.size.width) - page_w) / 2.0).max(GAP);
-        Self { origin: bounds.origin, x0, page_w, page_h, zoom, margin_l: page.margins.0, margin_t: page.margins.1 }
+        let row_w = cols as f32 * page_w + (cols - 1) as f32 * GAP;
+        let x0 = ((f32::from(bounds.size.width) - row_w) / 2.0).max(GAP);
+        Self { origin: bounds.origin, x0, page_w, page_h, zoom, margin_l: page.margins.0, margin_t: page.margins.1, cols }
     }
     fn page_origin(&self, k: usize) -> Point<Pixels> {
-        self.origin + point(px(self.x0), px(GAP + k as f32 * (self.page_h + GAP)))
+        let (row, col) = (k / self.cols, k % self.cols);
+        self.origin + point(px(self.x0 + col as f32 * (self.page_w + GAP)), px(GAP + row as f32 * (self.page_h + GAP)))
     }
     /// Layout mm (y up, origin at writable top-left) → screen px on page `k`.
     fn screen(&self, k: usize, x: f32, y: f32) -> Point<Pixels> {
@@ -151,7 +164,10 @@ impl Geom {
     /// Screen px → (page, layout x, layout y).
     fn unproject(&self, p: Point<Pixels>, pages: usize) -> (usize, f32, f32) {
         let rel_y = f32::from(p.y - self.origin.y) - GAP / 2.0;
-        let k = ((rel_y / (self.page_h + GAP)).floor().max(0.0) as usize).min(pages.saturating_sub(1));
+        let rel_x = f32::from(p.x - self.origin.x) - self.x0 + GAP / 2.0;
+        let row = (rel_y / (self.page_h + GAP)).floor().max(0.0) as usize;
+        let col = ((rel_x / (self.page_w + GAP)).floor().max(0.0) as usize).min(self.cols - 1);
+        let k = (row * self.cols + col).min(pages.saturating_sub(1));
         let o = self.page_origin(k);
         let x = f32::from(p.x - o.x) / self.zoom - self.margin_l;
         let y = self.margin_t - f32::from(p.y - o.y) / self.zoom;
@@ -172,6 +188,8 @@ pub struct DocView {
     reveal_caret: bool,
     /// 书写原点 marker being dragged: its layout point (mm).
     origin_drag: Option<(f32, f32)>,
+    /// 格式刷 armed: the formats to give the next mouse selection, and whether it stays armed.
+    painter: Option<(chixie_rs_doc::model::Attrs, bool)>,
     /// What the current layout was computed from, to skip needless relayouts.
     /// What the layout was made from: font set generation, page and style settings, template.
     layout_key: Option<(u64, PageSettings, StyleFile, Option<Template>)>,
@@ -209,6 +227,7 @@ impl DocView {
             caret_visible: true,
             reveal_caret: false,
             origin_drag: None,
+            painter: None,
             layout_key: None,
             dirty_draft: false,
             _tasks: vec![blink],
@@ -245,9 +264,11 @@ impl DocView {
     /// Fit the page width into the viewport (needs one paint).
     pub fn fit_width(&mut self, cx: &mut Context<Self>) {
         let vw = f32::from(self.scroll.bounds().size.width);
-        let paper_w = cx.global::<AppState>().settings.page.paper.0;
+        let st = cx.global::<AppState>();
+        let cols = if st.settings.ui.double_page { 2.0 } else { 1.0 };
+        let paper_w = st.settings.page.paper.0;
         if vw > 100.0 {
-            self.set_zoom((vw - 2.0 * GAP) / paper_w, cx);
+            self.set_zoom((vw - (cols + 1.0) * GAP) / (cols * paper_w), cx);
         }
     }
 
@@ -279,11 +300,44 @@ impl DocView {
         // Every font in use (roles, mix, fallbacks); empty until one is chosen.
         let fonts = st.font_set.clone();
         self.has_font = !fonts.is_empty();
-        let joins = self.doc.joins();
-        let tuning = self.doc.tunings();
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning };
-        self.layout = Arc::new(layout::layout_flow(&flow, &*fonts, &params));
+        self.load_run_fonts(cx);
+        self.layout = Arc::new(self.lay_out(&params, cx));
         cx.notify();
+    }
+
+    /// Lay the document out with `params`: text, paragraphs, 合并内容, 字符微调, 字符格式 and the
+    /// characters' own fonts.
+    fn lay_out(&self, params: &layout::PageParams, cx: &App) -> Document {
+        let st = cx.global::<AppState>();
+        let (joins, tuning) = (self.doc.joins(), self.doc.tunings());
+        let styles = self.doc.styles(st.settings.page.font_size * PT_PER_SIZE);
+        let by_id = self.doc.char_fonts().into_iter().filter_map(|(id, n)| st.run_fonts.get(n).cloned().flatten().map(|f| (id, f))).collect();
+        let fonts = RunFonts { base: &*st.font_set, by_id };
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning, styles: &styles };
+        layout::layout_flow(&flow, &fonts, params)
+    }
+
+    /// Load the fonts characters name (字体) that are not cached yet; the main font is the
+    /// document's own. A name with no local font is remembered as missing.
+    fn load_run_fonts(&self, cx: &mut App) {
+        let st = cx.global::<AppState>();
+        let main = st.active_font.as_ref().map(|a| a.name.as_str());
+        let mut names: Vec<String> = self.doc.char_fonts().into_iter().map(|(_, n)| n).filter(|n| Some(*n) != main && !st.run_fonts.contains_key(*n)).map(str::to_owned).collect();
+        names.sort();
+        names.dedup();
+        if names.is_empty() {
+            return;
+        }
+        let (store, fixes) = (st.fonts.clone(), st.settings.fonts.fix);
+        let loaded: Vec<(String, Option<Arc<Font>>)> = names
+            .into_iter()
+            .map(|n| {
+                let font = store.id_of(&n).and_then(|id| store.load(id).inspect_err(|e| log::warn!("loading font {n}: {e}")).ok());
+                let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }));
+                (n, font)
+            })
+            .collect();
+        cx.global_mut::<AppState>().run_fonts.extend(loaded);
     }
 
     /// After any text change: relayout, keep the caret visible, mark the draft dirty.
@@ -508,13 +562,27 @@ impl DocView {
         self.doc.insert("");
         self.edited(cx);
     }
+    /// Select chars `r` and scroll to them (查找).
+    pub fn select(&mut self, r: Range<usize>, cx: &mut Context<Self>) {
+        self.doc.select_range(r);
+        self.after_move(cx);
+    }
+    /// 导入: add chars by `mode` (one undo step).
+    pub fn import_chars(&mut self, chars: Vec<(char, Option<chixie_rs_doc::model::Attrs>)>, mode: chixie_rs_doc::import::ImportMode, cx: &mut Context<Self>) {
+        let chars = if table_mode(cx) { chars.into_iter().map(|(c, a)| (if c == '\t' { layout::CELL_BREAK } else { c }, a)).collect() } else { chars };
+        self.doc.import_chars(chars, mode);
+        self.edited(cx);
+    }
+    /// Replace several ranges (替换 / 全部替换, one undo step).
+    pub fn replace_ranges(&mut self, edits: Vec<(Range<usize>, String)>, cx: &mut Context<Self>) {
+        self.doc.replace_many(edits);
+        self.edited(cx);
+    }
     /// How segment `seg` would be set on template `t` (a trial layout; nothing changes).
     pub fn trial_cell(&self, t: &Template, seg: usize, cx: &App) -> Option<layout::CellInfo> {
         let st = cx.global::<AppState>();
         let params = st.settings.page_params_with(t.ruling());
-        let (joins, tuning) = (self.doc.joins(), self.doc.tunings());
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning };
-        layout::layout_flow(&flow, &*st.font_set, &params).cells.into_iter().find(|c| c.seg == seg)
+        self.lay_out(&params, cx).cells.into_iter().find(|c| c.seg == seg)
     }
     fn combine(&mut self, _: &Combine, window: &mut Window, cx: &mut Context<Self>) {
         match self.doc.toggle_combine() {
@@ -535,20 +603,37 @@ impl DocView {
         self.doc.select_all();
         self.after_move(cx);
     }
+    /// The selection as plain text plus each char's formatting (JSON metadata, read back by
+    /// our own paste; other programs see the text).
+    fn copy_selection(&self, cx: &mut Context<Self>) {
+        let clip = RichClip { v: 1, attrs: self.doc.selected_attrs() };
+        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(self.doc.selected_text(), clip));
+    }
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if self.doc.has_selection() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.doc.selected_text()));
+            self.copy_selection(cx);
         }
     }
     pub fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
         if self.doc.has_selection() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.doc.selected_text()));
+            self.copy_selection(cx);
             self.doc.insert("");
             self.edited(cx);
         }
     }
     pub fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|i| i.text()) {
+        let Some(item) = cx.read_from_clipboard() else { return };
+        // Our own copy keeps its formatting.
+        let rich = item.entries().iter().find_map(|e| match e {
+            ClipboardEntry::String(s) => s.metadata_json::<RichClip>().filter(|c| c.v == 1).map(|c| (s.text().clone(), c.attrs)),
+            _ => None,
+        });
+        if let Some((text, attrs)) = rich {
+            self.doc.insert_with_attrs(&text, &attrs);
+            self.edited(cx);
+            return;
+        }
+        if let Some(text) = item.text() {
             // Tab-separated text (from a spreadsheet) fills cells on a table form.
             let text = if table_mode(cx) { text.replace('\t', &layout::CELL_BREAK.to_string()) } else { text };
             self.type_text(&text, cx);
@@ -626,7 +711,9 @@ impl DocView {
         }
     }
     fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.selecting = false;
+        if std::mem::take(&mut self.selecting) {
+            self.apply_painter(cx);
+        }
         if let Some(p) = self.origin_drag.take() {
             let st = cx.global_mut::<AppState>();
             st.settings.page.origin = sheet(&st.settings.page).snap_origin(p, ORIGIN_SNAP_MM);
@@ -738,8 +825,11 @@ impl Render for DocView {
         let page = settings.page.clone();
         let page_prepaint = page.clone();
         let pages = self.layout.pages.len().max(1);
-        let total_h = GAP + pages as f32 * (page.paper.1 * self.zoom + GAP);
-        let total_w = page.paper.0 * self.zoom + 2.0 * GAP;
+        let ui = settings.ui.clone();
+        let cols = if ui.double_page { 2 } else { 1 };
+        let rows = pages.div_ceil(cols);
+        let total_h = GAP + rows as f32 * (page.paper.1 * self.zoom + GAP);
+        let total_w = cols as f32 * page.paper.0 * self.zoom + (cols + 1) as f32 * GAP;
 
         let entity = cx.entity();
         let focus = self.focus.clone();
@@ -770,6 +860,7 @@ impl Render for DocView {
             .bg(desk)
             .overflow_scroll()
             .track_scroll(&scroll)
+            .map(|el| Self::format_actions(el, cx))
             .on_action(cx.listener(Self::move_left))
             .on_action(cx.listener(Self::move_right))
             .on_action(cx.listener(Self::move_up))
@@ -811,12 +902,18 @@ impl Render for DocView {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
+            // A file dropped on the page is imported (导入).
+            .on_drop(cx.listener(|_, paths: &ExternalPaths, w, cx| {
+                if let Some(p) = paths.paths().first() {
+                    crate::import_ui::import_path(cx.entity(), p.clone(), w, cx);
+                }
+            }))
             .on_scroll(cx.listener(Self::scroll_zoom))
             .cursor(CursorStyle::IBeam)
             .child(
                 canvas(
                     move |bounds, _w, _cx| {
-                        let g = Geom::new(bounds, &page_prepaint, zoom);
+                        let g = Geom::new(bounds, &page_prepaint, zoom, cols);
                         geom_out.set(Some(g));
                         g
                     },
@@ -838,6 +935,8 @@ impl Render for DocView {
                                 window.paint_quad(outline(guides, guide.opacity(0.5), BorderStyle::Dashed));
                             }
                         }
+                        // 行号 / 页码 (preview only).
+                        paint_numbers(window, cx, &g, &layout_doc, pages, page.margins, ui.line_numbers, ui.page_numbers);
                         // Template ruling (pre-printed on the paper; never plotted).
                         if show_guides {
                             for (k, p) in layout_doc.pages.iter().enumerate() {
@@ -941,7 +1040,7 @@ impl Render for DocView {
                 .min_w(px(total_w))
                 .h(px(total_h)),
             )
-            .context_menu(move |m, window, _cx| {
+            .context_menu(move |m, window, cx| {
                 // On the 书写原点 marker: ChiXie3's origin menu; elsewhere the edit commands.
                 let near_origin = menu_geom.get().is_some_and(|g| {
                     let (_, x, y) = g.unproject(window.mouse_position(), pages);
@@ -963,10 +1062,74 @@ impl Render for DocView {
                         .item(PopupMenuItem::new("移至框线起点").on_click(set(Origin::Frame)))
                         .item(PopupMenuItem::new("自定义原点位置：拖动蓝色圆圈").disabled(true))
                 } else {
-                    m.menu("剪切", Box::new(Cut)).menu("复制", Box::new(Copy)).menu("粘贴", Box::new(Paste)).separator().menu("全选", Box::new(SelectAll))
+                    use crate::app::menu as am;
+                    let table = table_mode(cx);
+                    let m = m
+                        .menu("剪切", Box::new(Cut))
+                        .menu("复制", Box::new(Copy))
+                        .menu("粘贴", Box::new(Paste))
+                        .separator()
+                        .menu("全选", Box::new(SelectAll))
+                        .menu("查找…", Box::new(crate::find_bar::OpenFind))
+                        .separator()
+                        .submenu("书写此页", window, cx, |m, _w, _cx| m.menu("直接书写", Box::new(am::WritePage)).menu("上传SD卡书写", Box::new(am::WritePageSd)))
+                        .menu("工作区巡边", Box::new(am::PatrolPage))
+                        .menu("绘制框架线", Box::new(am::DrawFrame))
+                        .menu("从这里断点续写", Box::new(am::ResumeHere));
+                    if table {
+                        m.separator()
+                            .submenu("刷新数据", window, cx, |m, _w, _cx| m.menu("本页", Box::new(am::RefreshPage)).menu("所有页", Box::new(am::RefreshAll)))
+                            .menu("批量溢出", Box::new(am::BatchOverflow))
+                    } else {
+                        m
+                    }
                 }
             })
     }
+}
+
+/// 行号 in the left margin (counted per page) and 第 n 页 under each page.
+#[allow(clippy::too_many_arguments)]
+fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, pages: usize, margins: (f32, f32, f32, f32), lines: bool, page_nums: bool) {
+    if !lines && !page_nums {
+        return;
+    }
+    let size = px((3.0 * g.zoom).clamp(8.0, 14.0));
+    let colour = hsla(0.0, 0.0, 0.55, 1.0);
+    let font = window.text_style().font();
+    let mut text = |window: &mut Window, s: String, at: Point<Pixels>, right: bool| {
+        let s: SharedString = s.into();
+        let run = TextRun { len: s.len(), font: font.clone(), color: colour, background_color: None, underline: None, strikethrough: None };
+        let shaped = window.text_system().shape_line(s, size, &[run], None);
+        let x = if right { at.x - shaped.width } else { at.x - shaped.width / 2.0 };
+        let _ = shaped.paint(point(x, at.y - size * 0.6), size * 1.2, TextAlign::Left, None, window, cx);
+    };
+    if lines {
+        let mut n = 0;
+        let mut page = usize::MAX;
+        for l in &d.lines {
+            if l.page != page {
+                (page, n) = (l.page, 0);
+            }
+            n += 1;
+            let mid = g.screen(l.page, 0.0, (l.top + l.bottom) / 2.0);
+            text(window, n.to_string(), mid - point(px(2.0 * g.zoom), px(0.0)), true);
+        }
+    }
+    if page_nums {
+        for k in 0..pages {
+            let o = g.page_origin(k);
+            let at = o + point(px(g.page_w / 2.0), px(g.page_h - margins.3 * g.zoom / 2.0));
+            text(window, format!("第 {} 页", k + 1), at, false);
+        }
+    }
+}
+
+/// Clipboard metadata of a copy from the editor: each char's formatting.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RichClip {
+    v: u32,
+    attrs: Vec<chixie_rs_doc::model::Attrs>,
 }
 
 /// The 书写原点 marker: grab radius and corner snap (mm).
@@ -1011,5 +1174,29 @@ pub fn paint_guides(window: &mut Window, guides: &[chixie_rs_core::layout::Guide
     let _ = zoom;
     if let Ok(path) = path.build() {
         window.paint_path(path, color);
+    }
+}
+
+#[cfg(test)]
+mod geom_tests {
+    use super::*;
+
+    #[core::prelude::v1::test]
+    fn double_page_places_pages_in_rows_of_two_and_hit_tests_back() {
+        let page = PageSettings::default();
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(2000.), px(1000.)));
+        let g = Geom::new(bounds, &page, 2.0, 2);
+        let (o0, o1, o2) = (g.page_origin(0), g.page_origin(1), g.page_origin(2));
+        assert_eq!(o0.y, o1.y);
+        assert!(o1.x > o0.x && o2.x == o0.x && o2.y > o0.y);
+        // A point in the writable area of each page maps back to that page.
+        for k in 0..3 {
+            let (pk, x, y) = g.unproject(g.screen(k, 10.0, -10.0), 3);
+            assert_eq!(pk, k);
+            assert!((x - 10.0).abs() < 1e-3 && (y + 10.0).abs() < 1e-3);
+        }
+        // Single page: one column.
+        let g1 = Geom::new(bounds, &page, 2.0, 1);
+        assert_eq!(g1.page_origin(1).x, g1.page_origin(0).x);
     }
 }

@@ -171,6 +171,22 @@ impl Glyphs for FontSet {
     }
 }
 
+/// Per-character fonts (a run's 字体 in the editor) over the document's fonts: a char whose id
+/// has an override takes that font's glyph, else (or when that font lacks it) `base`'s.
+pub struct RunFonts<'a, G: Glyphs + ?Sized> {
+    pub base: &'a G,
+    pub by_id: std::collections::HashMap<u64, Arc<Font>>,
+}
+
+impl<G: Glyphs + ?Sized> Glyphs for RunFonts<'_, G> {
+    fn glyph(&self, c: char, id: u64) -> Option<&Glyph> {
+        self.by_id.get(&id).and_then(|f| crate::layout::glyph_for(f, c)).or_else(|| self.base.glyph(c, id))
+    }
+    fn space(&self) -> Option<&Glyph> {
+        self.base.space()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

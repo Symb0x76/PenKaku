@@ -251,24 +251,26 @@ fn import_file(view: Entity<DocView>, window: &mut Window, cx: &mut App) {
             let Ok(Ok(Some(paths))) = rx.await else { return };
             let Some(path) = paths.into_iter().next() else { return };
             let _ = cx.update(|w, cx| {
-                let Some(TemplateKind::Table(tt)) = cx.global::<AppState>().active_template().map(|t| t.kind) else { return };
-                let res = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| chixie_rs_template::xlsx::read_sheets(&b));
-                match res {
-                    Ok(sheets) => {
-                        let chars = view.read(cx).doc_chars().to_vec();
-                        match tt.import_sheets(&chars, &sheets) {
-                            Ok(edits) => {
-                                view.update(cx, |v, cx| v.replace_many(edits, cx));
-                                w.push_notification(Notification::success(format!("已导入 {} 个工作表", sheets.len())), cx);
-                            }
-                            Err(e) => w.push_notification(Notification::warning(e), cx),
-                        }
-                    }
+                match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| chixie_rs_template::xlsx::read_sheets(&b)) {
+                    Ok(sheets) => import_workbook(view, &sheets, w, cx),
                     Err(e) => w.push_notification(Notification::error(format!("导入失败：{e}")), cx),
                 }
             });
         })
         .detach();
+}
+
+/// Fill the form's cells from a workbook's sheets (one undo step).
+pub fn import_workbook(view: Entity<DocView>, sheets: &[chixie_rs_template::xlsx::Sheet], w: &mut Window, cx: &mut App) {
+    let Some(TemplateKind::Table(tt)) = cx.global::<AppState>().active_template().map(|t| t.kind) else { return };
+    let chars = view.read(cx).doc_chars().to_vec();
+    match tt.import_sheets(&chars, sheets) {
+        Ok(edits) => {
+            view.update(cx, |v, cx| v.replace_many(edits, cx));
+            w.push_notification(Notification::success(format!("已导入 {} 个工作表", sheets.len())), cx);
+        }
+        Err(e) => w.push_notification(Notification::warning(e), cx),
+    }
 }
 
 /// Apply plan `which` (0 shrink, 1 add rows, 2 ignore) to every overflowing cell; returns how many.

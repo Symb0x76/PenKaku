@@ -148,6 +148,8 @@ const SALT_GLYPH: u64 = 0x474C_5948_0000_0002;
 const SALT_INDENT: u64 = 0x494E_4445_0000_0003;
 /// Random row count per page (ruled templates).
 pub const SALT_ROWS: u64 = 0x524F_5753_0000_0005;
+/// 下划线 / 删除线 waver.
+pub const SALT_RULE: u64 = 0x5255_4C45_0000_0008;
 /// Deformation draws from its own stream so toggling jitter doesn't change deformation.
 pub const SALT_DEFORM: u64 = 0x4445_464F_0000_0004;
 

@@ -62,6 +62,9 @@ impl ChixieRsApp {
         let grid = matches!(ruling, Some(Ruling::Grid { .. }));
         let table = matches!(ruling, Some(Ruling::Table { .. }));
         let overflowing = self.doc.read(cx).layout_doc().overflowing().count();
+        let fs = self.doc.read(cx).format_state(cx);
+        let sel = fs.selected;
+        let doc = self.doc.clone();
         let (align, indented) = {
             let d = self.doc.read(cx).doc();
             (d.align(), d.indented())
@@ -75,6 +78,14 @@ impl ChixieRsApp {
                 h_flex().gap_1().child(big("paste", "粘贴", IconName::ClipboardPaste).on_click(act(Box::new(doc_view::Paste)))).child(stack([
                     small("cut", "剪切", IconName::Scissors).on_click(act(Box::new(doc_view::Cut))).into_any_element(),
                     small("copy", "复制", IconName::Copy).on_click(act(Box::new(doc_view::Copy))).into_any_element(),
+                    small("painter", "格式刷", IconName::Paintbrush)
+                        .selected(fs.painter)
+                        .tooltip("单击：刷一次；双击：一直刷到按 Esc")
+                        .on_click({
+                            let doc = doc.clone();
+                            move |e: &ClickEvent, _w, cx| doc.update(cx, |d, cx| d.arm_painter(e.click_count() > 1, cx))
+                        })
+                        .into_any_element(),
                 ])),
                 None,
             ))
@@ -91,7 +102,13 @@ impl ChixieRsApp {
                                 div().w(px(190.)).child(
                                     Select::new(&self.font_select)
                                         .small()
-                                        .placeholder(if has_fonts { "选择字体" } else { "（无收藏字体）" })
+                                        .placeholder(if sel && fs.font.is_none() {
+                                            "所选内容中字体不统一"
+                                        } else if has_fonts {
+                                            "选择字体"
+                                        } else {
+                                            "（无收藏字体）"
+                                        })
                                         .menu_width(px(260.)),
                                 ),
                             )
@@ -103,13 +120,14 @@ impl ChixieRsApp {
                             .child(div().text_xs().child("字号"))
                             .child(div().w(px(96.)).child(NumberInput::new(&self.font_size).small()))
                             .child(ribbon::icon_btn("grow", IconName::AArrowUp, "增大字号").on_click(cx.listener(move |t, _: &ClickEvent, w, cx| {
-                                t.set_font_size(font_size + 10.0, w, cx)
+                                t.bump_size(10.0, font_size, w, cx)
                             })))
                             .child(ribbon::icon_btn("shrink", IconName::AArrowDown, "减小字号").on_click(cx.listener(move |t, _: &ClickEvent, w, cx| {
-                                t.set_font_size(font_size - 10.0, w, cx)
+                                t.bump_size(-10.0, font_size, w, cx)
                             })))
                             .child(pen_menu),
-                    ),
+                    )
+                    .child(self.format_buttons(&fs)),
                 None,
             ))
             .child(group(
@@ -218,6 +236,36 @@ impl ChixieRsApp {
                 })
             })
             .into_any_element()
+    }
+
+    /// 倾斜 ▾, 下划线, 删除线, 上标, 下标, 标题, 清除格式 (on the selection).
+    #[inline(never)]
+    fn format_buttons(&self, fs: &doc_view::FormatState) -> AnyElement {
+        let act = |a: Box<dyn Action>| editor_action(self.doc.clone(), a);
+        let doc = self.doc.clone();
+        let (right, left) = (fs.tilt_right, fs.tilt_left);
+        h_flex()
+            .gap_0p5()
+            .child(ribbon::icon_btn("tilt", IconName::Italic, "倾斜").selected(right || left).dropdown_menu(move |m, _w, _cx| {
+                m.item(PopupMenuItem::new("右倾斜 (Ctrl+I)").checked(right).on_click(editor_action(doc.clone(), Box::new(doc_view::TiltRight))))
+                    .item(PopupMenuItem::new("左倾斜").checked(left).on_click(editor_action(doc.clone(), Box::new(doc_view::TiltLeft))))
+            }))
+            .child(ribbon::icon_btn("underline", IconName::Underline, "下划线 (Ctrl+U)").selected(fs.underline).on_click(act(Box::new(doc_view::ToggleUnderline))))
+            .child(ribbon::icon_btn("strike", IconName::Strikethrough, "删除线").selected(fs.strike).on_click(act(Box::new(doc_view::ToggleStrike))))
+            .child(ribbon::icon_btn("sup", IconName::Superscript, "上标 (Ctrl+Shift+=)").selected(fs.sup).on_click(act(Box::new(doc_view::ToggleSuper))))
+            .child(ribbon::icon_btn("sub", IconName::Subscript, "下标 (Ctrl+=)").selected(fs.sub).on_click(act(Box::new(doc_view::ToggleSub))))
+            .child(ribbon::icon_btn("title", IconName::Heading, "标题 (Ctrl+B)").selected(fs.title).on_click(act(Box::new(doc_view::ToggleTitle))))
+            .child(ribbon::icon_btn("clear-format", IconName::RemoveFormatting, "清除格式").on_click(act(Box::new(doc_view::ClearFormat))))
+            .into_any_element()
+    }
+
+    /// A+ / A−: the selection's size, else the document's.
+    fn bump_size(&mut self, delta: f32, doc_size: f32, window: &mut Window, cx: &mut Context<Self>) {
+        if self.doc.read(cx).doc().selection().is_empty() {
+            self.set_font_size(doc_size + delta, window, cx);
+        } else {
+            self.doc.update(cx, |d, cx| d.bump_run_size(delta, cx));
+        }
     }
 
     fn set_font_size(&mut self, v: f32, window: &mut Window, cx: &mut Context<Self>) {
@@ -557,9 +605,25 @@ impl ChixieRsApp {
     #[inline(never)]
     fn tab_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let dark = cx.theme().mode == ThemeMode::Dark;
-        let show_guides = cx.global::<AppState>().settings.ui.show_guides;
+        let ui = cx.global::<AppState>().settings.ui.clone();
+        let show_guides = ui.show_guides;
+        let double = ui.double_page;
         h_flex()
             .h_full()
+            .child(group(
+                cx,
+                "pages",
+                "页面",
+                h_flex()
+                    .gap_1()
+                    .child(big("single", "单页", IconName::File).selected(!double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = false)
+                    })))
+                    .child(big("double", "双页", IconName::Columns2).selected(double).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.ui.double_page = true)
+                    }))),
+                None,
+            ))
             .child(group(
                 cx,
                 "zoom",
@@ -582,15 +646,35 @@ impl ChixieRsApp {
                 cx,
                 "show",
                 "显示",
-                stack([Checkbox::new("guides")
-                    .small()
-                    .label("模板格线")
-                    .checked(show_guides)
-                    .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                        let v = *v;
-                        t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
-                    }))
-                    .into_any_element()]),
+                stack([
+                    Checkbox::new("guides")
+                        .small()
+                        .label("模板格线")
+                        .checked(show_guides)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
+                        }))
+                        .into_any_element(),
+                    Checkbox::new("line-numbers")
+                        .small()
+                        .label("行号")
+                        .checked(ui.line_numbers)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.ui.line_numbers = v);
+                        }))
+                        .into_any_element(),
+                    Checkbox::new("page-numbers")
+                        .small()
+                        .label("页码")
+                        .checked(ui.page_numbers)
+                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
+                            let v = *v;
+                            t.edit_settings(cx, |st| st.settings.ui.page_numbers = v);
+                        }))
+                        .into_any_element(),
+                ]),
                 None,
             ))
             .child(group(

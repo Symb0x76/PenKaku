@@ -68,6 +68,71 @@ impl Tuning {
     }
 }
 
+/// 上标 / 下标.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Script {
+    #[default]
+    None,
+    Super,
+    Sub,
+}
+
+/// 字符格式 as layout sees it. Identity = `CharStyle::default()`.
+///
+/// The factors below are ours, not measured from ChiXie3 yet (VERIFY against a capture).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CharStyle {
+    /// Size relative to the document's (the char's 字号 ÷ the page's).
+    pub scale: f32,
+    /// −1 左倾斜, 0 upright, +1 右倾斜.
+    pub tilt: i8,
+    pub underline: bool,
+    pub strike: bool,
+    pub script: Script,
+    /// 标题: larger.
+    pub title: bool,
+}
+
+impl Default for CharStyle {
+    fn default() -> Self {
+        Self { scale: 1.0, tilt: 0, underline: false, strike: false, script: Script::None, title: false }
+    }
+}
+
+/// Shear of a tilted char (degrees from upright).
+pub const TILT_DEG: f32 = 12.0;
+/// Super / subscript size factor.
+pub const SCRIPT_SCALE: f32 = 0.6;
+/// Superscript raise and subscript drop of the foot, in ems of the line.
+pub const SUPER_RAISE: f32 = 0.35;
+pub const SUB_DROP: f32 = 0.15;
+/// 标题 size factor.
+pub const TITLE_SCALE: f32 = 1.5;
+
+impl CharStyle {
+    pub fn is_plain(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Overall size factor.
+    pub fn factor(&self) -> f32 {
+        let mut f = self.scale;
+        if self.title {
+            f *= TITLE_SCALE;
+        }
+        if self.script != Script::None {
+            f *= SCRIPT_SCALE;
+        }
+        f
+    }
+
+    /// Glyph shear: x moves `shear × height above the foot`.
+    fn shear(&self) -> f32 {
+        f32::from(self.tilt.signum()) * TILT_DEG.to_radians().tan()
+    }
+}
+
 /// Paragraph formatting (one per `'\n'`-separated paragraph).
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -418,7 +483,7 @@ pub fn layout_ids(chars: &[char], ids: &[u64], font: &(impl Glyphs + ?Sized), p:
 /// [`layout_ids`] with paragraph formatting: `paras[k]` applies to the k-th `'\n'`-separated
 /// paragraph (missing entries are left-aligned with the default indent).
 pub fn layout_doc(chars: &[char], ids: &[u64], paras: &[Para], font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
-    layout_flow(&Flow { chars, ids, paras, joins: &[], tuning: &[] }, font, p)
+    layout_flow(&Flow { chars, ids, paras, ..Default::default() }, font, p)
 }
 
 /// Everything layout reads from a document.
@@ -433,6 +498,8 @@ pub struct Flow<'a> {
     pub joins: &'a [bool],
     /// 字符微调 per char; missing or `None` = untouched.
     pub tuning: &'a [Option<Tuning>],
+    /// 字符格式 per char; missing or `None` = plain.
+    pub styles: &'a [Option<CharStyle>],
 }
 
 /// Half-width in a grid: two in a row share one cell. Digits and the half space always;
@@ -506,11 +573,12 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
 
 /// One layout pass; `fits[seg]` overrides a table cell's size and rows.
 fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[Option<CellFit>]) -> Document {
-    let Flow { chars, ids, paras, joins, tuning } = *f;
+    let Flow { chars, ids, paras, joins, tuning, styles } = *f;
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
     let join = |k: usize| joins.get(k).copied().unwrap_or(false);
     let tune = |k: usize| tuning.get(k).copied().flatten().unwrap_or_default();
+    let style = |k: usize| styles.get(k).copied().flatten().unwrap_or_default();
     let mut para_ix = 0;
     let mut s = p.mm_per_unit;
     let table = matches!(p.ruling, Ruling::Table { .. });
@@ -526,6 +594,8 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
     let mut pen = Pen {
         p,
         chars,
+        ids,
+        styles,
         align: para(0).align,
         line_stroke: 0,
         pitch: grid.map(|(_, cw, cg)| cw + cg),
@@ -613,7 +683,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                 let x = cell_x + w * slot as f32;
                 let (sx, sy) = slot_scale(s, font.glyph(ch, id), squeeze, n, w);
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
-                draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0, tune(i));
+                draw_char(&mut pen, font, &mut jit, ch, id, x + (w - adv) / 2.0, sx, sy, 0.0, tune(i), style(i));
                 pen.cx = x + w;
                 pen.push_box(x);
                 shared = (slot + 1 < n).then_some((cell_x, slot + 1, n, squeeze));
@@ -626,7 +696,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                     // (half size; a second one beside it), as composition paper is written.
                     let x = (cols - 1) as f32 * (cw + cg) + cw * (0.5 + 0.25 * hung as f32);
                     let lower = pen.em * 0.5;
-                    draw_char(&mut pen, font, &mut jit, ch, id, x, s * 0.5, s * 0.5, lower, tune(i));
+                    draw_char(&mut pen, font, &mut jit, ch, id, x, s * 0.5, s * 0.5, lower, tune(i), style(i));
                     pen.cx = x + cw * 0.25;
                     pen.push_box(x);
                     hung += 1;
@@ -660,7 +730,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                 let w = cw / n as f32;
                 let (sx, sy) = slot_scale(s, font.glyph(ch, id), join(i), n, w);
                 let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * sx);
-                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0, tune(i));
+                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (w - adv) / 2.0, sx, sy, 0.0, tune(i), style(i));
                 pen.cx = cell_x + w;
                 pen.col += 1;
                 pen.push_box(cell_x);
@@ -669,8 +739,9 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                 continue;
             }
             if ch != ' ' {
-                let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * s);
-                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (cw - adv) / 2.0, s, s, 0.0, tune(i));
+                let st = style(i);
+                let adv = font.glyph(ch, id).map_or(0.0, |g| g.advance * s * st.factor());
+                draw_char(&mut pen, font, &mut jit, ch, id, cell_x + (cw - adv) / 2.0, s, s, 0.0, tune(i), st);
             }
             pen.cx = cell_x + cw;
             pen.col += 1;
@@ -704,10 +775,11 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                 continue;
             }
             ' ' => {
+                let f = style(i).factor();
                 if jitter_on {
-                    pen.cx += jit.space(prev, id);
+                    pen.cx += jit.space(prev, id) * f;
                 } else {
-                    pen.cx += font.space().map(|gl| gl.advance * s).unwrap_or(p.space_width);
+                    pen.cx += font.space().map(|gl| gl.advance * s).unwrap_or(p.space_width) * f;
                     pen.cx += p.char_spacing;
                 }
                 pen.push_box(x0);
@@ -735,8 +807,11 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
             prev = Some(ch);
             continue;
         };
+        let st = style(i);
+        // A formatted char's size: exactly `s` when plain (keeps the golden bytes).
+        let sf = if st.is_plain() { s } else { s * st.factor() };
         // Wrap before a glyph that would cross the right edge (never on an empty line).
-        if p.page.is_some() && pen.cx > 0.0 && pen.cx + glyph.advance * s > pen.line_w {
+        if p.page.is_some() && pen.cx > 0.0 && pen.cx + glyph.advance * sf > pen.line_w {
             let b = if p.kinsoku { kinsoku::break_before(chars, pen.line_start, i) } else { i };
             if b < i {
                 // Take chars b..i off this line and lay them again from the next one.
@@ -756,11 +831,12 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
         // `line_x + cx` is exactly `cx` on Free ruling (line_x = 0), keeping the golden bytes.
         let (cx, line_top) = (pen.line_x + pen.cx, pen.text_top);
         let t = tune(i);
-        if !t.is_identity() {
+        if !t.is_identity() || !st.is_plain() {
             // 字符微调: drawn like a grid cell's char (same jitter and deformation), moved,
-            // resized and re-rolled; the advance is unchanged, so neighbours stay put.
-            draw_char(&mut pen, font, &mut jit, ch, id, cx, s, s, 0.0, t);
-            pen.cx += glyph.advance * s + if jitter_on { jit.spacing(ch, id) } else { p.char_spacing };
+            // resized and re-rolled; the tuning leaves the advance, so neighbours stay put.
+            // 字符格式 sizes the char and its advance.
+            draw_char(&mut pen, font, &mut jit, ch, id, cx, s, s, 0.0, t, st);
+            pen.cx += glyph.advance * sf + if jitter_on { jit.spacing(ch, id) } else { p.char_spacing };
         } else if !jitter_on && !deform_on {
             for stroke in &glyph.strokes {
                 pen.page.strokes.push(
