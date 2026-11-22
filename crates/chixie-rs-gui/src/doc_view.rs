@@ -6,7 +6,8 @@
 //! down. On paper that point is (margin_left, margin_top) mm. On screen, page k's top-left is at
 //! `origin + (x0, GAP + k * (page_h + GAP))` px and 1 mm = `zoom` px.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -178,6 +179,10 @@ impl Geom {
 pub struct DocView {
     doc: EditDoc,
     layout: Arc<Document>,
+    /// Pen colour per char, computed with the layout.
+    ink_of: Arc<Vec<Option<chixie_rs_core::profile::Rgb>>>,
+    /// Built page paths, reused across frames (scroll, caret blink) while layout and zoom stay.
+    paths: Rc<RefCell<PathCache>>,
     has_font: bool,
     focus: FocusHandle,
     scroll: ScrollHandle,
@@ -218,6 +223,8 @@ impl DocView {
         let mut this = Self {
             doc,
             layout: Arc::new(Document::default()),
+            ink_of: Arc::default(),
+            paths: Rc::default(),
             has_font: false,
             focus,
             scroll: ScrollHandle::new(),
@@ -302,6 +309,8 @@ impl DocView {
         self.has_font = !fonts.is_empty();
         self.load_run_fonts(cx);
         self.layout = Arc::new(crate::perf::time(crate::perf::Kind::Relayout, || self.lay_out(&params, cx)));
+        let d = self.doc.document();
+        self.ink_of = Arc::new((0..self.doc.len()).map(|i| d.attrs(i).colour).collect());
         cx.notify();
     }
 
@@ -852,10 +861,8 @@ impl Render for DocView {
         let focus = self.focus.clone();
         let focused = focus.is_focused(window);
         let layout_doc = self.layout.clone();
-        let ink_of: Vec<Option<chixie_rs_core::profile::Rgb>> = {
-            let d = self.doc.document();
-            (0..self.doc.len()).map(|i| d.attrs(i).colour).collect()
-        };
+        let ink_of = self.ink_of.clone();
+        let path_cache = self.paths.clone();
         let sel = self.doc.selection();
         let caret = self.doc.caret();
         let marked = self.doc.marked();
@@ -936,8 +943,14 @@ impl Render for DocView {
                     },
                     move |bounds, g, window, cx| {
                         let _timer = crate::perf::PaintTimer::start();
+                        // Only pages inside the scrolled viewport are painted.
+                        let clip = window.content_mask().bounds;
+                        let visible: Vec<usize> = (0..pages).filter(|&k| Bounds::new(g.page_origin(k), size(px(g.page_w), px(g.page_h + GAP))).intersects(&clip)).collect();
+                        let on_screen = |k: usize| visible.binary_search(&k).is_ok();
+                        let mut cache = path_cache.borrow_mut();
+                        cache.reset_unless(Arc::as_ptr(&layout_doc) as usize, g.zoom);
                         // Pages.
-                        for k in 0..pages {
+                        for &k in &visible {
                             let o = g.page_origin(k);
                             let paper = Bounds::new(o, size(px(g.page_w), px(g.page_h)));
                             // Word's sheet: soft drop shadow on the grey desk.
@@ -954,23 +967,30 @@ impl Render for DocView {
                             }
                         }
                         // 行号 / 页码 (preview only).
-                        paint_numbers(window, cx, &g, &layout_doc, pages, ui.line_numbers, ui.page_numbers);
+                        paint_numbers(window, cx, &g, &layout_doc, &visible, ui.line_numbers, ui.page_numbers);
                         // Template ruling (pre-printed on the paper; never plotted).
                         if show_guides {
-                            for (k, p) in layout_doc.pages.iter().enumerate() {
-                                paint_guides(window, &p.guides, |x, y| g.screen(k, x, y), g.zoom);
+                            for &k in &visible {
+                                let o = g.page_origin(k);
+                                let paths = cache.page(k, || PagePaths::build(&layout_doc, &ink_of, &g, k));
+                                if let Some(p) = &paths.guides {
+                                    window.paint_path(translated(p, o), GUIDE_COLOUR);
+                                }
                             }
                         }
                         // Selection.
                         for i in sel.clone() {
                             let bx = layout_doc.boxes[i];
+                            if !on_screen(bx.page) {
+                                continue;
+                            }
                             let line = layout_doc.lines[bx.line];
                             let x1 = if bx.x1 > bx.x0 { bx.x1 } else { bx.x0 + 2.0 };
                             let rect = Bounds::from_corners(g.screen(bx.page, bx.x0, line.top), g.screen(bx.page, x1, line.bottom));
                             window.paint_quad(fill(rect, sel_color.opacity(0.35)));
                         }
                         // Missing glyphs: dashed placeholder boxes.
-                        for bx in layout_doc.missing_at.iter().filter_map(|&i| layout_doc.boxes.get(i)) {
+                        for bx in layout_doc.missing_at.iter().filter_map(|&i| layout_doc.boxes.get(i)).filter(|bx| on_screen(bx.page)) {
                             {
                                 let line = layout_doc.lines[bx.line];
                                 let pad = (line.top - line.bottom) * 0.2;
@@ -982,43 +1002,16 @@ impl Render for DocView {
                             }
                         }
                         // Ink.
-                        let stroke_w = px((0.35 * g.zoom).clamp(0.6, 2.5));
-                        for (k, p) in layout_doc.pages.iter().enumerate() {
-                            if p.strokes.is_empty() {
-                                continue;
-                            }
-                            let colour_at = |i: usize| p.stroke_chars.get(i).and_then(|&c| ink_of.get(c).copied().flatten());
-                            let mut inks: Vec<Option<chixie_rs_core::profile::Rgb>> = vec![None];
-                            for i in 0..p.strokes.len() {
-                                if let Some(c) = colour_at(i)
-                                    && !inks.contains(&Some(c))
-                                {
-                                    inks.push(Some(c));
-                                }
-                            }
-                            for ink in inks {
-                                let mut path = PathBuilder::stroke(stroke_w);
-                                for s in p.strokes.iter().enumerate().filter(|(i, _)| colour_at(*i) == ink).map(|(_, s)| s) {
-                                    let mut pts = s.iter().map(|&(x, y)| g.screen(k, x, y));
-                                    let Some(first) = pts.next() else { continue };
-                                    path.move_to(first);
-                                    let mut drew = false;
-                                    for q in pts {
-                                        path.line_to(q);
-                                        drew = true;
-                                    }
-                                    if !drew {
-                                        path.line_to(first + point(px(0.6), px(0.6)));
-                                    }
-                                }
-                                if let Ok(path) = path.build() {
-                                    let colour = ink.map_or(gpui_kit::black(), |[r, g, b]| Hsla::from(Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }));
-                                    window.paint_path(path, colour);
-                                }
+                        for &k in &visible {
+                            let o = g.page_origin(k);
+                            let paths = cache.page(k, || PagePaths::build(&layout_doc, &ink_of, &g, k));
+                            for (colour, p) in &paths.ink {
+                                window.paint_path(translated(p, o), *colour);
                             }
                         }
+                        drop(cache);
                         // 内容溢出: a warning badge in each overflowing cell's top-left corner.
-                        for c in layout_doc.overflowing() {
+                        for c in layout_doc.overflowing().into_iter().filter(|c| on_screen(c.page)) {
                             let a = g.screen(c.page, c.rect.0, c.rect.1);
                             let side = px(BADGE_MM * g.zoom);
                             window.paint_quad(fill(Bounds::new(a, size(side, side)), missing_color));
@@ -1027,7 +1020,7 @@ impl Render for DocView {
                         }
                         // 书写原点: a blue ring where the pen tip must stand at job start.
                         let ring = px((1.6 * g.zoom).max(5.0));
-                        for k in 0..pages {
+                        for &k in &visible {
                             let c = g.screen(k, origin_pt.0, origin_pt.1);
                             let b = Bounds::new(c - point(ring, ring), size(ring * 2.0, ring * 2.0));
                             window.paint_quad(quad(b, ring, transparent_black(), px(2.0), ORIGIN_BLUE, BorderStyle::Solid));
@@ -1108,7 +1101,7 @@ impl Render for DocView {
 
 /// 行号 in the left margin (counted per page) and 第 n 页 under each page.
 #[allow(clippy::too_many_arguments)]
-fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, pages: usize, lines: bool, page_nums: bool) {
+fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, visible: &[usize], lines: bool, page_nums: bool) {
     if !lines && !page_nums {
         return;
     }
@@ -1130,12 +1123,15 @@ fn paint_numbers(window: &mut Window, cx: &mut App, g: &Geom, d: &Document, page
                 (page, n) = (l.page, 0);
             }
             n += 1;
+            if visible.binary_search(&l.page).is_err() {
+                continue;
+            }
             let mid = g.screen(l.page, 0.0, (l.top + l.bottom) / 2.0);
             text(window, n.to_string(), mid - point(px(2.0 * g.zoom), px(0.0)), true);
         }
     }
     if page_nums {
-        for k in 0..pages {
+        for &k in visible {
             let o = g.page_origin(k);
             // In the gap under the page, where the template's ruling can't cover it.
             let at = o + point(px(g.page_w / 2.0), px(g.page_h + GAP / 2.0));
@@ -1174,11 +1170,100 @@ fn sheet(p: &PageSettings) -> chixie_rs_output::Sheet {
 }
 
 /// Light-blue ruling lines; dashed ones are cut into 1.2 mm dashes.
-pub fn paint_guides(window: &mut Window, guides: &[chixie_rs_core::layout::Guide], to_px: impl Fn(f32, f32) -> Point<Pixels>, zoom: f32) {
-    if guides.is_empty() {
-        return;
+pub fn paint_guides(window: &mut Window, guides: &[chixie_rs_core::layout::Guide], to_px: impl Fn(f32, f32) -> Point<Pixels>, _zoom: f32) {
+    if let Some(path) = guide_path(guides, to_px) {
+        window.paint_path(path, GUIDE_COLOUR);
     }
-    let color = hsla(210.0 / 360.0, 0.65, 0.55, 0.55);
+}
+
+const GUIDE_COLOUR: Hsla = Hsla { h: 210.0 / 360.0, s: 0.65, l: 0.55, a: 0.55 };
+
+/// Built page paths, keyed by the layout (its `Arc` address) and zoom; cleared when either
+/// changes. Paths are in page-local px (page top-left = 0, 0) and moved into place per frame.
+#[derive(Default)]
+struct PathCache {
+    key: (usize, u32),
+    pages: HashMap<usize, Rc<PagePaths>>,
+}
+
+impl PathCache {
+    fn reset_unless(&mut self, layout: usize, zoom: f32) {
+        let key = (layout, zoom.to_bits());
+        if self.key != key {
+            self.key = key;
+            self.pages.clear();
+        }
+    }
+
+    fn page(&mut self, k: usize, build: impl FnOnce() -> PagePaths) -> Rc<PagePaths> {
+        self.pages.entry(k).or_insert_with(|| Rc::new(build())).clone()
+    }
+}
+
+struct PagePaths {
+    guides: Option<Path<Pixels>>,
+    /// One path per pen colour.
+    ink: Vec<(Hsla, Path<Pixels>)>,
+}
+
+impl PagePaths {
+    fn build(d: &Document, ink_of: &[Option<chixie_rs_core::profile::Rgb>], g: &Geom, k: usize) -> Self {
+        let o = g.page_origin(k);
+        let local = |x: f32, y: f32| g.screen(k, x, y) - o;
+        let Some(p) = d.pages.get(k) else { return Self { guides: None, ink: Vec::new() } };
+        let guides = guide_path(&p.guides, local);
+        let stroke_w = px((0.35 * g.zoom).clamp(0.6, 2.5));
+        let colour_at = |i: usize| p.stroke_chars.get(i).and_then(|&c| ink_of.get(c).copied().flatten());
+        let mut inks: Vec<Option<chixie_rs_core::profile::Rgb>> = vec![None];
+        for i in 0..p.strokes.len() {
+            if let Some(c) = colour_at(i)
+                && !inks.contains(&Some(c))
+            {
+                inks.push(Some(c));
+            }
+        }
+        let mut ink = Vec::new();
+        for pen in inks {
+            let mut path = PathBuilder::stroke(stroke_w);
+            let mut any = false;
+            for s in p.strokes.iter().enumerate().filter(|(i, _)| colour_at(*i) == pen).map(|(_, s)| s) {
+                let mut pts = s.iter().map(|&(x, y)| local(x, y));
+                let Some(first) = pts.next() else { continue };
+                path.move_to(first);
+                any = true;
+                let mut drew = false;
+                for q in pts {
+                    path.line_to(q);
+                    drew = true;
+                }
+                if !drew {
+                    path.line_to(first + point(px(0.6), px(0.6)));
+                }
+            }
+            if any && let Ok(path) = path.build() {
+                let colour = pen.map_or(gpui_kit::black(), |[r, g, b]| Hsla::from(Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }));
+                ink.push((colour, path));
+            }
+        }
+        Self { guides, ink }
+    }
+}
+
+/// `p` moved by `by` (a cached page-local path put in place for this frame).
+fn translated(p: &Path<Pixels>, by: Point<Pixels>) -> Path<Pixels> {
+    let mut p = p.clone();
+    p.bounds.origin = p.bounds.origin + by;
+    for v in &mut p.vertices {
+        v.xy_position = v.xy_position + by;
+    }
+    p
+}
+
+/// The template's ruling as one stroked path (dashed guides as short segments).
+fn guide_path(guides: &[chixie_rs_core::layout::Guide], to_px: impl Fn(f32, f32) -> Point<Pixels>) -> Option<Path<Pixels>> {
+    if guides.is_empty() {
+        return None;
+    }
     let mut path = PathBuilder::stroke(px(1.0));
     for gd in guides {
         if gd.dashed {
@@ -1196,10 +1281,7 @@ pub fn paint_guides(window: &mut Window, guides: &[chixie_rs_core::layout::Guide
             path.line_to(to_px(gd.b.0, gd.b.1));
         }
     }
-    let _ = zoom;
-    if let Ok(path) = path.build() {
-        window.paint_path(path, color);
-    }
+    path.build().ok()
 }
 
 #[cfg(test)]
