@@ -19,6 +19,7 @@ mod doc_view;
 mod fake;
 mod file_ops;
 mod find_bar;
+mod import_ui;
 mod cloud_preview;
 mod font_preview;
 mod font_lib;

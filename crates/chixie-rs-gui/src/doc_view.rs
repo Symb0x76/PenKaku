@@ -567,6 +567,12 @@ impl DocView {
         self.doc.select_range(r);
         self.after_move(cx);
     }
+    /// 导入: add chars by `mode` (one undo step).
+    pub fn import_chars(&mut self, chars: Vec<(char, Option<chixie_rs_doc::model::Attrs>)>, mode: chixie_rs_doc::import::ImportMode, cx: &mut Context<Self>) {
+        let chars = if table_mode(cx) { chars.into_iter().map(|(c, a)| (if c == '\t' { layout::CELL_BREAK } else { c }, a)).collect() } else { chars };
+        self.doc.import_chars(chars, mode);
+        self.edited(cx);
+    }
     /// Replace several ranges (替换 / 全部替换, one undo step).
     pub fn replace_ranges(&mut self, edits: Vec<(Range<usize>, String)>, cx: &mut Context<Self>) {
         self.doc.replace_many(edits);
@@ -896,6 +902,12 @@ impl Render for DocView {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
+            // A file dropped on the page is imported (导入).
+            .on_drop(cx.listener(|_, paths: &ExternalPaths, w, cx| {
+                if let Some(p) = paths.paths().first() {
+                    crate::import_ui::import_path(cx.entity(), p.clone(), w, cx);
+                }
+            }))
             .on_scroll(cx.listener(Self::scroll_zoom))
             .cursor(CursorStyle::IBeam)
             .child(

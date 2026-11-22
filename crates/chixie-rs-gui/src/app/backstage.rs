@@ -126,6 +126,17 @@ impl ChixieRsApp {
                     .label("浏览…")
                     .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_doc(w, cx))),
             )
+            .child(div().pt_4().text_sm().text_color(muted).child("把文件中的文字导入当前文档（txt、docx、pdf、xlsx；表格模板可导入 xlsx 填表）。也可以把文件拖到页面上。"))
+            .child(
+                Button::new("bs-import")
+                    .large()
+                    .icon(Icon::new(IconName::FileInput))
+                    .label("导入到当前文档…")
+                    .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
+                        t.close_backstage(w, cx);
+                        crate::import_ui::pick_and_import(t.doc.clone(), w, cx);
+                    })),
+            )
             .into_any_element()
     }
 

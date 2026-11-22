@@ -277,6 +277,13 @@ pub fn read(bytes: &[u8]) -> Result<Vec<PdfPage>, String> {
     Ok(out)
 }
 
+/// The text of every page (导入 into a document); an empty string for a page with none (a scan,
+/// or glyphs without a text mapping).
+pub fn text(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let doc = Document::load_mem(bytes).map_err(|e| e.to_string())?;
+    Ok(doc.get_pages().keys().map(|&n| doc.extract_text(&[n]).unwrap_or_default().trim_end().to_string()).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +299,12 @@ mod tests {
         for (k, w) in a.cols.iter().enumerate() {
             assert!((w - (f.xs[k + 1] - f.xs[k])).abs() < 0.5, "col {k}: {w}");
         }
+    }
+
+    #[test]
+    fn page_text_and_image_only_pages() {
+        let pdf = synth::pdf_with_text(&["Hello PDF", ""]);
+        assert_eq!(text(&pdf).unwrap(), vec!["Hello PDF".to_string(), String::new()]);
     }
 
     #[test]

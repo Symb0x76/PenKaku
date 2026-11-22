@@ -1074,6 +1074,7 @@ version = "0.1.0"
 dependencies = [
  "chixie-rs-core",
  "chixie-rs-output",
+ "encoding_rs",
  "proptest",
  "quick-xml 0.41.0",
  "serde",

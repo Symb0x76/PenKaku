@@ -5,6 +5,7 @@ pub mod chx;
 pub mod docx;
 pub mod edit;
 pub mod find;
+pub mod import;
 pub mod model;
 
 use std::path::Path;
@@ -14,8 +15,8 @@ pub use edit::EditDoc;
 pub use find::FindOpts;
 pub use model::{Align, Attrs, Char, Command, Document, Para};
 
-/// Open a document by extension: `.docx`, `.chx` (v1, migrated), anything else as UTF-8 text
-/// (BOM and CRLF tolerated; fresh ids, no seed).
+/// Open a document by extension: `.docx`, `.chx` (v1, migrated), anything else as text
+/// (UTF-8 / UTF-16 / GB18030, see [`import::decode_text`]; fresh ids, no seed).
 pub fn open(path: &Path) -> std::io::Result<Loaded> {
     let bytes = std::fs::read(path)?;
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
@@ -23,10 +24,7 @@ pub fn open(path: &Path) -> std::io::Result<Loaded> {
     match ext.as_deref() {
         Some("docx") => docx::read(&bytes).map_err(|e| invalid(e.to_string())),
         Some("chx") => chx::read(&bytes).map_err(|e| invalid(e.to_string())),
-        _ => {
-            let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
-            Ok(Loaded { doc: Document::from_text(text.trim_start_matches('\u{feff}')), seed: None })
-        }
+        _ => Ok(Loaded { doc: Document::from_text(&import::decode_text(&bytes)), seed: None }),
     }
 }
 
