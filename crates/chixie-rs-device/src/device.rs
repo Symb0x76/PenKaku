@@ -837,6 +837,22 @@ mod tests {
         h.send(Command::Shutdown);
     }
 
+    /// A 自定义命令 is sent as one `Command::Send` per line; the board must see them in that order.
+    #[test]
+    fn custom_command_lines_send_in_order() {
+        let (h, ev, fake) = start(Fake::default());
+        wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
+        for line in ["G21", "G90", "G0 X10.000 Y10.000"] {
+            h.send(Command::Send(line.into()));
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while fake.lock().unwrap().lines.len() < 4 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(fake.lock().unwrap().lines, vec!["$I", "G21", "G90", "G0 X10.000 Y10.000"]);
+        h.send(Command::Shutdown);
+    }
+
     #[test]
     fn query_machine_parses_dollar_dollar() {
         // Grbl answers `$$` with one line per setting, then `ok`.

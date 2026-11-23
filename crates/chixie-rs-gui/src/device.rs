@@ -2,16 +2,20 @@
 //! (port choice, jog pad, pen/unlock/zero, live position, console, job progress).
 //! Job start / sheet change / stop prompts live in `app.rs` because they need the document.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::time::Duration;
 
+use chixie_rs_core::config::{CONSOLE_HISTORY_MAX, CustomCommand};
 use chixie_rs_device::device::{Command, DeviceHandle, Dir, Event, Job, JobOutcome, Pen, Target};
 use chixie_rs_device::grbl::{self, GrblStatus};
 use chixie_rs_device::transport::{self, PortInfo};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -73,6 +77,10 @@ pub struct DevicePanel {
     /// Outcome of the last finished job (status bar / autotest).
     pub last_end: Option<JobOutcome>,
     console: Entity<InputState>,
+    /// Console ↑/↓ recall: index into `console_history` (newest first); `None` = the live line.
+    history_pos: Option<usize>,
+    /// The live line, kept while ↑ recalls older commands.
+    history_draft: String,
     /// 0 = 连接与控制, 1 = 参数设置.
     pub tab: usize,
     pub params: Entity<DeviceParams>,
@@ -100,7 +108,10 @@ impl DevicePanel {
             if let InputEvent::PressEnter { .. } = ev {
                 let line = s.read(cx).value().trim().to_string();
                 if !line.is_empty() {
-                    this.handle.send(Command::Send(line));
+                    this.handle.send(Command::Send(line.clone()));
+                    remember_console_line(&line, cx);
+                    this.history_pos = None;
+                    this.history_draft.clear();
                     s.update(cx, |s, cx| s.set_value("", window, cx));
                 }
             }
@@ -119,6 +130,8 @@ impl DevicePanel {
             job: None,
             last_end: None,
             console,
+            history_pos: None,
+            history_draft: String::new(),
             tab: 0,
             params,
             alarm: false,
@@ -169,6 +182,40 @@ impl DevicePanel {
     }
     pub fn busy(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// The console and 自定义命令 buttons work only while connected with no job running: the
+    /// device actor does not service `Send` mid-job.
+    pub fn console_enabled(&self) -> bool {
+        self.is_connected() && !self.busy()
+    }
+
+    /// ↑/↓ in the console recall earlier lines; ↓ past the newest restores the live line.
+    fn console_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let up = match ev.keystroke.key.as_str() {
+            "up" => true,
+            "down" => false,
+            _ => return,
+        };
+        if !self.console_enabled() || (self.history_pos.is_none() && !up) {
+            return;
+        }
+        let history = cx.global::<AppState>().settings.device.console_history.clone();
+        if history.is_empty() {
+            return; // nothing to recall: leave the key to the input
+        }
+        let next = history_step(history.len(), self.history_pos, up);
+        if self.history_pos.is_none() {
+            self.history_draft = self.console.read(cx).value().to_string();
+        }
+        let text = match next {
+            Some(i) => history[i].clone(),
+            None => std::mem::take(&mut self.history_draft),
+        };
+        self.history_pos = next;
+        self.console.update(cx, |s, cx| s.set_value(text, window, cx));
+        cx.stop_propagation();
+        cx.notify();
     }
 
     pub fn refresh_ports(&mut self, cx: &mut Context<Self>) {
@@ -552,9 +599,188 @@ impl DevicePanel {
                     .text_xs()
                     .children(lines),
             )
-            .child(Input::new(&self.console).small().disabled(!self.is_connected()))
+            .child(
+                // Capture phase, so ↑/↓ reach here before the input's own cursor-up/down handling.
+                div()
+                    .capture_key_down(cx.listener(|t, ev: &KeyDownEvent, window, cx| t.console_key(ev, window, cx)))
+                    .child(Input::new(&self.console).small().disabled(!self.console_enabled())),
+            )
             .into_any_element()
     }
+
+    /// 自定义命令 buttons under the console; the ⚙ button opens the editor.
+    #[inline(never)]
+    fn custom_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let enabled = self.console_enabled();
+        let commands = cx.global::<AppState>().settings.device.custom_commands.clone();
+        let grid = if commands.is_empty() {
+            div().text_xs().text_color(muted).child("尚未添加，点 ⚙ 新建按钮").into_any_element()
+        } else {
+            h_flex()
+                .flex_wrap()
+                .gap_1()
+                .children(commands.iter().enumerate().map(|(i, c)| {
+                    Button::new(("custom-cmd", i))
+                        .small()
+                        .label(c.name.clone())
+                        .disabled(!enabled)
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| t.run_custom_command(i, cx)))
+                }))
+                .into_any_element()
+        };
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("自定义命令"))
+                    .child(Button::new("custom-edit").small().label("⚙").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_command_editor(w, cx)))),
+            )
+            .child(grid)
+            .into_any_element()
+    }
+
+    /// Send each non-blank line of a 自定义命令 in order; the actor replies to each before the next.
+    fn run_custom_command(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.console_enabled() {
+            return;
+        }
+        let Some(cmd) = cx.global::<AppState>().settings.device.custom_commands.get(index).cloned() else {
+            return;
+        };
+        for line in command_lines(&cmd.lines) {
+            self.send(Command::Send(line));
+        }
+        cx.notify();
+    }
+
+    /// 自定义命令 editor: pick a button to edit, 添加/保存, 删除 or 新建. Edits go straight to settings.
+    fn open_command_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = cx.entity();
+        let sel: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("例如：归零"));
+        let lines = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 10));
+        window.open_dialog(cx, move |d, _w, cx| {
+            let muted = cx.theme().muted_foreground;
+            let commands = cx.global::<AppState>().settings.device.custom_commands.clone();
+            let cur = sel.get();
+            let picks: Vec<Button> = commands
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let (sel, name, lines) = (sel.clone(), name.clone(), lines.clone());
+                    let b = Button::new(("cmd-pick", i)).small().label(c.name.clone());
+                    let b = if cur == Some(i) { b.primary() } else { b };
+                    b.on_click(move |_: &ClickEvent, w, cx| {
+                        sel.set(Some(i));
+                        let c = cx.global::<AppState>().settings.device.custom_commands.get(i).cloned().unwrap_or_default();
+                        set_editor(&name, &lines, &c.name, &c.lines, w, cx);
+                        cx.refresh_windows();
+                    })
+                })
+                .collect();
+            let (sel_s, name_s, lines_s, panel_s) = (sel.clone(), name.clone(), lines.clone(), panel.clone());
+            let save = Button::new("cmd-save").small().primary().label("添加/保存").on_click(move |_: &ClickEvent, w, cx| {
+                let title = name_s.read(cx).value().trim().to_string();
+                let body = command_lines(&lines_s.read(cx).value());
+                if title.is_empty() {
+                    w.push_notification(Notification::warning("请输入按钮名称"), cx);
+                    return;
+                }
+                if body.is_empty() {
+                    w.push_notification(Notification::warning("请输入按钮命令"), cx);
+                    return;
+                }
+                let mut cmds = cx.global::<AppState>().settings.device.custom_commands.clone();
+                let cmd = CustomCommand { name: title, lines: body.join("\n") };
+                let at = match sel_s.get() {
+                    Some(i) if i < cmds.len() => {
+                        cmds[i] = cmd;
+                        i
+                    }
+                    _ => {
+                        cmds.push(cmd);
+                        cmds.len() - 1
+                    }
+                };
+                sel_s.set(Some(at));
+                store_custom_commands(&panel_s, cmds, cx);
+                w.push_notification(Notification::success("已保存"), cx);
+            });
+            let (sel_d, name_d, lines_d, panel_d) = (sel.clone(), name.clone(), lines.clone(), panel.clone());
+            let del = Button::new("cmd-delete").small().danger().label("删除").disabled(cur.is_none()).on_click(move |_: &ClickEvent, w, cx| {
+                let Some(i) = sel_d.get() else { return };
+                let mut cmds = cx.global::<AppState>().settings.device.custom_commands.clone();
+                if i < cmds.len() {
+                    cmds.remove(i);
+                }
+                sel_d.set(None);
+                set_editor(&name_d, &lines_d, "", "", w, cx);
+                store_custom_commands(&panel_d, cmds, cx);
+            });
+            let (sel_n, name_n, lines_n) = (sel.clone(), name.clone(), lines.clone());
+            let new = Button::new("cmd-new").small().label("新建").on_click(move |_: &ClickEvent, w, cx| {
+                sel_n.set(None);
+                set_editor(&name_n, &lines_n, "", "", w, cx);
+                cx.refresh_windows();
+            });
+            let close = Button::new("cmd-close").small().label("关闭").on_click(|_: &ClickEvent, w, cx| w.close_dialog(cx));
+            d.title("自定义命令").w(px(460.)).child(
+                v_flex()
+                    .gap_3()
+                    .child(div().text_xs().text_color(muted).child("点按钮载入编辑。每行一条 G-code 或 $ 命令，按顺序发送。"))
+                    .child(h_flex().flex_wrap().gap_1().children(picks))
+                    .child(h_flex().gap_2().child(div().text_sm().child("按钮名称")).child(div().flex_1().child(Input::new(&name).small())))
+                    .child(v_flex().gap_1().child(div().text_sm().child("按钮命令")).child(Textarea::new(&lines))),
+            )
+            .footer(h_flex().gap_2().justify_end().child(del).child(new).child(save).child(close))
+        });
+    }
+}
+
+/// Replace the editor fields (name and command lines) with the given text.
+fn set_editor(name: &Entity<InputState>, lines: &Entity<TextareaState>, title: &str, body: &str, w: &mut Window, cx: &mut App) {
+    name.update(cx, |s, cx| s.set_value(title.to_string(), w, cx));
+    lines.update(cx, |s, cx| s.set_value(body.to_string(), w, cx));
+}
+
+/// Write the custom command list to settings, then redraw the panel and open dialogs.
+fn store_custom_commands(panel: &Entity<DevicePanel>, cmds: Vec<CustomCommand>, cx: &mut App) {
+    let st = cx.global_mut::<AppState>();
+    st.settings.device.custom_commands = cmds;
+    st.save_settings();
+    panel.update(cx, |_, cx| cx.notify());
+    cx.refresh_windows();
+}
+
+/// The non-blank lines of a 自定义命令, trimmed, in order.
+pub fn command_lines(text: &str) -> Vec<String> {
+    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
+}
+
+/// Console ↑/↓ over `len` entries, newest first. `pos` is the shown entry (`None` = the live
+/// line); the result is the next one, back to `None` once ↓ passes the newest.
+pub fn history_step(len: usize, pos: Option<usize>, up: bool) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    match (up, pos) {
+        (true, None) => Some(0),
+        (true, Some(i)) => Some((i + 1).min(len - 1)),
+        (false, Some(i)) if i > 0 => Some(i - 1),
+        (false, _) => None,
+    }
+}
+
+/// Move a sent console line to the top of the history (no repeats), capped and saved.
+fn remember_console_line(line: &str, cx: &mut App) {
+    let st = cx.global_mut::<AppState>();
+    let history = &mut st.settings.device.console_history;
+    history.retain(|l| l != line);
+    history.insert(0, line.to_string());
+    history.truncate(CONSOLE_HISTORY_MAX);
+    st.save_settings();
 }
 
 pub fn state_zh(s: &str) -> &'static str {
@@ -608,6 +834,35 @@ impl Render for DevicePanel {
                     .child(self.job_section(cx))
                     .child(sep())
                     .child(self.console_section(cx))
+                    .child(sep())
+                    .child(self.custom_section(cx))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[core::prelude::v1::test]
+    fn history_recall_walks_newest_first_and_restores_the_live_line() {
+        // Empty history: nothing to recall.
+        assert_eq!(history_step(0, None, true), None);
+        // ↑ from the live line lands on the newest entry, then clamps at the oldest.
+        assert_eq!(history_step(3, None, true), Some(0));
+        assert_eq!(history_step(3, Some(0), true), Some(1));
+        assert_eq!(history_step(3, Some(1), true), Some(2));
+        assert_eq!(history_step(3, Some(2), true), Some(2));
+        // ↓ walks back toward newest, and past it returns to the live line.
+        assert_eq!(history_step(3, Some(2), false), Some(1));
+        assert_eq!(history_step(3, Some(0), false), None);
+        // ↓ on the live line stays there.
+        assert_eq!(history_step(3, None, false), None);
+    }
+
+    #[core::prelude::v1::test]
+    fn command_lines_skip_blanks_and_trim_in_order() {
+        assert_eq!(command_lines("  G21 \n\n$H\n   \nG90"), vec!["G21", "$H", "G90"]);
+        assert!(command_lines(" \n\t\n").is_empty());
     }
 }

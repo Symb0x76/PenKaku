@@ -66,6 +66,9 @@ impl FontSettings {
     }
 }
 
+/// Console input history kept in settings (newest first).
+pub const CONSOLE_HISTORY_MAX: usize = 50;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DeviceSettings {
@@ -75,6 +78,18 @@ pub struct DeviceSettings {
     pub last_ip: Option<String>,
     /// Connect by itself when a ChiXie USB board (or `last_port`) appears.
     pub auto_connect: bool,
+    /// 自定义命令: named buttons under the console; each line of `lines` is sent in order.
+    pub custom_commands: Vec<CustomCommand>,
+    /// Console input history, newest first, at most `CONSOLE_HISTORY_MAX` entries.
+    pub console_history: Vec<String>,
+}
+
+/// One 自定义命令 button: `lines` holds G-code / `$` lines, one command per line.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomCommand {
+    pub name: String,
+    pub lines: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -125,7 +140,15 @@ pub struct UiSettings {
 
 impl Default for DeviceSettings {
     fn default() -> Self {
-        Self { profile: DeviceProfile::default(), baud: DEFAULT_BAUD, last_port: None, last_ip: None, auto_connect: true }
+        Self {
+            profile: DeviceProfile::default(),
+            baud: DEFAULT_BAUD,
+            last_port: None,
+            last_ip: None,
+            auto_connect: true,
+            custom_commands: Vec::new(),
+            console_history: Vec::new(),
+        }
     }
 }
 
@@ -391,6 +414,19 @@ stroke_deform_degree=1
         let has_password_key = text.lines().any(|l| l.trim_start().to_lowercase().starts_with("password"));
         assert!(!has_password_key, "no password field may be persisted:\n{text}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn device_custom_commands_and_history_roundtrip() {
+        let mut s = Settings::default();
+        s.device.custom_commands = vec![CustomCommand { name: "归零".into(), lines: "G92 X0 Y0\n$H".into() }];
+        s.device.console_history = vec!["$$".into(), "G0 X10".into()];
+        let text = toml::to_string(&s).unwrap();
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(back.device, s.device);
+        // Files written before these fields existed still load, with both lists empty.
+        let old: Settings = toml::from_str("[device]\nbaud = 115200\n").unwrap();
+        assert!(old.device.custom_commands.is_empty() && old.device.console_history.is_empty());
     }
 
     #[test]
