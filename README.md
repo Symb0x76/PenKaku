@@ -6,7 +6,8 @@ A desktop client for ChiXie pen-plotter handwriting machines (Grbl_ESP32 boards)
 Rust. It replaces the ChiXie3 Windows client: you type a document, lay it out on a template in
 a handwriting font, and the machine writes it with a pen.
 
-Internal tool. Runs on Windows, macOS and Linux. Fonts come from your ChiXie account.
+Internal tool. Runs on Windows, macOS and Linux. Fonts are downloaded with your ChiXie account;
+once downloaded they stay on this computer and work with or without logging in.
 
 ## Features
 
