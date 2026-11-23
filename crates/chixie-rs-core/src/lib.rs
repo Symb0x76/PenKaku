@@ -12,6 +12,7 @@ pub mod font_store;
 pub mod handwriting;
 pub mod layout;
 pub mod path;
+pub mod pickle;
 pub mod profile;
 pub mod session;
 

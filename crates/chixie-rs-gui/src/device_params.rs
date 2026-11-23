@@ -177,21 +177,63 @@ impl DeviceParams {
         self.store(p, cx);
     }
 
-    /// Read ChiXie3's own `config.ini` and take its (first) device.
-    fn import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 从炽写配置导入: ChiXie3's own `config.ini`.
+    fn import_ini(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from).unwrap_or_default().join("ChiXie3/conf/config.ini");
         let res = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| chixie3_devices::import(&String::from_utf8_lossy(&b)).map_err(|e| e.to_string()));
+        self.offer(res, &path, window, cx);
+    }
+
+    /// 从 .cset 文件导入: pick a ChiXie3 device-parameter file. The picker cannot filter by
+    /// extension, so a file that is not one fails to read with an error notice.
+    fn import_cset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.entity();
+        let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("选择炽写设备参数文件（*.cset）".into()) });
+        window
+            .spawn(cx, async move |cx| {
+                let Ok(Ok(Some(paths))) = rx.await else { return };
+                let Some(path) = paths.into_iter().next() else { return };
+                let _ = cx.update(|w, cx| view.update(cx, |v, cx| v.load_cset(&path, w, cx)));
+            })
+            .detach();
+    }
+
+    fn load_cset(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
+        let res = std::fs::read(path).map_err(|e| e.to_string()).and_then(|b| chixie3_devices::import_cset(&b).map_err(|e| e.to_string()));
+        self.offer(res, path, window, cx);
+    }
+
+    /// Apply the devices read from `path`: one goes straight in, several let the user choose.
+    fn offer(&mut self, res: Result<Vec<DeviceProfile>, String>, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
         match res {
-            Ok(ds) if !ds.is_empty() => {
-                let d = ds[0].clone();
-                let name = d.name.clone();
-                self.store(d, cx);
-                self.load(window, cx);
-                window.push_notification(Notification::success(format!("已导入炽写设备「{name}」的参数")), cx);
-            }
-            Ok(_) => window.push_notification(Notification::warning("炽写配置里没有设备参数"), cx),
+            Ok(mut ds) if ds.len() == 1 => self.adopt(ds.remove(0), window, cx),
+            Ok(ds) if ds.is_empty() => window.push_notification(Notification::warning(format!("{} 里没有设备参数", path.display())), cx),
+            Ok(ds) => self.choose(ds, window, cx),
             Err(e) => window.push_notification(Notification::error(format!("读取 {} 失败：{e}", path.display())), cx),
         }
+    }
+
+    /// Several devices in the file: a dialog lists them and the picked one is applied.
+    fn choose(&self, ds: Vec<DeviceProfile>, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.entity();
+        window.open_dialog(cx, move |d, _w, _cx| {
+            let rows = ds.iter().enumerate().map(|(i, p)| {
+                let (view, p) = (view.clone(), p.clone());
+                Button::new(format!("pick-device-{i}")).w_full().label(p.name.clone()).on_click(move |_: &ClickEvent, w: &mut Window, cx: &mut App| {
+                    w.close_dialog(cx);
+                    view.update(cx, |v, cx| v.adopt(p.clone(), w, cx));
+                })
+            });
+            d.title("选择要导入的设备").w(px(380.)).child(v_flex().gap_2().children(rows))
+        });
+    }
+
+    /// Make `d` this device's profile and show it.
+    fn adopt(&mut self, d: DeviceProfile, window: &mut Window, cx: &mut Context<Self>) {
+        let name = d.name.clone();
+        self.store(d, cx);
+        self.load(window, cx);
+        window.push_notification(Notification::success(format!("已导入炽写设备「{name}」的参数")), cx);
     }
 
     #[inline(never)]
@@ -454,13 +496,19 @@ impl DeviceParams {
                     .flex_wrap()
                     .child(Button::new("p-down").small().label("测试落笔").on_click(cx.listener(|v, _: &ClickEvent, _w, _cx| v.handle.send(Command::Pen(Pen::Down)))))
                     .child(Button::new("p-up").small().label("测试抬笔").on_click(cx.listener(|v, _: &ClickEvent, _w, _cx| v.handle.send(Command::Pen(Pen::Up)))))
-                    .child(
+                    .child({
+                        let this = cx.entity();
                         Button::new("p-import")
                             .small()
                             .icon(Icon::new(IconName::Import))
                             .label("从炽写导入")
-                            .on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.import(w, cx))),
-                    ),
+                            .dropdown_caret(true)
+                            .dropdown_menu(move |m, _w, _cx| {
+                                let (a, b) = (this.clone(), this.clone());
+                                m.item(PopupMenuItem::new("炽写配置 (config.ini)").on_click(move |_, w, cx| a.update(cx, |v, cx| v.import_ini(w, cx))))
+                                    .item(PopupMenuItem::new("设备参数文件 (*.cset)…").on_click(move |_, w, cx| b.update(cx, |v, cx| v.import_cset(w, cx))))
+                            })
+                    }),
             )
             .into_any_element()
     }
