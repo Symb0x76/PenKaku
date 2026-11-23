@@ -9,6 +9,10 @@
   - layout/gcode split; Grbl pause/status; device actor;
   - calibration; handwriting jitter; deformation; style TOML; CLI flags.
 - Tests: 52 core (+1 opt-in keyring) + 2 goldens; GUI autotest passes; clippy clean.
+- M9 Step 7 (`.cset` import) on `claude/upbeat-engelbart-aa9c11`: core `pickle.rs` (safe reader,
+  shared with templates), `chixie3_devices::import_cset`, 从炽写导入 menu (config.ini | .cset) with a
+  device picker. gpui's file prompt has no extension filter, so the picker is unfiltered. Workspace
+  tests: 283 passed, 2 ignored; clippy clean. GUI dialogs not yet clicked through.
 
 ## Open / VERIFY
 - Space width; wrap rule (glyph origin vs right edge); first-line indent mode; `row_offset_style`
@@ -300,3 +304,28 @@
   - agent-desktop notes: the gpui window has no useful UIA tree; drive with `--headed mouse-click --xy` from
     screenshots (window origin + (9, 0)); `press shift+right` does not extend selections (use Shift+click);
     text goes in via `clipboard-set` + `press ctrl+v`.
+- **M9 (2026-11-22), branch `m9-perf`** (plan `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`; BOSS
+  re-scoped: wired + this board only, focus on speed and improvements over ChiXie3; N1 / wireless / 配网 dropped):
+  - Perf, measured by `AUTOTEST_PERF` (16 styled pages, CI debug; macOS runner paints no frames) and
+    `crates/chixie-rs-core/tests/layout_timing.rs` (`--ignored`, 8000 chars):
+
+    | step | relayout | paint/frame |
+    |---|---|---|
+    | before | ~500 ms (mac 690) | ~140 ms |
+    | visible pages + path cache (`doc_view.rs` `PathCache`, `PagePaths`) | ~500 | ~15 |
+    | `layout::DeformCache` (core, passed in `Flow`) | ~40 (mac 58) | ~15 |
+    | deps `opt-level = 2` in debug | ~37 (mac 74) | ~3–5 |
+
+    Core timing: styled 8000 chars 262 → 7.6 ms debug, 15.7 → 1.6 ms release. Incremental reflow
+    (plan step 3b) not needed after the cache; not done. `[profile.dev.package."*"] opt-level = 2`
+    added (CI ships debug builds).
+  - `perf.rs`: `CHIXIE_RS_PERF=1` logs relayout / paint ms.
+  - 中英文分开设置: `HandwritingStyle::{english, number}: ScriptStyle` (scale %, baseline, float,
+    deformation; `None` = 同中文). Size and baseline fold into `CharStyle.scale` / `Tuning.dy_mm`.
+    手写效果 dialog has 中文 / 英文 / 数字 tabs. `AUTOTEST_SCRIPT`.
+  - 固件参数: `MachineSettings.all` (numeric + named keys), `Command::{WriteSettings, ResetSettings}`,
+    `firmware.rs` dialog (设备 › 固件), sim stores `$k=v`. `AUTOTEST_FIRMWARE`. Checklist 13j/13k.
+  - Icons: `Settings2`, `Dot`, `FileInput`, `FolderInput` were not bundled; embedded (scan: every
+    `IconName::X` vs gpui-kit-assets `default-icons.txt` + `icons.rs`).
+  - Parallel sessions proposed (not started by BOSS yet): step 6 自定义命令 + history (`m9-commands`),
+    step 7 `.cset` import (`m9-cset`).

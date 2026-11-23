@@ -96,6 +96,49 @@ pub struct HandwritingStyle {
     pub line_start_offset: Span,
     /// Indent of a paragraph's first line, mm. `None` = not applied (ChiXie3 default mode).
     pub first_line_indent: Option<Span>,
+    /// 中英文分开设置: Latin letters and digits can differ from Chinese (not in ChiXie3).
+    pub english: ScriptStyle,
+    pub number: ScriptStyle,
+}
+
+/// Size, baseline, float and deformation of one script (English letters or digits), on top of
+/// the Chinese settings. The defaults change nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScriptStyle {
+    /// 大小, percent of the Chinese size (the advance scales too).
+    pub scale_pct: f32,
+    /// 基线偏移, mm; positive raises the glyph.
+    pub baseline_mm: f32,
+    /// 上下浮动; `None` = same as Chinese.
+    pub vertical_offset: Option<Span>,
+    /// 字符变形; `None` = same as Chinese.
+    pub deformation: Option<crate::deformation::Deformation>,
+}
+
+impl Default for ScriptStyle {
+    fn default() -> Self {
+        Self { scale_pct: 100.0, baseline_mm: 0.0, vertical_offset: None, deformation: None }
+    }
+}
+
+impl ScriptStyle {
+    /// Size or baseline differ from Chinese.
+    pub fn moves_glyph(&self) -> bool {
+        self.scale_pct != 100.0 || self.baseline_mm != 0.0
+    }
+}
+
+impl HandwritingStyle {
+    /// The script settings that apply to `c`, if it is an English letter or a digit.
+    pub fn script_of(&self, c: char) -> Option<&ScriptStyle> {
+        use crate::font::fontset::{CharClass, class_of};
+        match class_of(c) {
+            CharClass::English => Some(&self.english),
+            CharClass::Number => Some(&self.number),
+            _ => None,
+        }
+    }
 }
 
 impl Default for HandwritingStyle {
@@ -114,6 +157,8 @@ impl Default for HandwritingStyle {
             random_correct_offset: false,
             line_start_offset: Span::new(0.0, 2.0),
             first_line_indent: None,
+            english: ScriptStyle::default(),
+            number: ScriptStyle::default(),
         }
     }
 }
@@ -200,7 +245,16 @@ impl<'a> Jitter<'a> {
     /// the row: each row draws a slope (keyed by its first character) so the offset runs from
     /// one side of the range to the other, plus a little noise.
     pub fn vertical(&mut self, id: u64, x: f32, row_w: f32) -> f32 {
-        let r = self.style.vertical_offset;
+        self.vertical_in(self.style.vertical_offset, id, x, row_w)
+    }
+
+    /// [`Self::vertical`] for character `c`: English letters and digits may have their own range.
+    pub fn vertical_for(&mut self, c: char, id: u64, x: f32, row_w: f32) -> f32 {
+        let r = self.style.script_of(c).and_then(|s| s.vertical_offset).unwrap_or(self.style.vertical_offset);
+        self.vertical_in(r, id, x, row_w)
+    }
+
+    fn vertical_in(&mut self, r: Span, id: u64, x: f32, row_w: f32) -> f32 {
         // Second draw of the glyph stream (the first is spacing).
         let mut rng = self.rng(SALT_GLYPH, id);
         rng.next_u64();

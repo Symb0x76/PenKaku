@@ -23,6 +23,8 @@ mod segment;
 mod tests;
 
 pub use pen::glyph_for;
+mod cache;
+pub use cache::DeformCache;
 use pen::{Pen, draw_char};
 
 /// One pen-down polyline in machine mm.
@@ -462,6 +464,18 @@ impl Default for PageParams {
     }
 }
 
+impl PageParams {
+    /// The deformation for `c`: English letters and digits may have their own.
+    pub fn deformation_for(&self, c: char) -> &Deformation {
+        self.style.script_of(c).and_then(|s| s.deformation.as_ref()).unwrap_or(&self.deformation)
+    }
+
+    /// Any script deforms its glyphs.
+    pub fn any_deformation(&self) -> bool {
+        self.deformation.is_active() || [&self.style.english, &self.style.number].iter().any(|s| s.deformation.as_ref().is_some_and(Deformation::is_active))
+    }
+}
+
 /// Lay out `text` with `font`, using character positions as ids (`0..n`). Unknown characters
 /// advance like a space and are listed in `Document::missing`. See [`layout_ids`].
 pub fn layout(text: &str, font: &(impl Glyphs + ?Sized), p: &PageParams) -> Document {
@@ -500,6 +514,8 @@ pub struct Flow<'a> {
     pub tuning: &'a [Option<Tuning>],
     /// 字符格式 per char; missing or `None` = plain.
     pub styles: &'a [Option<CharStyle>],
+    /// Deformed glyphs from earlier layouts (the editor keeps one per font set).
+    pub deform_cache: Option<&'a DeformCache>,
 }
 
 /// Half-width in a grid: two in a row share one cell. Digits and the half space always;
@@ -573,18 +589,35 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
 
 /// One layout pass; `fits[seg]` overrides a table cell's size and rows.
 fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[Option<CellFit>]) -> Document {
-    let Flow { chars, ids, paras, joins, tuning, styles } = *f;
+    let Flow { chars, ids, paras, joins, tuning, styles, deform_cache } = *f;
+    if let Some(c) = deform_cache {
+        c.begin(p);
+    }
     assert_eq!(chars.len(), ids.len(), "one id per character");
     let para = |k: usize| paras.get(k).copied().unwrap_or_default();
     let join = |k: usize| joins.get(k).copied().unwrap_or(false);
-    let tune = |k: usize| tuning.get(k).copied().flatten().unwrap_or_default();
-    let style = |k: usize| styles.get(k).copied().flatten().unwrap_or_default();
+    // 中英文分开设置: a letter's or digit's own size and baseline ride on its 字符格式 and 字符微调.
+    let script = |k: usize| p.style.script_of(chars[k]).filter(|s| s.moves_glyph());
+    let tune = |k: usize| {
+        let mut t = tuning.get(k).copied().flatten().unwrap_or_default();
+        if let Some(s) = script(k) {
+            t.dy_mm -= s.baseline_mm;
+        }
+        t
+    };
+    let style = |k: usize| {
+        let mut st = styles.get(k).copied().flatten().unwrap_or_default();
+        if let Some(s) = script(k) {
+            st.scale *= s.scale_pct / 100.0;
+        }
+        st
+    };
     let mut para_ix = 0;
     let mut s = p.mm_per_unit;
     let table = matches!(p.ruling, Ruling::Table { .. });
     let (ox, oy) = p.origin;
     let jitter_on = p.style.enabled;
-    let deform_on = p.deformation.is_active();
+    let deform_on = p.any_deformation();
     let mut jit = Jitter::new(&p.style);
 
     let grid = match p.ruling {
@@ -593,6 +626,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
     };
     let mut pen = Pen {
         p,
+        deform_cache,
         chars,
         ids,
         styles,
@@ -848,10 +882,14 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
             }
             pen.cx += glyph.advance * s + p.char_spacing;
         } else {
-            let voff = if jitter_on { jit.vertical(id, pen.cx, pen.line_w) } else { 0.0 };
-            let mut drng = rng_for(p.style.seed, SALT_DEFORM, id);
-            let strokes = p.deformation.apply(&glyph.strokes, is_cjk(ch), s, &mut drng);
-            for stroke in &strokes {
+            let voff = if jitter_on { jit.vertical_for(ch, id, pen.cx, pen.line_w) } else { 0.0 };
+            let cjk = is_cjk(ch);
+            let make = || p.deformation_for(ch).apply(&glyph.strokes, cjk, s, &mut rng_for(p.style.seed, SALT_DEFORM, id));
+            let strokes = match deform_cache.filter(|_| deform_on) {
+                Some(c) => c.get_or((std::ptr::from_ref(glyph) as usize, id, s.to_bits(), cjk), make),
+                None => std::sync::Arc::new(make()),
+            };
+            for stroke in strokes.iter() {
                 pen.page.strokes.push(
                     stroke
                         .iter()

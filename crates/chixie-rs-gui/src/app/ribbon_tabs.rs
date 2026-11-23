@@ -589,6 +589,18 @@ impl ChixieRsApp {
             ))
             .child(group(
                 cx,
+                "firmware",
+                "固件",
+                h_flex().child(
+                    big("firmware", "固件参数", IconName::Settings2)
+                        .disabled(!connected || running)
+                        .tooltip("查看和修改控制板的 Grbl $ 参数")
+                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| crate::firmware::open(t.device.clone(), w, cx))),
+                ),
+                None,
+            ))
+            .child(group(
+                cx,
                 "pane",
                 "窗格",
                 h_flex().child(big("pane", if self.show_pane { "隐藏面板" } else { "设备面板" }, IconName::PanelRight).on_click(cx.listener(

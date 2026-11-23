@@ -1,10 +1,13 @@
-//! Import ChiXie3 device parameters (`config.ini` `[DeviceConfig] DeviceParams`).
+//! Import ChiXie3 device parameters: `config.ini` `[DeviceConfig] DeviceParams`, and `.cset` files.
 //!
 //! QSettings stores the value as `@Variant(<bytes>)`: a QDataStream-serialised QVariantMap
 //! `{device name: {key: value}}`, with the bytes escaped ini-style (`\0`, `\xHH`, `\b`, …). Only
 //! the QVariant types ChiXie3 writes are decoded (map, string, int, bool, double).
+//!
+//! A `.cset` is a Python pickle of the same `{device name: {key: value}}` dict (see `pickle`).
 
-use crate::profile::{AxisMap, DeviceProfile, DeviceType, Firmware};
+use crate::pickle;
+use crate::profile::{AxisMap, DeviceProfile, DeviceType, EndPosition, Firmware};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +53,34 @@ pub fn import(ini_text: &str) -> Result<Vec<DeviceProfile>> {
     Ok(devices.iter().map(|(name, params)| profile(name, params)).collect())
 }
 
+/// Every device in a `.cset` file, as profiles. Parsed as data only: nothing in it is executed.
+pub fn import_cset(bytes: &[u8]) -> Result<Vec<DeviceProfile>> {
+    let pickle::Value::Dict(devices) = pickle::parse(bytes)? else { return Err(bad(".cset is not a dict")) };
+    devices
+        .iter()
+        .map(|(name, params)| -> Result<DeviceProfile> {
+            let name = name.as_str().ok_or_else(|| bad("device name is not a string"))?;
+            match from_pickle(params) {
+                Some(p @ Value::Map(_)) => Ok(profile(name, &p)),
+                _ => Err(bad(&format!("{name}: parameters are not a dict"))),
+            }
+        })
+        .collect()
+}
+
+/// A `.cset` value in the shape `profile` reads. Entries of other kinds (lists, objects, None) are
+/// dropped, as an unknown key would be.
+fn from_pickle(v: &pickle::Value) -> Option<Value> {
+    Some(match v {
+        pickle::Value::Bool(b) => Value::Bool(*b),
+        pickle::Value::Int(i) => Value::Int(*i),
+        pickle::Value::Float(f) => Value::Double(*f),
+        pickle::Value::Str(s) => Value::Str(s.clone()),
+        pickle::Value::Dict(items) => Value::Map(items.iter().filter_map(|(k, v)| Some((k.as_str()?.to_string(), from_pickle(v)?))).collect()),
+        _ => return None,
+    })
+}
+
 fn profile(name: &str, p: &Value) -> DeviceProfile {
     let num = |k: &str| p.get(k).and_then(Value::num);
     let mut d = DeviceProfile { name: name.to_string(), ..Default::default() };
@@ -72,8 +103,17 @@ fn profile(name: &str, p: &Value) -> DeviceProfile {
     if let Some(v) = num("pauseTime") {
         d.pause_after_down_s = v.max(0.0) as f32;
     }
+    if let Some(v) = num("WriteDonePos") {
+        d.end_position = end_position(v as i64);
+    }
+    // Each axis is labelled by its `+` side (`x_plus`); its `-` side (`x_reduce`) is the opposite
+    // label, which stands in when the `+` one is missing.
     let dir = |k: &str| p.get(k).and_then(Value::text).unwrap_or_default().to_ascii_uppercase();
-    let (xp, yp) = (dir("x_plus"), dir("y_plus"));
+    let plus = |plus_key: &str, minus_key: &str| {
+        let label = dir(plus_key);
+        if label.is_empty() { opposite(&dir(minus_key)) } else { label }
+    };
+    let (xp, yp) = (plus("x_plus", "x_reduce"), plus("y_plus", "y_reduce"));
     let swap = xp.starts_with('Y');
     d.axis_map = AxisMap { swap_xy: swap, invert_x: xp.ends_with('-') && !swap || swap && yp.ends_with('-'), invert_y: if swap { xp.ends_with('-') } else { yp.ends_with('-') } };
     if xp.is_empty() && yp.is_empty() {
@@ -91,6 +131,26 @@ fn device_type(i: i64) -> DeviceType {
         2 => DeviceType::ElectromagnetPenUp,
         5 => DeviceType::CustomZ,
         _ => DeviceType::StepperPenUp,
+    }
+}
+
+/// ChiXie3 写完位置 (`WriteDonePos`) choices: 0 原点, 1 原点左侧2cm, 2 任务结束点.
+fn end_position(i: i64) -> EndPosition {
+    match i {
+        1 => EndPosition::OriginLeft { mm: EndPosition::ORIGIN_LEFT_MM },
+        2 => EndPosition::Stay,
+        _ => EndPosition::Origin,
+    }
+}
+
+/// `X+` ↔ `X-` and `Y+` ↔ `Y-`; empty for any other label.
+fn opposite(label: &str) -> String {
+    if let Some(axis) = label.strip_suffix('+') {
+        format!("{axis}-")
+    } else if let Some(axis) = label.strip_suffix('-') {
+        format!("{axis}+")
+    } else {
+        String::new()
     }
 }
 
@@ -260,5 +320,59 @@ DeviceParams=@Variant(\0\0\0\b\0\0\0\x1\0\0\0\xe\0g\0u\0\x61\0n\0g\0k\0u\0\0\0\b
         assert_eq!(import("[DeviceConfig]\nAutoConnect=false\n").unwrap(), vec![]);
         assert!(import("DeviceParams=@Variant(\\0\\0)").is_err());
         assert!(import("DeviceParams=plain").is_err());
+    }
+
+    /// `fixtures/device_params.cset`, written by `make_cset_fixture.py`.
+    fn cset_fixture() -> Vec<u8> {
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/device_params.cset")).unwrap()
+    }
+
+    #[test]
+    fn imports_both_cset_devices() {
+        let ds = import_cset(&cset_fixture()).unwrap();
+        assert_eq!(ds.len(), 2);
+
+        let stepper = &ds[0];
+        assert_eq!(stepper.name, "测试步进机");
+        assert_eq!((stepper.firmware, stepper.device_type), (Firmware::ChiXieEsp32Grbl, DeviceType::StepperPenUp));
+        assert_eq!((stepper.pen_up_z, stepper.pen_down_z), (0.0, 2.0));
+        assert_eq!((stepper.write_speed, stepper.travel_speed, stepper.pause_after_down_s), (19000.0, 19000.0, 0.5));
+        assert_eq!(stepper.end_position, EndPosition::OriginLeft { mm: 20.0 });
+        assert!(stepper.axis_map.is_identity());
+
+        let servo = &ds[1];
+        assert_eq!(servo.name, "测试舵机");
+        assert_eq!((servo.firmware, servo.device_type), (Firmware::Grbl, DeviceType::ServoPenUp));
+        assert_eq!((servo.pen_up_z, servo.pen_down_z), (90.0, 30.0));
+        assert_eq!((servo.write_speed, servo.travel_speed, servo.pause_after_down_s), (8000.0, 8000.0, 0.2));
+        assert_eq!(servo.end_position, EndPosition::Stay);
+        // x_plus is Y-, and y_plus is absent: it comes from y_reduce X- as X+.
+        assert_eq!(servo.axis_map, AxisMap { swap_xy: true, invert_x: false, invert_y: true });
+    }
+
+    #[test]
+    fn write_done_pos_maps_to_end_position() {
+        let at = |v: f32| {
+            let p = Value::Map(vec![("WriteDonePos".into(), Value::Double(f64::from(v)))]);
+            profile("d", &p).end_position
+        };
+        assert_eq!((at(0.0), at(1.0), at(2.0), at(7.0)), (EndPosition::Origin, EndPosition::OriginLeft { mm: 20.0 }, EndPosition::Stay, EndPosition::Origin));
+    }
+
+    #[test]
+    fn cset_must_be_a_dict_of_dicts() {
+        // [1, 2]: not a device table.
+        assert!(import_cset(b"\x80\x04]q\x00(K\x01K\x02e.").is_err());
+        // {"evil": 1}: a device whose parameters are not a dict.
+        assert!(import_cset(b"\x80\x04}(X\x04\x00\x00\x00evilK\x01u.").is_err());
+    }
+
+    #[test]
+    fn malicious_cset_is_parsed_as_data() {
+        // {"evil": os.system("echo pwned")} as GLOBAL + REDUCE: the call is recorded, never made.
+        let bytes = b"\x80\x02}(X\x04\x00\x00\x00evilcos\nsystem\n\x8c\x0aecho pwned\x85Ru.";
+        let v = crate::pickle::parse(bytes).unwrap();
+        assert!(matches!(v.get("evil"), Some(crate::pickle::Value::Object { class, .. }) if class == "os.system"));
+        assert!(import_cset(bytes).is_err());
     }
 }

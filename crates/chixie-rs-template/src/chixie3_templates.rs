@@ -2,25 +2,24 @@
 //! `composition_template.cx`).
 //!
 //! The files are Python pickles (protocol 4) of `{name: NoteTemplate | CompositionTemplate}`.
-//! A tiny pickle reader covers the opcodes those files use. Class references are only recorded
-//! by name; nothing is ever executed. Field meanings: docs/protocol.md (templates).
+//! The safe pickle reader lives in `chixie_rs_core::pickle`: class names are read, never run.
+//! Field meanings: docs/protocol.md (templates).
 
 use crate::template::{Template, TemplateKind};
+use chixie_rs_core::pickle::{self, Value};
 use chixie_rs_core::{Error, Result};
 
 /// Read every template from one `.cx` file's bytes.
 pub fn import(bytes: &[u8]) -> Result<Vec<Template>> {
-    let mut vm = Vm::default();
-    let root = vm.run(bytes)?;
-    let Node::Dict(items) = &vm.nodes[root] else { return Err(bad("top level is not a dict")) };
+    let Value::Dict(items) = pickle::parse(bytes)? else { return Err(bad("top level is not a dict")) };
     let mut out = Vec::new();
-    for &(k, v) in items {
-        let name = vm.str(k).ok_or_else(|| bad("template key is not a string"))?.to_string();
-        let Node::Object { class, state } = &vm.nodes[v] else { return Err(bad("template is not an object")) };
-        let f = Fields { vm: &vm, state: *state };
+    for (k, v) in &items {
+        let name = k.as_str().ok_or_else(|| bad("template key is not a string"))?;
+        let Value::Object { class, state } = v else { return Err(bad("template is not an object")) };
+        let f = Fields(state.as_ref());
         let t = match class.rsplit('.').next().unwrap_or_default() {
-            "NoteTemplate" => note(&name, &f)?,
-            "CompositionTemplate" => composition(&name, &f)?,
+            "NoteTemplate" => note(name, &f)?,
+            "CompositionTemplate" => composition(name, &f)?,
             other => return Err(bad(&format!("unknown template class {other}"))),
         };
         out.push(t);
@@ -66,301 +65,30 @@ fn bad(msg: &str) -> Error {
 }
 
 /// An object's `__dict__` state.
-struct Fields<'a> {
-    vm: &'a Vm,
-    state: usize,
-}
+struct Fields<'a>(&'a Value);
 
 impl Fields<'_> {
-    fn get(&self, key: &str) -> Option<usize> {
-        let Node::Dict(items) = &self.vm.nodes[self.state] else { return None };
-        items.iter().find(|(k, _)| self.vm.str(*k) == Some(key)).map(|&(_, v)| v)
-    }
     fn num(&self, key: &str) -> Result<f32> {
-        match self.get(key).map(|i| &self.vm.nodes[i]) {
-            Some(Node::Int(v)) => Ok(*v as f32),
-            Some(Node::Float(v)) => Ok(*v as f32),
+        match self.0.get(key) {
+            Some(Value::Int(v)) => Ok(*v as f32),
+            Some(Value::Float(v)) => Ok(*v as f32),
             _ => Err(bad(&format!("missing number {key}"))),
         }
     }
     fn bool(&self, key: &str) -> Option<bool> {
-        match self.get(key).map(|i| &self.vm.nodes[i]) {
-            Some(Node::Bool(b)) => Some(*b),
-            Some(Node::Int(v)) => Some(*v != 0),
+        match self.0.get(key) {
+            Some(Value::Bool(b)) => Some(*b),
+            Some(Value::Int(v)) => Some(*v != 0),
             _ => None,
         }
     }
     fn first_num(&self, key: &str) -> Option<f32> {
-        let Some(Node::List(xs)) = self.get(key).map(|i| &self.vm.nodes[i]) else { return None };
-        match xs.first().map(|&i| &self.vm.nodes[i]) {
-            Some(Node::Int(v)) => Some(*v as f32),
-            Some(Node::Float(v)) => Some(*v as f32),
+        let Some(Value::List(xs)) = self.0.get(key) else { return None };
+        match xs.first() {
+            Some(Value::Int(v)) => Some(*v as f32),
+            Some(Value::Float(v)) => Some(*v as f32),
             _ => None,
         }
-    }
-}
-
-/// Pickle values live in an arena so memoized containers can be mutated in place.
-#[derive(Debug)]
-enum Node {
-    None,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Str(String),
-    List(Vec<usize>),
-    Tuple(Vec<usize>),
-    Dict(Vec<(usize, usize)>),
-    /// A class reference (`module.Name`), never resolved.
-    Class(String),
-    Object { class: String, state: usize },
-}
-
-#[derive(Default)]
-struct Vm {
-    nodes: Vec<Node>,
-    stack: Vec<usize>,
-    marks: Vec<usize>,
-    memo: Vec<usize>,
-}
-
-impl Vm {
-    fn str(&self, i: usize) -> Option<&str> {
-        match &self.nodes[i] {
-            Node::Str(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    fn push(&mut self, n: Node) {
-        self.nodes.push(n);
-        self.stack.push(self.nodes.len() - 1);
-    }
-
-    fn pop(&mut self) -> Result<usize> {
-        self.stack.pop().ok_or_else(|| bad("stack underflow"))
-    }
-
-    fn pop_mark(&mut self) -> Result<Vec<usize>> {
-        let m = self.marks.pop().ok_or_else(|| bad("no mark"))?;
-        if m > self.stack.len() {
-            return Err(bad("mark past stack"));
-        }
-        Ok(self.stack.split_off(m))
-    }
-
-    fn top(&self) -> Result<usize> {
-        self.stack.last().copied().ok_or_else(|| bad("empty stack"))
-    }
-
-    fn set_items(&mut self, dict: usize, kv: &[usize]) -> Result<()> {
-        let Node::Dict(items) = &mut self.nodes[dict] else { return Err(bad("SETITEM on non-dict")) };
-        for &[k, v] in kv.as_chunks::<2>().0 {
-            items.push((k, v));
-        }
-        Ok(())
-    }
-
-    fn run(&mut self, b: &[u8]) -> Result<usize> {
-        let mut r = Reader { b, i: 0 };
-        loop {
-            let op = r.u8()?;
-            match op {
-                0x80 => {
-                    r.take(1)?; // PROTO
-                }
-                0x95 => {
-                    r.take(8)?; // FRAME
-                }
-                b'.' => return self.pop(),
-                b'(' => self.marks.push(self.stack.len()),
-                b'}' => self.push(Node::Dict(Vec::new())),
-                b']' => self.push(Node::List(Vec::new())),
-                b')' => self.push(Node::Tuple(Vec::new())),
-                b'N' => self.push(Node::None),
-                0x88 => self.push(Node::Bool(true)),
-                0x89 => self.push(Node::Bool(false)),
-                b'K' => {
-                    let v = r.u8()?;
-                    self.push(Node::Int(v.into()))
-                }
-                b'M' => {
-                    let v = u16::from_le_bytes(r.array()?);
-                    self.push(Node::Int(v.into()))
-                }
-                b'J' => {
-                    let v = i32::from_le_bytes(r.array()?);
-                    self.push(Node::Int(v.into()))
-                }
-                0x8a => {
-                    // LONG1: little-endian two's complement, n bytes
-                    let n = r.u8()? as usize;
-                    let bytes = r.take(n)?;
-                    let mut v: i64 = 0;
-                    for (k, &byte) in bytes.iter().enumerate().take(8) {
-                        v |= i64::from(byte) << (8 * k);
-                    }
-                    if n > 0 && n < 8 && bytes[n - 1] & 0x80 != 0 {
-                        v -= 1i64 << (8 * n);
-                    }
-                    self.push(Node::Int(v))
-                }
-                b'G' => {
-                    let v = f64::from_be_bytes(r.array()?);
-                    self.push(Node::Float(v))
-                }
-                0x8c => {
-                    let n = r.u8()? as usize;
-                    let s = r.utf8(n)?;
-                    self.push(Node::Str(s))
-                }
-                b'X' => {
-                    let n = u32::from_le_bytes(r.array()?) as usize;
-                    let s = r.utf8(n)?;
-                    self.push(Node::Str(s))
-                }
-                0x8d => {
-                    let n = u64::from_le_bytes(r.array()?) as usize;
-                    let s = r.utf8(n)?;
-                    self.push(Node::Str(s))
-                }
-                0x94 => {
-                    let t = self.top()?;
-                    self.memo.push(t)
-                }
-                b'q' => {
-                    let k = r.u8()? as usize;
-                    self.memo_put(k)?
-                }
-                b'r' => {
-                    let k = u32::from_le_bytes(r.array()?) as usize;
-                    self.memo_put(k)?
-                }
-                b'h' => {
-                    let k = r.u8()? as usize;
-                    self.memo_get(k)?
-                }
-                b'j' => {
-                    let k = u32::from_le_bytes(r.array()?) as usize;
-                    self.memo_get(k)?
-                }
-                0x93 => {
-                    // STACK_GLOBAL
-                    let name = self.pop()?;
-                    let module = self.pop()?;
-                    let full = format!("{}.{}", self.str(module).unwrap_or("?"), self.str(name).unwrap_or("?"));
-                    self.push(Node::Class(full))
-                }
-                b'c' => {
-                    let module = r.line()?;
-                    let name = r.line()?;
-                    self.push(Node::Class(format!("{module}.{name}")))
-                }
-                0x81 | b'R' => {
-                    // NEWOBJ (cls, args) / REDUCE (callable, args): record, never call.
-                    let _args = self.pop()?;
-                    let cls = self.pop()?;
-                    let class = match &self.nodes[cls] {
-                        Node::Class(c) => c.clone(),
-                        _ => return Err(bad("NEWOBJ without a class")),
-                    };
-                    self.nodes.push(Node::Dict(Vec::new()));
-                    let state = self.nodes.len() - 1;
-                    self.push(Node::Object { class, state })
-                }
-                b'b' => {
-                    // BUILD: object state (a dict, or (dict, slots))
-                    let mut st = self.pop()?;
-                    if let Node::Tuple(t) = &self.nodes[st]
-                        && let Some(&first) = t.first()
-                    {
-                        st = first;
-                    }
-                    let obj = self.top()?;
-                    match &mut self.nodes[obj] {
-                        Node::Object { state, .. } => *state = st,
-                        _ => return Err(bad("BUILD on non-object")),
-                    }
-                }
-                b's' => {
-                    let v = self.pop()?;
-                    let k = self.pop()?;
-                    let d = self.top()?;
-                    self.set_items(d, &[k, v])?
-                }
-                b'u' => {
-                    let kv = self.pop_mark()?;
-                    let d = self.top()?;
-                    self.set_items(d, &kv)?
-                }
-                b'a' | b'e' => {
-                    let items = if op == b'a' { vec![self.pop()?] } else { self.pop_mark()? };
-                    let l = self.top()?;
-                    match &mut self.nodes[l] {
-                        Node::List(xs) => xs.extend(items),
-                        _ => return Err(bad("APPEND on non-list")),
-                    }
-                }
-                b't' => {
-                    let xs = self.pop_mark()?;
-                    self.push(Node::Tuple(xs))
-                }
-                0x85..=0x87 => {
-                    let n = (op - 0x84) as usize;
-                    if self.stack.len() < n {
-                        return Err(bad("stack underflow"));
-                    }
-                    let xs = self.stack.split_off(self.stack.len() - n);
-                    self.push(Node::Tuple(xs))
-                }
-                other => return Err(bad(&format!("unsupported pickle opcode 0x{other:02x}"))),
-            }
-        }
-    }
-
-    fn memo_put(&mut self, k: usize) -> Result<()> {
-        let t = self.top()?;
-        if self.memo.len() <= k {
-            self.memo.resize(k + 1, usize::MAX);
-        }
-        self.memo[k] = t;
-        Ok(())
-    }
-
-    fn memo_get(&mut self, k: usize) -> Result<()> {
-        let i = *self.memo.get(k).filter(|&&i| i != usize::MAX).ok_or_else(|| bad("bad memo ref"))?;
-        self.stack.push(i);
-        Ok(())
-    }
-}
-
-struct Reader<'a> {
-    b: &'a [u8],
-    i: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
-        let end = self.i.checked_add(n).filter(|&e| e <= self.b.len()).ok_or_else(|| bad("truncated"))?;
-        let s = &self.b[self.i..end];
-        self.i = end;
-        Ok(s)
-    }
-    fn u8(&mut self) -> Result<u8> {
-        Ok(self.take(1)?[0])
-    }
-    fn array<const N: usize>(&mut self) -> Result<[u8; N]> {
-        Ok(self.take(N)?.try_into().expect("length checked"))
-    }
-    fn utf8(&mut self, n: usize) -> Result<String> {
-        String::from_utf8(self.take(n)?.to_vec()).map_err(|_| bad("invalid UTF-8"))
-    }
-    fn line(&mut self) -> Result<String> {
-        let rest = &self.b[self.i..];
-        let n = rest.iter().position(|&c| c == b'\n').ok_or_else(|| bad("unterminated GLOBAL"))?;
-        let s = self.utf8(n)?;
-        self.i += 1;
-        Ok(s)
     }
 }
 

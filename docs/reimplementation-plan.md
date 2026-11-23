@@ -413,6 +413,16 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   the document (txt / docx / pdf / xlsx), PDF export and print (`lopdf` in `chixie-rs-output`;
   `chixie-rs-cli pdf`; CI sample per OS). Left: the format capture, BOSS's look at the 3 sample
   PDFs and a printed page (checklist 13i).
+- **M9 (branch `m9-perf`, re-scoped by BOSS 2026-11-22):** performance and improvements over
+  ChiXie3, wired device only.
+  - **Editor speed.** Deformed-glyph cache between relayouts (`layout::DeformCache`); paint only
+    visible pages, with page paths cached across frames; dependencies optimised in debug builds.
+    16 styled pages, debug, CI: relayout ≈ 500 → 40 ms, paint ≈ 140 → 4 ms per frame.
+  - **中英文分开设置.** English letters and digits get their own size, baseline, 上下浮动 and
+    字符变形 (`HandwritingStyle::{english, number}`).
+  - **固件参数.** `$` editor with numeric and named keys, and a typed-confirm `$RST=*`.
+  - **Parallel sessions:** 自定义命令 + console history, and `.cset` import.
+  - Left: BOSS checks one `$` write on the board (checklist 13j).
 
 ### M8 Files and editor UX (3–4 wk) — spec R3 (UX part)
 - Find/replace with options; Word-style context menu.
@@ -429,6 +439,9 @@ template library (no cloud: ChiXie3 has no template backend; the online tabs wai
   - replace keeps untouched character ids.
 
 ### M9 Device extras (2–3 wk)
+> Re-scoped 2026-11-22 (see status above): wired, this board only. Not planned now: wireless
+> discovery, manual network devices, 配网, the N1 card and N1 advanced settings, `.cset` export.
+
 - `.cset` import/export (pickle opcode reader only, never executes).
 - Wireless discovery, manual network device, ESP32 Wi-Fi provisioning (配网).
 - Firmware `$$` editor with labels.

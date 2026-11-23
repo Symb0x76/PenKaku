@@ -18,6 +18,7 @@ mod device_params;
 mod doc_view;
 mod fake;
 mod file_ops;
+mod firmware;
 mod find_bar;
 mod import_ui;
 mod cloud_preview;
@@ -26,6 +27,7 @@ mod font_lib;
 mod fonts;
 mod icons;
 mod login;
+mod perf;
 mod ribbon;
 mod sim;
 mod state;
@@ -418,6 +420,26 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             );
         });
         shot("PARAMS");
+        // 固件参数: write one setting, read it back, then restore it.
+        let value_of = |cx: &mut AsyncApp, key: &str| {
+            cx.update(|cx| device.read(cx).params.read(cx).machine.as_ref().and_then(|m| m.all.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())))
+        };
+        let old = value_of(cx, "112");
+        cx.update(|cx| device.read(cx).send(chixie_rs_device::device::Command::WriteSettings(vec![("112".into(), "4321".into())])));
+        cx.background_executor().timer(pause(600)).await;
+        let written = value_of(cx, "112").as_deref() == Some("4321");
+        if let Some(v) = old.clone() {
+            cx.update(|cx| device.read(cx).send(chixie_rs_device::device::Command::WriteSettings(vec![("112".into(), v)])));
+            cx.background_executor().timer(pause(600)).await;
+        }
+        let restored = value_of(cx, "112") == old;
+        let dialog_rows = cx
+            .update_window(handle, |_, window, cx| {
+                let view = cx.new(|cx| firmware::FirmwareView::new(device.clone(), window, cx));
+                view.read(cx).row_count()
+            })
+            .unwrap_or(0);
+        println!("AUTOTEST_FIRMWARE written={written} restored={restored} rows={dialog_rows}");
         cx.background_executor().timer(pause(2500)).await;
         cx.update(|cx| {
             let st = cx.global_mut::<AppState>();
@@ -606,6 +628,76 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
             (pdf, a.doc.read(cx).doc().text() == text_before)
         });
         println!("AUTOTEST_FORMAT underline={underline} paste={paste} replace_keeps_ids={replace} import_txt={import} pdf={pdf} restored={restored}");
+        // Perf (M9): a styled 20-page document; ten keystrokes at the end, then scrolling.
+        let style0 = cx.update(|cx| {
+            let st = cx.global_mut::<AppState>();
+            let old = st.settings.style.clone();
+            let s = &mut st.settings.style;
+            s.handwriting.enabled = true;
+            (s.deformation.enabled, s.deformation.base, s.deformation.shape) = (true, true, true);
+            old
+        });
+        let unit = ['你', '好', 'A', '你', '好', '.', ' '];
+        let long: String = (0..8000).map(|i| if i % 300 == 299 { '\n' } else { unit[i % unit.len()] }).collect();
+        let n0 = cx.update(|cx| app.read(cx).doc.read(cx).doc().len());
+        let pages = cx.update(|cx| {
+            let view = app.read(cx).doc.clone();
+            view.update(cx, |v, cx| {
+                let n = n0;
+                v.replace_ranges(vec![(n..n, long)], cx);
+                v.relayout_now(cx);
+            });
+            view.read(cx).document().pages.len()
+        });
+        cx.background_executor().timer(pause(500)).await;
+        perf::reset();
+        let mut relayout_max = 0f64;
+        for _ in 0..10 {
+            cx.update(|cx| {
+                let view = app.read(cx).doc.clone();
+                view.update(cx, |v, cx| {
+                    let n = v.doc().len();
+                    v.replace_ranges(vec![(n..n, "好".into())], cx);
+                });
+            });
+            cx.background_executor().timer(pause(80)).await;
+            relayout_max = relayout_max.max(perf::snapshot().0);
+        }
+        let type_paint = perf::snapshot().2;
+        perf::reset();
+        for k in 0..30 {
+            cx.update(|cx| app.read(cx).doc.clone().update(cx, |v, cx| v.scroll_to(k as f32 * 400.0, cx)));
+            cx.background_executor().timer(pause(40)).await;
+        }
+        let (_, _, scroll_paint, scroll_frames) = perf::snapshot();
+        cx.update(|cx| {
+            cx.global_mut::<AppState>().settings.style = style0;
+            app.read(cx).doc.clone().update(cx, |v, cx| {
+                let n = v.doc().len();
+                v.replace_ranges(vec![(n0..n, String::new())], cx);
+                v.scroll_to(0.0, cx);
+                v.relayout_now(cx);
+            });
+        });
+        // 中英文分开设置: English at 80 % gets a narrower box; Chinese boxes stay put.
+        let script = cx.update(|cx| {
+            let view = app.read(cx).doc.clone();
+            let widths = |cx: &App| {
+                let v = view.read(cx);
+                let (chars, d) = (v.doc().chars().to_vec(), v.document());
+                let w = |c: char| chars.iter().position(|&x| x == c).map(|i| d.boxes[i].x1 - d.boxes[i].x0);
+                (w('A'), w('你'))
+            };
+            let before = widths(cx);
+            cx.global_mut::<AppState>().settings.style.handwriting.english.scale_pct = 80.0;
+            view.update(cx, |v, cx| v.relayout_now(cx));
+            let after = widths(cx);
+            cx.global_mut::<AppState>().settings.style.handwriting.english.scale_pct = 100.0;
+            view.update(cx, |v, cx| v.relayout_now(cx));
+            matches!((before, after), ((Some(a0), Some(z0)), (Some(a1), Some(z1))) if (a1 - 0.8 * a0).abs() < 0.05 && (z1 - z0).abs() < 1e-3)
+        });
+        println!("AUTOTEST_SCRIPT english_scaled={script}");
+        println!("AUTOTEST_PERF pages={pages} relayout_ms={relayout_max:.1} type_paint_ms={type_paint:.1} scroll_paint_ms={scroll_paint:.1} scroll_frames={scroll_frames}");
         // Table forms: a 2×2 form; Tab adds a cell; a clipped cell overflows and 批量溢出
         // (shrink) fixes it; a 30-name list makes 30 pages; DOCX keeps the text through Word
         // tables. Template, settings and text are put back.

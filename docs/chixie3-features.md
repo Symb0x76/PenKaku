@@ -172,7 +172,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Device | 无线发现 | arp + UPnP `description.xml` | Partial (core, untested) | P2 | S |
 | Device | 手动添加网络设备 | name/IP/port | Partial | P1 | S |
 | Device | ESP32 配网 | STA / AP / BT / none | Missing | P2 | M |
-| Device | 固件参数 ($$) | easy/expert editor, `$RST=*` | Partial (read only) | P2 | M |
+| Device | 固件参数 ($$) | easy/expert editor, `$RST=*` | Done (M9: table editor, numeric + named keys, typed-confirm `$RST=*`) | P2 | M |
 | Device | 炽写ESP主板设置 | PWM, axis follow, CoreXY, radio | Missing | P3 | M |
 | Device | 炽写 N1 card | speed/direction/pressure modes, beep | Missing | P2 | M |
 | Device | 炽写设备高级设置 | N1 TMC driver + per-axis parameters (current, microstep, stall, offsets) | Missing | P3 | M |
@@ -2136,7 +2136,9 @@ the source language and en as the first translation.
    many "尚未开发" paths).
 7. **Native performance.** ChiXie3 uses one QGraphicsItem per character (needs a "large text mode")
    and a slow Python TPS warp (its own TODO asks for numpy/JIT/C). chixie-rs relayouts from a flat
-   model and paints only visible pages; a TPS solve per glyph is microseconds in Rust.
+   model and paints only visible pages; a TPS solve per glyph is microseconds in Rust. Done in M9:
+   deformed glyphs are cached between relayouts and page paths between frames (16 styled pages,
+   debug build: relayout ≈ 500 → 40 ms, paint ≈ 140 → 4 ms per frame).
 8. **Documents that reproduce output.** Template, origin, page rotation and per-character tweaks
    belong to the document, not to global settings, so a `.chx` file plus a font id is a complete
    job description.
@@ -2146,6 +2148,9 @@ the source language and en as the first translation.
 10. **Plotting correctness.** Exact primitives flattened at emit time with a chord tolerance, stroke
     ordering to cut pen-up travel, clipping to the paper, hatch fills for SVG/images — none exist in
     ChiXie3.
+11. **中英文分开设置 (M9).** ChiXie3 can only pick a different font for English and digits. chixie-rs
+    also gives letters and digits their own size, baseline, 上下浮动 and 字符变形 (手写效果 dialog,
+    英文 / 数字 tabs), so Latin text in a Chinese handwriting font can sit and scale naturally.
 
 ## 5. Roadmap
 

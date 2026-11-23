@@ -24,11 +24,13 @@ pub struct SimGrbl {
     drop_at: Option<usize>,
     /// `CHIXIE_RS_SIM_DROP_OK=n`: the `ok` for line `n` is lost.
     drop_ok: Option<usize>,
+    /// `$$` settings; `$key=value` changes them, `$RST=*` restores them.
+    settings: Vec<(String, String)>,
 }
 
 impl SimGrbl {
     fn new(delay: Duration) -> Self {
-        Self { out: VecDeque::new(), queue: VecDeque::new(), pos: [0.0; 2], held: false, alarm: false, delay, executed: 0, drop_at: None, drop_ok: None }
+        Self { out: VecDeque::new(), queue: VecDeque::new(), pos: [0.0; 2], held: false, alarm: false, delay, executed: 0, drop_at: None, drop_ok: None, settings: default_settings() }
     }
 
     fn status(&self) -> String {
@@ -49,10 +51,21 @@ impl SimGrbl {
         if up == "$I" {
             self.out.push_back("[VER:1.1h.SIM:]".into());
         } else if up == "$$" {
-            // The verified board's settings (docs/protocol.md hardware probe).
-            for l in ["$100=80.000", "$101=80.000", "$110=12000.000", "$111=12000.000", "$120=3000.000", "$121=3000.000", "$130=300.000", "$131=300.000"] {
-                self.out.push_back(l.into());
+            for (k, v) in &self.settings {
+                self.out.push_back(format!("${k}={v}"));
             }
+        } else if up == "$RST=*" {
+            self.settings = default_settings();
+            return;
+        } else if let Some((k, v)) = line.strip_prefix('$').and_then(|r| r.split_once('='))
+            && !k.eq_ignore_ascii_case("J")
+        {
+            // `$key=value`: store it (a real board validates; the sim accepts anything).
+            match self.settings.iter_mut().find(|(n, _)| n == k) {
+                Some(e) => e.1 = v.to_string(),
+                None => self.settings.push((k.to_string(), v.to_string())),
+            }
+            return;
         } else if up == "$G" {
             self.out.push_back("[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]".into());
         } else if up == "$X" {
@@ -68,6 +81,17 @@ impl SimGrbl {
             }
         }
     }
+}
+
+/// The verified board's `$$` (docs/protocol.md hardware probe), plus a few common keys.
+fn default_settings() -> Vec<(String, String)> {
+    [
+        ("0", "10"), ("1", "25"), ("3", "0"), ("100", "80.000"), ("101", "80.000"), ("102", "80.000"),
+        ("110", "12000.000"), ("111", "12000.000"), ("112", "5000.000"), ("120", "3000.000"), ("121", "3000.000"),
+        ("122", "1000.000"), ("130", "300.000"), ("131", "300.000"), ("132", "50.000"),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .to_vec()
 }
 
 /// Value after `axis` in a G-code line (`X12.5` → 12.5).
@@ -160,5 +184,20 @@ mod tests {
         assert_eq!(g.read_line().unwrap().as_deref(), Some("ok"));
         g.write_all(b"?").unwrap();
         assert_eq!(g.read_line().unwrap().as_deref(), Some("<Idle|MPos:11.000,-4.000,0.000|FS:0,0>"));
+    }
+
+    #[core::prelude::v1::test]
+    fn stores_settings_and_resets() {
+        let mut g = SimGrbl::new(Duration::ZERO);
+        let dollars = |g: &mut SimGrbl| {
+            g.write_all(b"$$\n").unwrap();
+            std::iter::from_fn(|| g.read_line().unwrap()).take_while(|l| l != "ok").collect::<Vec<_>>()
+        };
+        g.write_all(b"$110=5000\n").unwrap();
+        assert_eq!(g.read_line().unwrap().as_deref(), Some("ok"));
+        assert!(dollars(&mut g).contains(&"$110=5000".to_string()));
+        g.write_all(b"$RST=*\n").unwrap();
+        g.read_line().unwrap();
+        assert!(dollars(&mut g).contains(&"$110=12000.000".to_string()));
     }
 }
