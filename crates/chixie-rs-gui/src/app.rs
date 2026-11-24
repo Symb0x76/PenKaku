@@ -10,7 +10,7 @@ pub(crate) mod fonts_ctl;
 mod resume;
 mod sd;
 pub(crate) mod templates_ctl;
-mod tune;
+pub(crate) mod tune;
 mod ribbon_tabs;
 
 use std::path::PathBuf;
@@ -33,6 +33,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 pub use backstage::Stage;
+pub use crate::nav_pane::NavTab as NavTabPub;
 
 use crate::device::{DevicePanel, Notice};
 use crate::doc_view::{self, DocView};
@@ -104,6 +105,9 @@ pub struct ChixieRsApp {
     /// 查找 / 替换 bar above the page.
     find_bar: Entity<crate::find_bar::FindBar>,
     find_open: bool,
+    /// 导航 pane (搜索 / 缺字) left of the page.
+    nav: Entity<crate::nav_pane::NavPane>,
+    nav_open: bool,
     /// Library folders watched for added / removed fonts.
     library_watch: Option<fonts_ctl::LibraryWatch>,
     /// Template folders watched for added / changed / removed templates.
@@ -149,6 +153,7 @@ impl ChixieRsApp {
         let initial = file_ops::open_draft(&cx.global::<AppState>().settings_path).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
         let doc = cx.new(|cx| DocView::new(initial, window, cx));
         let find_bar = cx.new(|cx| crate::find_bar::FindBar::new(doc.clone(), window, cx));
+        let nav = cx.new(|cx| crate::nav_pane::NavPane::new(doc.clone(), window, cx));
         let page = cx.global::<AppState>().settings.page.clone();
         let font_size = cx.new(|cx| InputState::new(window, cx).step(5.0).min(5.0).max(1000.0).default_value(fmt_num(page.font_size)));
         let line_height = cx.new(|cx| InputState::new(window, cx).step(0.25).min(1.0).max(200.0).default_value(fmt_num(page.line_height)));
@@ -249,6 +254,9 @@ impl ChixieRsApp {
                     cx.notify();
                 }
             }),
+            cx.subscribe_in(&nav, window, |this, _p, ev: &crate::nav_pane::NavPaneEvent, window, cx| match ev {
+                crate::nav_pane::NavPaneEvent::Close => this.close_nav(window, cx),
+            }),
             cx.subscribe_in(&templates, window, |this, _v, ev: &TemplateEvent, window, cx| match ev {
                 TemplateEvent::Apply(name) => {
                     this.apply_template(Some(name.clone()), cx);
@@ -288,6 +296,8 @@ impl ChixieRsApp {
             tune_open: false,
             find_bar,
             find_open: false,
+            nav,
+            nav_open: false,
             library_watch: None,
             template_watch: None,
             gallery,
@@ -387,13 +397,36 @@ impl ChixieRsApp {
         cx.notify();
     }
 
-    /// 查找 (or 替换): show the bar and focus its search box.
+    /// 替换: show the bar and focus its search box (查找 opens the 导航 pane instead).
     pub(crate) fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.backstage.is_some() {
             return;
         }
         self.find_open = true;
         self.find_bar.update(cx, |b, cx| b.open(replace, window, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn nav_open(&self) -> bool {
+        self.nav_open
+    }
+    /// Matches the 搜索 tab lists (autotest).
+    pub(crate) fn nav_hit_count(&self, cx: &App) -> usize {
+        self.nav.read(cx).hit_count(cx)
+    }
+    pub(crate) fn close_nav(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.nav_open = false;
+        self.focus_doc(window, cx);
+        cx.notify();
+    }
+
+    /// 导航 pane on `tab` (Ctrl+F: 搜索; the status bar's 缺字: 缺字).
+    pub(crate) fn open_nav(&mut self, tab: crate::nav_pane::NavTab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.backstage.is_some() {
+            return;
+        }
+        self.nav_open = true;
+        self.nav.update(cx, |p, cx| p.open(tab, window, cx));
         cx.notify();
     }
 
@@ -712,6 +745,12 @@ impl ChixieRsApp {
     }
 
     fn open_style_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_style_tab(0, window, cx);
+    }
+
+    /// 手写效果范围 on tab `tab` (0 中文, 1 英文, 2 数字).
+    pub(crate) fn open_style_tab(&mut self, tab: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.style_dialog.update(cx, |d, cx| d.show_tab(tab, window, cx));
         let content = self.style_dialog.clone();
         window.open_dialog(cx, move |dialog, _w, _cx| dialog.title("手写效果范围").w(px(460.)).child(content.clone()));
     }
@@ -1130,7 +1169,7 @@ impl ChixieRsApp {
                         .text_color(danger)
                         .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
                         .child(format!("缺字 {missing}：{chars}"))
-                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_missing_dialog(w, cx))),
+                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_nav(crate::nav_pane::NavTab::Missing, w, cx))),
                 )
             })
             .when(punct_issues > 0, |el| {
@@ -1311,6 +1350,7 @@ impl Render for ChixieRsApp {
                         .min_h_0()
                         .border_t_1()
                         .border_color(border.opacity(0.6))
+                        .when(self.nav_open, |el| el.child(self.nav.clone()))
                         .child(
                             v_flex()
                                 .flex_1()
@@ -1330,7 +1370,7 @@ impl Render for ChixieRsApp {
             .text_color(fg)
             .on_action(cx.listener(|t, _: &doc_view::Save, w, cx| t.save_doc(false, w, cx)))
             .map(|el| self.menu_actions(el, cx))
-            .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_find(false, w, cx)))
+            .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_nav(crate::nav_pane::NavTab::Search, w, cx)))
             .on_action(cx.listener(|t, _: &crate::find_bar::OpenReplace, w, cx| t.open_find(true, w, cx)))
             .child(title_bar)
             .child(body);

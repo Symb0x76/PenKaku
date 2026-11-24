@@ -130,6 +130,7 @@ impl ChixieRsApp {
                     .child(self.format_buttons(&fs)),
                 None,
             ))
+            .child(self.script_group(cx))
             .child(group(
                 cx,
                 "para",
@@ -215,6 +216,68 @@ impl ChixieRsApp {
                 None,
             ))
             .into_any_element()
+    }
+
+    /// 中英文 group: letters and digits get their own font (role font), size (% of the Chinese
+    /// size) and 字形 (the 手写效果 dialog's 英文 / 数字 tab); 消除中英空格.
+    #[inline(never)]
+    fn script_group(&self, cx: &mut Context<Self>) -> AnyElement {
+        use super::fonts_ctl::Role;
+        const PCTS: [f32; 9] = [70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 110.0, 120.0];
+        let hw = &cx.global::<AppState>().settings.style.handwriting;
+        let scales = [hw.english.scale_pct, hw.number.scale_pct];
+        let app = cx.entity();
+        let row = |k: usize, label: &'static str, role: Role| {
+            let (a1, a2, a3) = (app.clone(), app.clone(), app.clone());
+            let font = Button::new(("script-font", k)).xsmall().outline().label("字体").dropdown_caret(true).tooltip(role.label()).dropdown_menu(move |m, _w, cx| {
+                let st = cx.global::<AppState>();
+                let current = role.get(&st.settings.fonts.roles).map(|key| key.local_id());
+                let a = a1.clone();
+                let m = m.item(PopupMenuItem::new("同中文（主线字体）").checked(current.is_none()).on_click(move |_, w, cx| a.update(cx, |t, cx| t.clear_role(role, w, cx))));
+                st.fonts.list().into_iter().fold(m, |m, f| {
+                    let a = a1.clone();
+                    m.item(PopupMenuItem::new(f.name).checked(current == Some(f.id)).on_click(move |_, w, cx| a.update(cx, |t, cx| t.set_role(f.id, role, w, cx))))
+                })
+            });
+            let size = Button::new(("script-size", k)).xsmall().outline().label(format!("{}%", fmt_num(scales[k]))).dropdown_caret(true).tooltip("大小（相对中文字号）").dropdown_menu(move |m, _w, cx| {
+                let cur = cx.global::<AppState>().settings.style.handwriting.clone();
+                let cur = if k == 0 { cur.english.scale_pct } else { cur.number.scale_pct };
+                PCTS.iter().fold(m, |m, &p| {
+                    let a = a2.clone();
+                    m.item(PopupMenuItem::new(format!("{}%", fmt_num(p))).checked(cur == p).on_click(move |_, _w, cx| {
+                        a.update(cx, |t, cx| {
+                            t.edit_settings(cx, |st| {
+                                let h = &mut st.settings.style.handwriting;
+                                if k == 0 { h.english.scale_pct = p } else { h.number.scale_pct = p }
+                            })
+                        })
+                    }))
+                })
+            });
+            let shape = Button::new(("script-shape", k)).xsmall().ghost().label("字形…").tooltip("基线、浮动和变形").on_click(move |_: &ClickEvent, w, cx| a3.update(cx, |t, cx| t.open_style_tab(k + 1, w, cx)));
+            h_flex().gap_1().items_center().child(div().w(px(28.)).text_xs().child(label)).child(font).child(size).child(shape)
+        };
+        let doc = self.doc.clone();
+        group(
+            cx,
+            "script",
+            "中英文",
+            v_flex()
+                .gap_1()
+                .child(row(0, "英文", Role::English))
+                .child(row(1, "数字", Role::Number))
+                .child(
+                    small("cjk-space", "消除中英空格", IconName::RemoveFormatting)
+                        .tooltip("删除中文与英文、数字之间的空格（有选中时只处理选中部分）")
+                        .on_click(move |_: &ClickEvent, w, cx| {
+                            let n = doc.update(cx, |d, cx| d.remove_cjk_latin_spaces(cx));
+                            let msg = if n == 0 { "没有需要消除的空格".to_string() } else { format!("已消除 {n} 处空格") };
+                            w.push_notification(gpui_kit::component::notification::Notification::info(msg), cx);
+                        }),
+                ),
+            None,
+        )
+        .into_any_element()
     }
 
     /// 笔色: the pen colour of the selected text (多色绘制 writes each colour with its own pen).

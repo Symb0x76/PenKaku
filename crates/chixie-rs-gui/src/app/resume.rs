@@ -116,12 +116,50 @@ impl ChixieRsApp {
     }
 
     pub(crate) fn start_resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Pick::At(i) = self.resume_pick(cx) else { return };
+        self.start_from(i, window, cx);
+    }
+
+    /// 从此处开始书写 (page menu): confirm, then write from the first non-space char at the
+    /// right-clicked spot (the selection's start) to the end of the document.
+    pub(crate) fn write_from_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (i, ch) = {
+            let doc = self.doc.read(cx).doc();
+            let sel = doc.selection();
+            let mut i = if sel.is_empty() { doc.caret() } else { sel.start };
+            while i < doc.len() && doc.chars()[i].is_whitespace() {
+                i += 1;
+            }
+            (i, doc.chars().get(i).copied())
+        };
+        let Some(ch) = ch else {
+            window.push_notification(Notification::warning("此处之后没有可书写的内容"), cx);
+            return;
+        };
+        let layout = self.doc.read(cx).document();
+        let Some(page) = layout.boxes.get(i).map(|b| b.page) else { return };
+        let pages = layout.pages.len();
+        let app = cx.entity();
+        window.open_alert_dialog(cx, move |a, _w, _cx| {
+            let app = app.clone();
+            a.title(format!("从「{ch}」开始书写？"))
+                .description(format!("从第 {} 页的「{ch}」写到文档末尾（第 {}–{pages} 页），之前的内容跳过。请确认纸张已放好、笔已装好，起点为当前原点。", page + 1, page + 1))
+                .confirm()
+                .ok_text("开始")
+                .on_ok(move |_, w, cx| {
+                    app.update(cx, |t, cx| t.start_from(i, w, cx));
+                    true
+                })
+        });
+    }
+
+    /// Write from char `i` (its first stroke) to the end of the document.
+    fn start_from(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let device = self.device.read(cx);
         if device.connected.is_none() || device.busy() {
-            window.push_notification(Notification::warning("请先连接串口或先等待无书写任务时再续写"), cx);
+            window.push_notification(Notification::warning("请先连接串口或先等待无书写任务时再书写"), cx);
             return;
         }
-        let Pick::At(i) = self.resume_pick(cx) else { return };
         let layout = self.doc.read(cx).document();
         let Some(page_ix) = layout.boxes.get(i).map(|b| b.page) else { return };
         let profile = cx.global::<AppState>().settings.device.profile.clone();

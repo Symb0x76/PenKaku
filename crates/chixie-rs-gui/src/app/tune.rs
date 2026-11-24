@@ -13,9 +13,9 @@ use super::ChixieRsApp;
 use crate::state::AppState;
 
 /// One click of the arrow pad (ChiXie3: 上移0.2 …).
-const STEP_MM: f32 = 0.2;
+pub(crate) const STEP_MM: f32 = 0.2;
 /// A+ / A− and 变胖 / 变瘦 (ChiXie3: 增大字号5%).
-const STEP_PCT: f32 = 0.05;
+pub(crate) const STEP_PCT: f32 = 0.05;
 
 type Change = fn(&mut Tuning);
 

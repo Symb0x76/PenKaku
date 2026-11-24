@@ -20,6 +20,7 @@ mod fake;
 mod file_ops;
 mod firmware;
 mod find_bar;
+mod nav_pane;
 mod import_ui;
 mod cloud_preview;
 mod font_preview;
@@ -260,6 +261,49 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 doc.bounds(),
                 files,
             );
+        });
+        // 导航 pane: 缺字 lists every missing char, 搜索 takes the selection; the mini toolbar.
+        let nav_shot = |name: &str| {
+            use std::io::Write as _;
+            println!("SHOT_{name}");
+            let _ = std::io::stdout().flush();
+        };
+        let _ = cx.update_window(handle, |_, window, cx| {
+            app.update(cx, |a, cx| a.open_nav(app::NavTabPub::Missing, window, cx));
+        });
+        cx.background_executor().timer(pause(400)).await;
+        nav_shot("NAV_MISSING");
+        cx.background_executor().timer(pause(2500)).await;
+        let _ = cx.update_window(handle, |_, window, cx| {
+            let doc = app.read(cx).doc.clone();
+            doc.update(cx, |d, cx| {
+                d.select(0..2, cx);
+                d.set_mini_open(true, cx);
+            });
+            app.update(cx, |a, cx| a.open_nav(app::NavTabPub::Search, window, cx));
+        });
+        cx.background_executor().timer(pause(400)).await;
+        cx.update(|cx| {
+            let a = app.read(cx);
+            let d = a.doc.read(cx);
+            println!(
+                "AUTOTEST_NAV open={} missing_at={} search_hits={} mini={}",
+                a.nav_open(),
+                d.document().missing_at.len(),
+                a.nav_hit_count(cx),
+                d.mini_open(),
+            );
+        });
+        nav_shot("NAV_SEARCH");
+        cx.background_executor().timer(pause(2500)).await;
+        let _ = cx.update_window(handle, |_, window, cx| {
+            app.update(cx, |a, cx| a.close_nav(window, cx));
+            let doc = app.read(cx).doc.clone();
+            doc.update(cx, |d, cx| {
+                d.set_mini_open(false, cx);
+                let end = d.doc().len();
+                d.select(end..end, cx);
+            });
         });
         // DOCX: save the edited document and open it again; text, ids and seed must survive.
         cx.update(|cx| {

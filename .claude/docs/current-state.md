@@ -329,3 +329,20 @@
     `IconName::X` vs gpui-kit-assets `default-icons.txt` + `icons.rs`).
   - Parallel sessions proposed (not started by BOSS yet): step 6 自定义命令 + history (`m9-commands`),
     step 7 `.cset` import (`m9-cset`).
+
+## 2026-11-25: 导航 / 右键 / 浮动工具栏 / 中英文 / 消除空格 (uncommitted)
+- `nav_pane.rs`: left 导航 pane, tabs 搜索 / 缺字. Ctrl+F (and the page menu's 查找…) opens 搜索
+  (selection becomes the query; Enter / Shift+Enter step); Ctrl+H still opens the replace bar.
+  Status-bar 缺字 opens the 缺字 tab (old 缺失字符 dialog removed). Rows: context ±10 chars,
+  第 p 页 第 l 行, click selects; capped at 500 rows.
+- Page menu: right click selects the char under the pointer (or moves the caret) first; adds
+  字符微调 submenu (move / size / width / 变形 / 恢复默认 / 微调面板…) and 从此处开始书写
+  (`WriteFromHere` → confirm → `start_from(i)`, shared with 断点续写).
+- `doc_view/mini_bar.rs`: Word mini toolbar on hovering the selection (字体, 字号, A+/A−, 标题,
+  倾斜, 下划线, 清除格式); sticky until the pointer moves over the page off the selection; flips
+  below the line when no room above.
+- 开始 › 中英文 group: 英文 / 数字 role font ▾, size % ▾, 字形… (opens 手写效果 on that tab, whose
+  大小/基线 inputs now re-read settings on open); 消除中英空格 (`chixie_rs_doc::find::cjk_latin_spaces`,
+  selection or whole doc, one undo step).
+- `AUTOTEST_NAV` + `SHOT_NAV_MISSING` / `SHOT_NAV_SEARCH`. Workspace tests + clippy clean.
+- VERIFY (BOSS): hover feel of the mini bar, right-click selection behaviour, 从此处开始书写 on hardware.
