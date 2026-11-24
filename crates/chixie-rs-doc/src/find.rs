@@ -55,7 +55,54 @@ pub fn find_in(hay: &[char], needle: &str, o: FindOpts) -> Vec<Range<usize>> {
     out
 }
 
+/// Chinese side of a 中英/中数 gap: Han ideographs and CJK / fullwidth punctuation.
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32, 0x3001..=0x303F | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0xFF01..=0xFF0F | 0xFF1A..=0xFF20 | 0xFF3B..=0xFF40 | 0xFF5B..=0xFF65 | 0x20000..=0x3FFFF)
+}
+
+/// Spaces a 一键消除 removes: ASCII, no-break and ideographic spaces and tabs.
+fn is_gap(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\u{00A0}' | '\u{3000}')
+}
+
+/// Every run of spaces inside `within` that sits between a Chinese char and an ASCII letter or
+/// digit (either order, on one line), left to right. Spaces between two Latin words stay.
+pub fn cjk_latin_spaces(hay: &[char], within: Range<usize>) -> Vec<Range<usize>> {
+    let end = within.end.min(hay.len());
+    let mut out = Vec::new();
+    let mut i = within.start;
+    while i < end {
+        if !is_gap(hay[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < hay.len() && is_gap(hay[i]) {
+            i += 1;
+        }
+        let (Some(&l), Some(&r)) = (start.checked_sub(1).and_then(|k| hay.get(k)), hay.get(i)) else { continue };
+        let latin = |c: char| c.is_ascii_alphanumeric();
+        if (is_cjk(l) && latin(r)) || (latin(l) && is_cjk(r)) {
+            out.push(start..i.min(end));
+        }
+    }
+    out
+}
+
 impl EditDoc {
+    /// 一键消除中英/中数空格 in the selection, or the whole text when nothing is selected (one
+    /// undo step); returns how many runs were removed.
+    pub fn remove_cjk_latin_spaces(&mut self) -> usize {
+        let sel = self.selection();
+        let within = if sel.is_empty() { 0..self.len() } else { sel };
+        let hits = cjk_latin_spaces(self.chars(), within);
+        let n = hits.len();
+        if n > 0 {
+            self.replace_many(hits.into_iter().map(|r| (r, String::new())).collect());
+        }
+        n
+    }
+
     pub fn find_all(&self, needle: &str, o: FindOpts) -> Vec<Range<usize>> {
         find_in(self.chars(), needle, o)
     }
@@ -97,6 +144,26 @@ mod tests {
         // The ideographic space is a space when widths fold.
         let d = EditDoc::from_text("你\u{3000}好");
         assert_eq!(d.find_all("你 好", opts(false, true)), vec![0..3]);
+    }
+
+    #[test]
+    fn cjk_latin_spaces_go_latin_word_spaces_stay() {
+        let mut d = EditDoc::from_text("用 Rust 写 2 个  demo，hello world ， ok\n中\u{3000}A");
+        assert_eq!(d.remove_cjk_latin_spaces(), 8);
+        assert_eq!(d.text(), "用Rust写2个demo，hello world，ok\n中A");
+        assert!(d.undo());
+        assert_eq!(d.text(), "用 Rust 写 2 个  demo，hello world ， ok\n中\u{3000}A");
+        // A space across a newline, or between two Chinese chars, stays.
+        let mut d = EditDoc::from_text("中 \nA 中 文");
+        assert_eq!(d.remove_cjk_latin_spaces(), 1);
+        assert_eq!(d.text(), "中 \nA中 文");
+    }
+
+    #[test]
+    fn cjk_latin_spaces_respect_the_range() {
+        let hay: Vec<char> = "中 A 中 B".chars().collect();
+        assert_eq!(cjk_latin_spaces(&hay, 0..hay.len()), vec![1..2, 3..4, 5..6]);
+        assert_eq!(cjk_latin_spaces(&hay, 2..5), vec![3..4]);
     }
 
     #[test]
