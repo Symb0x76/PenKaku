@@ -101,6 +101,9 @@ pub fn face(id: i64, max_h: f32, max_w: f32, cx: &App) -> Option<AnyElement> {
     }
 }
 
+/// Value of the picker's first entry, which opens 字体库 instead of choosing a font.
+pub const FONT_LIBRARY: i64 = i64::MIN;
+
 /// One entry of the font picker: downloaded fonts with their preview, cloud fonts by name.
 #[derive(Clone)]
 pub struct FontItem {
@@ -109,6 +112,16 @@ pub struct FontItem {
     /// Collected on the server but not downloaded yet (login needed to use it).
     pub cloud: bool,
 }
+
+impl FontItem {
+    /// The 字体库… entry at the top of the picker.
+    pub fn library() -> Self {
+        Self { id: FONT_LIBRARY, name: "字体库…".into(), cloud: false }
+    }
+}
+
+/// Width of the face column, so the plain names after it line up.
+const FACE_W: f32 = 150.0;
 
 impl SelectItem for FontItem {
     type Value = i64;
@@ -123,14 +136,28 @@ impl SelectItem for FontItem {
 
     fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme();
-        let (fg, muted) = (theme.foreground, theme.muted_foreground);
+        let (fg, muted, border) = (theme.foreground, theme.muted_foreground, theme.border);
+        if self.id == FONT_LIBRARY {
+            return h_flex()
+                .w_full()
+                .h(px(30.))
+                .gap_2()
+                .border_b_1()
+                .border_color(border)
+                .text_color(fg)
+                .child(Icon::new(IconName::Type).with_size(px(15.)))
+                .child(div().flex_1().child(self.name.clone()))
+                .child(div().text_xs().text_color(muted).child("浏览、下载、导入"));
+        }
         h_flex()
             .w_full()
             .h(px(30.))
             .gap_3()
-            .map(|el| match face(self.id, 22.0, 150.0, cx) {
-                // Word's list: the font's own face first, its plain name after it.
-                Some(f) => el.child(f).child(div().flex_1()).child(div().text_xs().text_color(muted).child(self.name.clone())),
+            .map(|el| match face(self.id, 22.0, FACE_W, cx) {
+                // Word's list: the font's own face first, its plain name after it (one column).
+                Some(f) => el
+                    .child(div().w(px(FACE_W)).flex_shrink_0().child(f))
+                    .child(div().flex_1().truncate().text_xs().text_color(muted).child(self.name.clone())),
                 None => el.child(div().flex_1().text_color(fg).child(self.name.clone())),
             })
             .when(self.cloud, |el| {

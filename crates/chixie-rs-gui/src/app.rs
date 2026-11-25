@@ -222,8 +222,18 @@ impl ChixieRsApp {
                 }
             }),
             cx.subscribe_in(&font_select, window, |this, _s, ev: &SelectEvent<Vec<FontItem>>, window, cx| {
-                if let SelectEvent::Confirm(Some(id)) = ev {
-                    this.choose_font(*id, window, cx);
+                match ev {
+                    // 字体库… is an action, not a font: put the real selection back once the
+                    // Select has committed its own (it does so after emitting Confirm).
+                    SelectEvent::Confirm(Some(crate::font_preview::FONT_LIBRARY)) => {
+                        cx.defer_in(window, |this, window, cx| {
+                            this.format_shown = None;
+                            this.sync_format_boxes(window, cx);
+                        });
+                        this.open_fonts(window, cx);
+                    }
+                    SelectEvent::Confirm(Some(id)) => this.choose_font(*id, window, cx),
+                    _ => {}
                 }
             }),
             cx.subscribe_in(&fonts, window, |this, _v, ev: &FontsEvent, window, cx| match ev {
@@ -460,9 +470,8 @@ impl ChixieRsApp {
     fn sync_font_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let st = cx.global::<AppState>();
         let local = st.fonts.list();
-        let mut items: Vec<FontItem> = local
-            .iter()
-            .map(|f| FontItem { id: f.id, name: f.name.clone().into(), cloud: false })
+        let mut items: Vec<FontItem> = std::iter::once(FontItem::library())
+            .chain(local.iter().map(|f| FontItem { id: f.id, name: f.name.clone().into(), cloud: false }))
             .collect();
         for f in self.fonts.read(cx).collected() {
             if !items.iter().any(|it| it.id == f.id) {
