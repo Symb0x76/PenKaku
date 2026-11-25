@@ -20,6 +20,7 @@ use chixie_rs_template::Template;
 use chixie_rs_core::font::Font;
 use chixie_rs_core::font::fix;
 use chixie_rs_core::font::fontset::RunFonts;
+use chixie_rs_core::font::library::FontKey;
 use chixie_rs_core::layout::{self, Document};
 use chixie_rs_doc::model::PT_PER_SIZE;
 use gpui_kit::*;
@@ -48,6 +49,7 @@ pub const KEY_CONTEXT: &str = "ChixieRsEditor";
 
 mod format;
 mod mini_bar;
+pub(crate) use mini_bar::SIZES;
 
 /// One 字符微调 step (page menu).
 type TuneFn = fn(&mut layout::Tuning);
@@ -358,11 +360,13 @@ impl DocView {
         if names.is_empty() {
             return;
         }
-        let (store, fixes) = (st.fonts.clone(), st.settings.fonts.fix);
+        let (store, settings) = (st.fonts.clone(), &st.settings.fonts);
         let loaded: Vec<(String, Option<Arc<Font>>)> = names
             .into_iter()
             .map(|n| {
-                let font = store.id_of(&n).and_then(|id| store.load(id).inspect_err(|e| log::warn!("loading font {n}: {e}")).ok());
+                let id = store.id_of(&n);
+                let font = id.and_then(|id| store.load(id).inspect_err(|e| log::warn!("loading font {n}: {e}")).ok());
+                let fixes = id.map(|id| settings.fix_for(&FontKey::from_local_id(id))).unwrap_or(settings.fix);
                 let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }));
                 (n, font)
             })
@@ -521,9 +525,23 @@ impl DocView {
         self.edited(cx);
     }
 
-    /// 应用至同字符: every character equal to a selected one gets tuning `t`.
-    pub fn set_tune_same(&mut self, t: layout::Tuning, cx: &mut Context<Self>) {
-        self.doc.tune_same_chars(move |x| *x = t);
+    /// 应用至同字符: every character equal to a selected one takes the first selected char's
+    /// 字体, 字号 and 微调. Each keeps its own 变形 unless `with_deform` (应用至同字符(同时变形)).
+    pub fn apply_tune_to_same(&mut self, with_deform: bool, cx: &mut Context<Self>) {
+        let sel = self.doc.selection();
+        if sel.is_empty() {
+            return;
+        }
+        let src = self.doc.document().attrs(sel.start).clone();
+        self.doc.attrs_same_chars(|a| {
+            a.font = src.font.clone();
+            a.size_pt = src.size_pt;
+            let mut t = src.tuning.unwrap_or_default();
+            if !with_deform {
+                t.reroll = a.tuning.map_or(0, |own| own.reroll);
+            }
+            a.tuning = (!t.is_identity()).then_some(t);
+        });
         self.edited(cx);
     }
 

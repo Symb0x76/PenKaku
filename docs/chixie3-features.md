@@ -151,7 +151,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Effects | 首行缩进 | Tab / button inserts random indent | Done (M3) | P1 | S |
 | Effects | 基础变形 | scale, rotate, stroke jitter, tail removal | Done (M5) | P1 | S |
 | Effects | 字形变形 (TPS) | thin-plate-spline warp with similarity check | Done (M5, TPS without the similarity check) | P2 | M |
-| Effects | 字符微调 | per-char font/size/offset/thin/fat/apply-to-same | Done (M5, no per-char font) | P2 | M |
+| Effects | 字符微调 | per-char font/size/offset/thin/fat/apply-to-same | Done (M5; card matches the dialog) | P2 | M |
 | Effects | 重复轨迹/异常宽度优化 | glyph clean-ups | Done (M4, 字体优化) | P2 | S |
 | Effects | 书写优化 (路径) | Douglas-Peucker / Catmull-Rom / uniform | Done (M5) | P2 | S |
 | Typeset | 输入排版 / 换行 | width-based row fill, pages | Done (`layout.rs`) | P0 | — |
@@ -919,7 +919,7 @@ the character) and 异常宽度字符处理 (static name 异常宽度字符优�
 form [ui-form]. Needs a selected character ("请选中字符后使用"). 变形 needs deformation on
 ("请先在设置窗口中启用变形配置"). 同步至服务器 only for 超级管理员 (`font/admin_tune_fonts`) (C §字符微调)
 [UI][high].
-**chixie-rs today:** Done (M5): `Attrs.tuning` (`layout::Tuning`: dx/dy mm, scale, width, reroll), task-pane card 字符微调 (arrows 0.2 mm, A+/A− 5 %, 变胖/变瘦, 变形, 恢复默认, 应用至同字符); glyph clean-ups are 字体优化 (M4). No per-char font, no server sync.
+**chixie-rs today:** Done (M5, matched to the dialog 2026-11-25): `Attrs.tuning` (`layout::Tuning`: dx/dy mm, scale, width, reroll). The task-pane card 字符微调 follows the dialog: 字符 with a preview of the laid-out glyph, 字体 (the char's own font), 字号 with A+/A− (±5 % of 字号), 微调 pad (0.2 mm, centre = back to the original position) beside 变形 / 变瘦 / 变胖, 恢复默认 (only 变形 / 变胖 / 变瘦, as ChiXie3), 应用至同字符 ▾ (字体, 字号 and 微调; 同时变形 also copies 变形), and the red 字符重复轨迹优化 / 异常宽度字符处理 that turn the clean-up on for the selected char's font only (`FontSettings.fix_fonts`). No server sync.
 **Recommended implementation:** per-character overrides stored in the document:
 `CharTweak { dx, dy, scale_x, font: Option<FontId>, size: Option<f32>, reroll: u32 }` keyed by
 char id (`reroll` bumps the RNG salt = "变形" again). "应用至同字符" copies the tweak to all

@@ -75,12 +75,12 @@ impl ChixieRsApp {
                 keys.push(m.key.clone());
             }
         }
-        let fixes = f.fix;
         let task = cx.background_executor().spawn(async move {
             keys.into_iter()
                 .filter_map(|k| {
                     let id = k.local_id();
                     let font = store.load(id).inspect_err(|e| log::warn!("loading font {k}: {e}")).ok()?;
+                    let fixes = f.fix_for(&k);
                     let font = if fixes.any() { fix::apply(&font, &fixes) } else { font };
                     Some((k, Arc::new(font), store.name_of(id).unwrap_or_default()))
                 })
@@ -172,6 +172,15 @@ impl ChixieRsApp {
 
     pub(crate) fn set_font_fix(&mut self, fix: FontFix, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_settings(cx, |st| st.settings.fonts.fix = fix);
+        self.reload_fonts(window, cx);
+    }
+
+    /// 字符微调's red links: turn a clean-up on for one font only.
+    pub(crate) fn add_font_fix(&mut self, key: FontKey, add: FontFix, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_settings(cx, |st| {
+            let e = st.settings.fonts.fix_fonts.entry(key).or_default();
+            *e = e.union(add);
+        });
         self.reload_fonts(window, cx);
     }
 

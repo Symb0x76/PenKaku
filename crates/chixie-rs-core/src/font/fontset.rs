@@ -94,6 +94,8 @@ pub fn class_of(c: char) -> CharClass {
 #[derive(Debug, Clone, Default)]
 pub struct FontSet {
     fonts: Vec<Arc<Font>>,
+    /// The library key of each font (empty for [`FontSet::single`]).
+    keys: Vec<FontKey>,
     /// Font indices to try, per class (Chinese, English, Number, Symbol).
     chains: [Vec<usize>; 4],
     /// 字体混用 for Chinese characters: (font index, weight); empty = off.
@@ -113,7 +115,7 @@ fn slot(c: CharClass) -> usize {
 impl FontSet {
     /// One font for everything (what layout used before font sets).
     pub fn single(font: Arc<Font>) -> Self {
-        Self { fonts: vec![font], chains: std::array::from_fn(|_| vec![0]), mix: Vec::new(), seed: 0 }
+        Self { fonts: vec![font], keys: Vec::new(), chains: std::array::from_fn(|_| vec![0]), mix: Vec::new(), seed: 0 }
     }
 
     /// Build from the loaded fonts. Each class tries its role font, then the main font, then the
@@ -133,7 +135,12 @@ impl FontSet {
             v
         };
         let chains = [chain(None), chain(ix(&roles.english)), chain(ix(&roles.number)), chain(ix(&roles.symbol))];
-        Self { fonts: loaded.iter().map(|(_, f)| f.clone()).collect(), chains, mix: mixed, seed }
+        Self { fonts: loaded.iter().map(|(_, f)| f.clone()).collect(), keys: loaded.iter().map(|(k, _)| k.clone()).collect(), chains, mix: mixed, seed }
+    }
+
+    /// The library key of the font that draws `c` (with stable id `id`).
+    pub fn key_of(&self, c: char, id: u64) -> Option<&FontKey> {
+        self.pick(c, id).and_then(|(i, _)| self.keys.get(i))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -219,6 +226,10 @@ mod tests {
         assert_eq!(s.pick('龘', 0).unwrap().0, 3);
         // Width counterpart is tried per font: '，' for ','.
         assert_eq!(s.pick(',', 0).unwrap().0, 0);
+        // 字符微调 finds the font by key.
+        assert_eq!(s.key_of('a', 0), Some(&key("en")));
+        assert_eq!(s.key_of('3', 0), None);
+        assert_eq!(FontSet::single(font("a")).key_of('a', 0), None);
     }
 
     #[test]

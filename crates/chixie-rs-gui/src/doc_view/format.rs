@@ -131,6 +131,33 @@ impl DocView {
         self.edited(cx);
     }
 
+    /// 字符微调 A+ / A− (ChiXie3: 增大字号5%): each selected char's size times `factor`.
+    pub fn scale_run_size(&mut self, factor: f32, cx: &mut Context<Self>) {
+        let base = cx.global::<AppState>().settings.page.font_size * PT_PER_SIZE;
+        self.doc.set_attrs(|a| a.size_pt = Some((a.size_pt.unwrap_or(base) * factor).clamp(1.0, 200.0)));
+        self.edited(cx);
+    }
+
+    /// The library key of the font that draws the first selected char: its own 字体, else the
+    /// font the font set picks for it.
+    pub fn selected_font_key(&self, cx: &App) -> Option<chixie_rs_core::font::library::FontKey> {
+        let i = self.doc.selection().start;
+        let c = *self.doc.chars().get(i)?;
+        let st = cx.global::<AppState>();
+        match &self.doc.document().attrs(i).font {
+            Some(name) => st.fonts.id_of(name).map(chixie_rs_core::font::library::FontKey::from_local_id),
+            None => st.font_set.key_of(c, self.doc.ids()[i]).cloned(),
+        }
+    }
+
+    /// The strokes the first selected char is drawn with (page mm, as laid out).
+    pub fn selected_strokes(&self) -> Vec<chixie_rs_core::layout::Stroke> {
+        let i = self.doc.selection().start;
+        let Some(b) = self.layout.boxes.get(i) else { return Vec::new() };
+        let Some(p) = self.layout.pages.get(b.page) else { return Vec::new() };
+        p.strokes.iter().zip(&p.stroke_chars).filter(|(_, c)| **c == i).map(|(s, _)| s.clone()).collect()
+    }
+
     /// 格式刷: take the formats at the selection start (or the caret); the next selection made
     /// with the mouse receives them. `sticky` (double-click) keeps it armed until Esc.
     pub fn arm_painter(&mut self, sticky: bool, cx: &mut Context<Self>) {

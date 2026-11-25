@@ -584,6 +584,19 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         dispatch(cx, vec![Box::new(doc_view::Undo)]);
         cx.background_executor().timer(pause(300)).await;
         let undone = cx.update(ink0) == before;
+        // 字符微调 card: the preview has the character's strokes, its font is found, and A+
+        // grows its 字号 by 5 %.
+        let (preview, font_key, size0) = cx.update(|cx| {
+            let v = app.read(cx).doc.read(cx);
+            (!v.selected_strokes().is_empty(), v.selected_font_key(cx).is_some(), v.format_state(cx).size)
+        });
+        cx.update(|cx| app.read(cx).doc.clone().update(cx, |d, cx| d.scale_run_size(1.05, cx)));
+        cx.background_executor().timer(pause(300)).await;
+        let size1 = cx.update(|cx| app.read(cx).doc.read(cx).format_state(cx).size);
+        let bigger = matches!((size0, size1), (Some(a), Some(b)) if (b / a - 1.05).abs() < 1e-3);
+        dispatch(cx, vec![Box::new(doc_view::Undo)]);
+        cx.background_executor().timer(pause(300)).await;
+        println!("AUTOTEST_TUNE preview={preview} font_key={font_key} bigger={bigger}");
         let route_ok = cx.update(|cx| {
             let d = app.read(cx).doc.read(cx).document();
             let mut prof = cx.global::<AppState>().settings.device.profile.clone();

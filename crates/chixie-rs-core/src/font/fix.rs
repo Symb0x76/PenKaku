@@ -23,6 +23,11 @@ impl FontFix {
     pub fn any(&self) -> bool {
         self.unify_size || self.dedupe || self.widths
     }
+
+    /// Every fix that either side turns on.
+    pub fn union(self, o: Self) -> Self {
+        Self { unify_size: self.unify_size || o.unify_size, dedupe: self.dedupe || o.dedupe, widths: self.widths || o.widths }
+    }
 }
 
 /// `font` with the chosen fixes applied.

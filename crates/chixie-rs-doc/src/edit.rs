@@ -454,7 +454,23 @@ impl EditDoc {
         self.tune_where(|i| wanted.contains(&chars[i]), f);
     }
 
+    /// 应用至同字符 with 字体 / 字号 too: `f` on every char equal to a selected one (one undo step).
+    pub fn attrs_same_chars(&mut self, f: impl Fn(&mut Attrs)) {
+        let sel = self.selection();
+        let wanted: Vec<char> = self.doc.chars()[sel].to_vec();
+        let chars = self.doc.chars().to_vec();
+        self.attrs_where(|i| wanted.contains(&chars[i]), f);
+    }
+
     fn tune_where(&mut self, pick: impl Fn(usize) -> bool, f: impl Fn(&mut Tuning)) {
+        self.attrs_where(pick, |a| {
+            let mut t = a.tuning.unwrap_or_default();
+            f(&mut t);
+            a.tuning = (!t.is_identity()).then_some(t);
+        });
+    }
+
+    fn attrs_where(&mut self, pick: impl Fn(usize) -> bool, f: impl Fn(&mut Attrs)) {
         let hits: Vec<usize> = (0..self.len()).filter(|&i| pick(i)).collect();
         let (Some(&first), Some(&last)) = (hits.first(), hits.last()) else { return };
         self.checkpoint(LastEdit::None);
@@ -462,9 +478,7 @@ impl EditDoc {
             .map(|i| {
                 let mut a = self.doc.attrs(i).clone();
                 if hits.binary_search(&i).is_ok() {
-                    let mut t = a.tuning.unwrap_or_default();
-                    f(&mut t);
-                    a.tuning = (!t.is_identity()).then_some(t);
+                    f(&mut a);
                 }
                 a
             })
@@ -623,6 +637,17 @@ mod tests {
         assert_eq!(d.tunings()[0].map(|t| t.dx_mm), Some(0.2));
         let back = crate::docx::read(&crate::docx::write(d.document(), 1).unwrap()).unwrap();
         assert_eq!(EditDoc::from_document(back.doc).tunings(), d.tunings());
+    }
+
+    #[test]
+    fn attrs_same_chars_is_one_undo_step() {
+        let mut d = EditDoc::from_text("你好你");
+        d.select_range(0..1);
+        d.attrs_same_chars(|a| a.size_pt = Some(30.0));
+        let sizes: Vec<_> = (0..3).map(|i| d.document().attrs(i).size_pt).collect();
+        assert_eq!(sizes, vec![Some(30.0), None, Some(30.0)]);
+        d.undo();
+        assert!((0..3).all(|i| d.document().attrs(i).size_pt.is_none()));
     }
 
     #[test]

@@ -55,11 +55,18 @@ pub struct FontSettings {
     pub mix: Vec<crate::font::fontset::MixEntry>,
     /// 换一组: changes which character gets which mixed font.
     pub mix_salt: u64,
-    /// 字体优化 applied when fonts are loaded.
+    /// 字体优化 applied to every font when fonts are loaded.
     pub fix: crate::font::fix::FontFix,
+    /// 字符微调's 字符重复轨迹优化 / 异常宽度字符处理: clean-ups for one font only, on top of `fix`.
+    pub fix_fonts: std::collections::BTreeMap<crate::font::library::FontKey, crate::font::fix::FontFix>,
 }
 
 impl FontSettings {
+    /// The clean-ups for one font: every font's plus its own.
+    pub fn fix_for(&self, key: &crate::font::library::FontKey) -> crate::font::fix::FontFix {
+        self.fix.union(self.fix_fonts.get(key).copied().unwrap_or_default())
+    }
+
     pub fn library(&self) -> crate::font::library::FontLibrary {
         let dir = self.library_dir.clone().unwrap_or_else(crate::font::library::default_dir);
         crate::font::library::FontLibrary::new(dir, self.extra_dirs.clone())
@@ -327,6 +334,19 @@ mod tests {
         // A file from before 中英文分开设置 gets the neutral defaults.
         let old: Settings = toml::from_str("[style.handwriting]\nenabled = true\n").unwrap();
         assert!(!old.style.handwriting.english.moves_glyph() && old.style.handwriting.number.deformation.is_none());
+    }
+
+    #[test]
+    fn per_font_fixes_add_to_the_global_ones_and_round_trip() {
+        use crate::font::fix::FontFix;
+        use crate::font::library::FontKey;
+        let mut s = Settings::default();
+        s.fonts.fix.unify_size = true;
+        s.fonts.fix_fonts.insert(FontKey::cloud(7), FontFix { dedupe: true, ..Default::default() });
+        let back: Settings = toml::from_str(&toml::to_string_pretty(&s).unwrap()).unwrap();
+        assert_eq!(back.fonts, s.fonts);
+        assert_eq!(back.fonts.fix_for(&FontKey::cloud(7)), FontFix { unify_size: true, dedupe: true, widths: false });
+        assert_eq!(back.fonts.fix_for(&FontKey::cloud(8)), FontFix { unify_size: true, ..Default::default() });
     }
 
     /// Shape of a real ChiXie3 config.ini (values from the verified install; login is fake).

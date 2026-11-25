@@ -15,7 +15,7 @@ use crate::state::AppState;
 const BAR_H: f32 = 40.0;
 
 /// 字号 choices (ChiXie3 units, 100 = 20 pt).
-const SIZES: [f32; 10] = [50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 140.0, 160.0];
+pub(crate) const SIZES: [f32; 10] = [50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 140.0, 160.0];
 
 impl DocView {
     /// Track whether the pointer is on the selected text (mouse moves without a drag).
