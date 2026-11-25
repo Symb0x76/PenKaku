@@ -1,2 +1,0 @@
-[profile.relnative]
-rustflags = ["-C", "target-cpu=native"]
