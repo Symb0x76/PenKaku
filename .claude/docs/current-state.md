@@ -370,3 +370,18 @@
 - AUTOTEST_DEVICE: write page 1 → card `(0,1)` + page 2 selected → jog 1 mm + zero checked via sim
   MPos → write page 2 → no card. `AUTOTEST_RESUME … next_page=Some(1)`. Both now grepped in CI.
 - VERIFY (BOSS): 自动选择最近路径 on hardware (travel between rows); the 换纸 card flow on paper.
+
+## 2026-11-25: ribbon tidy-up (uncommitted, on master)
+- `ribbon.rs`: `ROW_H` 24 px grid; `row()`, `rows(w, …)`, `field_label()`; `small()` and `stack()`
+  rows are 24 px so every group's three rows line up. 开始 groups have fixed widths (字体 224,
+  中英文 256, 段落 132); 表格功能 split into two stacks (was five rows, overflowing).
+- 字体库… is the first entry of the font picker (`FontItem::library`, value `FONT_LIBRARY`); the
+  ribbon button is gone. Confirming it opens 字体库 and (deferred, `format_shown` cleared) restores
+  the real selection. Font names in the list sit in one column after a 150 px face column.
+- 中英文: role font button shows the font name (or 同中文); 字形 is an icon + full label button.
+- 行距 moved to 布局 › 页面设置 (BOSS choice); disabled with "当前模板自带行距" unless the page has
+  no template or a Blank one (only `Ruling::Free` uses `line_height`).
+- Checked by screenshots (FAKE mode). Clippy clean, gui tests pass.
+- Zoom 10 %–500 % like Word (`ZOOM_MIN/MAX` = 0.1 / 5 × `ZOOM_100`). Pages per row follow the
+  viewport width (`doc_view::page_cols`: as many as fit, ≥ 2 with 双页, ≤ page count); after a
+  resize the canvas prepaint re-checks and calls `window.refresh()`. Test `columns_follow_viewport_width`.
