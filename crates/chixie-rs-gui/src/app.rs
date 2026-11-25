@@ -845,8 +845,8 @@ impl ChixieRsApp {
         cx.notify();
     }
 
-    /// 书写 (选页书写): confirm extents, then stream the selected page only. The pen parks at
-    /// 写完位置 after it, and the next page is selected for after the sheet change.
+    /// 书写 (选页书写): confirm extents, then stream the selected page only. The pen returns to the
+    /// origin after it, and the next page is selected for after the sheet change.
     pub(crate) fn start_job(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.device.read(cx).busy() {
             window.push_notification(Notification::warning("当前有书写任务正在进行中，请先结束任务"), cx);
@@ -886,9 +886,8 @@ impl ChixieRsApp {
         }
         let pages = written.len();
         let desc = format!(
-            "第 {} / {pages} 页（{strokes} 笔），书写范围 {w:.1} × {h:.1} mm。{warn}请确认纸张已放好、笔已装好，起点为当前原点；写完后笔会停在{}。",
+            "第 {} / {pages} 页（{strokes} 笔），书写范围 {w:.1} × {h:.1} mm。{warn}请确认纸张已放好、笔已装好，起点为当前原点；写完后笔会回到原点。",
             first + 1,
-            profile.end_position.label(),
         );
         let title = format!("是否立即书写第 {} 页？", first + 1);
         self.show_pane = true;
@@ -929,13 +928,12 @@ impl ChixieRsApp {
             return None;
         }
         let pages = self.doc.read(cx).layout_doc().pages.len();
-        let park = cx.global::<AppState>().settings.device.profile.end_position.label();
         if page + 1 >= pages {
-            return Some(format!("第 {} 页已写完（全部 {pages} 页），笔已停在{park}", page + 1));
+            return Some(format!("第 {} 页已写完（全部 {pages} 页），笔已回到原点", page + 1));
         }
         self.sheet_change = Some((page, page + 1));
         self.goto_page(page + 1, cx);
-        Some(format!("第 {} 页已写完，笔已停在{park}。请换纸，然后点「书写」写第 {} 页（已选中）", page + 1, page + 2))
+        Some(format!("第 {} 页已写完，笔已回到原点。请换纸，然后点「书写」写第 {} 页（已选中）", page + 1, page + 2))
     }
 
     fn on_device_event(&mut self, ev: DevEvent, window: &mut Window, cx: &mut Context<Self>) {

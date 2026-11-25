@@ -357,7 +357,11 @@
   moves the caret to that page, `goto_page`; the caret's page is what 书写 writes). Removed
   开始书写(全部), 从此页起 and every 已换纸继续 button; `JobScope` and `JobState.awaiting` gone; the
   GUI ignores `Event::AwaitingSheet` (never sent for one-page jobs; device crate unchanged).
-- After a page finishes (Done): pen parks at 写完位置 (default 原点), toast "第 n 页已写完…请换纸",
+- 写完位置 removed (BOSS 2026-11-25: the pen must go back to the origin set before the job): after
+  every finished job, and after 停止 when the hold settled, the device sends pen up + `PARK`
+  (`G90G0 X0Y0`, `profile.rs`); SD programs end the same way. `DeviceProfile.end_position` and the
+  ChiXie3 `WriteDonePos` import are gone; old settings files with `[end_position]` still load.
+- After a page finishes (Done): pen returns to the origin, toast "第 n 页已写完…请换纸",
   the next page is selected, and a non-modal 请换纸 card sits in the task pane (+ status bar)
   until the next 书写 or 关闭. Jog / 设为原点 / everything stays usable (no job is running).
   Last page → "全部 N 页已写完" toast, no card. Stopped / failed jobs: no card.

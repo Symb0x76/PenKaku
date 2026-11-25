@@ -4,7 +4,7 @@
 
 use chixie_rs_core::chixie3_devices;
 use chixie_rs_device::device::{Command, DeviceHandle, Pen};
-use chixie_rs_core::profile::{DeviceProfile, DeviceType, EndPosition, Firmware, Origin, PageRotation, PathPlan};
+use chixie_rs_core::profile::{DeviceProfile, DeviceType, Firmware, Origin, PageRotation, PathPlan};
 use chixie_rs_device::grbl::MachineSettings;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -418,15 +418,6 @@ impl DeviceParams {
                 }))
             })
         });
-        let w3 = this.clone();
-        let end = Button::new("end-pos").small().outline().w_full().label(p.end_position.label()).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
-            [EndPosition::Origin, EndPosition::OriginLeft { mm: EndPosition::ORIGIN_LEFT_MM }, EndPosition::Stay].into_iter().fold(m, |m, e| {
-                let this = w3.clone();
-                m.item(PopupMenuItem::new(e.label()).checked(e == p.end_position).on_click(move |_, _w, cx| {
-                    let _ = this.update(cx, |v, cx| v.edit(cx, |p| p.end_position = e));
-                }))
-            })
-        });
         let servo = p.device_type == DeviceType::ServoPenUp;
         let num = |f: F| {
             let (_, l, unit, ..) = NUMS.iter().find(|n| n.0 == f).copied().expect("field");
@@ -463,7 +454,6 @@ impl DeviceParams {
                     .child(row("落笔指令", Input::new(&self.custom_down).small().into_any_element()))
             })
             .child(div().text_xs().text_color(muted).child(format!("抬笔：{}　落笔：{}", p.pen_up_cmd(), p.pen_down_cmd())))
-            .child(row("写完位置", end.into_any_element()))
             .child(row("书写优化", self.route_menu(&p, cx)))
             .when(p.device_type == DeviceType::StepperPenUp, |el| el.child(row("笔锋(实验)", self.taper_menu(&p, cx))))
             .child(row("路径规划", plan_el))
