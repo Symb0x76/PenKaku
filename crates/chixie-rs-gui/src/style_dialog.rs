@@ -228,31 +228,17 @@ impl StyleDialog {
                 st.save_settings();
             }
         };
-        let shape = style.deformation.shape_degree;
-        let shape_menu = Button::new("shape-degree").small().outline().label(format!("字形变形幅度 {}", fmt_num(shape))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
-            (0..=10).fold(m, |m, k| {
-                m.item(PopupMenuItem::new(k.to_string()).checked(k as f32 == shape).on_click(move |_, _w, cx| {
-                    let st = cx.global_mut::<AppState>();
-                    st.settings.style.deformation.shape_degree = k as f32;
-                    st.save_settings();
-                }))
-            })
-        });
-        col.child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("细节"))
+        col.child(degree_rows(&style.deformation, None))
+            .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("细节"))
             .child(
-                h_flex()
-                    .gap_4()
-                    .child(Checkbox::new("tails").small().label("随机删除小尾巴").checked(style.deformation.remove_tails).on_click(edit(|s, v| s.deformation.remove_tails = v)))
-                    .child(
-                        Checkbox::new("drift")
-                            .small()
-                            .label("智能偏移（同向偏移）")
-                            .checked(style.handwriting.intelligent_vertical_offset)
-                            .on_click(edit(|s, v| s.handwriting.intelligent_vertical_offset = v)),
-                    ),
+                Checkbox::new("drift")
+                    .small()
+                    .label("智能偏移（同向偏移）")
+                    .checked(style.handwriting.intelligent_vertical_offset)
+                    .on_click(edit(|s, v| s.handwriting.intelligent_vertical_offset = v)),
             )
             .child(
-                h_flex().gap_2().child(shape_menu).child(div().flex_1()).child(Button::new("recommended").small().label("使用推荐参数").on_click(|_: &ClickEvent, window, cx| {
+                h_flex().gap_2().child(div().flex_1()).child(Button::new("recommended").small().label("使用推荐参数").on_click(|_: &ClickEvent, window, cx| {
                     window.open_dialog(cx, |d, _w, _cx| {
                         d.title("使用推荐参数").w(px(360.)).child("确认将字符变形参数设置为推荐参数吗？").footer(
                             h_flex().gap_2().justify_end().child(Button::new("rec-cancel").label("取消").on_click(|_: &ClickEvent, w, cx| w.close_dialog(cx))).child(
@@ -260,9 +246,7 @@ impl StyleDialog {
                                     let st = cx.global_mut::<AppState>();
                                     let d = &mut st.settings.style.deformation;
                                     // ChiXie3's shipped values; the on/off switches stay as they are.
-                                    let rec = Deformation::recommended();
-                                    (d.h_scale_pct, d.v_scale_pct, d.rotation_deg, d.stroke_degree, d.shape_degree, d.remove_tails) =
-                                        (rec.h_scale_pct, rec.v_scale_pct, rec.rotation_deg, rec.stroke_degree, rec.shape_degree, rec.remove_tails);
+                                    *d = Deformation { enabled: d.enabled, base: d.base, shape: d.shape, ..Deformation::recommended() };
                                     st.save_settings();
                                     w.close_dialog(cx);
                                 }),
@@ -313,9 +297,67 @@ impl StyleDialog {
             for (r, (label, unit, _, _)) in SCRIPT_ROWS.iter().enumerate().skip(1) {
                 col = col.child(Self::range_row(label, unit, &rows[r], muted));
             }
+            if let Some(d) = &sc.deformation {
+                col = col.child(degree_rows(d, Some(k)));
+            }
         }
         col
     }
+}
+
+/// The deformation a degree control edits: the Chinese one, or script k's own.
+fn deform_of(s: &mut StyleFile, which: Option<usize>) -> &mut Deformation {
+    match which {
+        None => &mut s.deformation,
+        Some(k) => own_deform(s, k),
+    }
+}
+
+/// A dropdown of `opts` for one deformation degree.
+fn degree_menu(id: &'static str, which: Option<usize>, label: &'static str, unit: &'static str, cur: f32, opts: &'static [f32], set: fn(&mut Deformation, f32)) -> impl IntoElement {
+    Button::new((id, which.unwrap_or(9))).small().outline().label(format!("{label} {}{unit}", fmt_num(cur))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+        opts.iter().fold(m, |m, &v| {
+            m.item(PopupMenuItem::new(format!("{}{unit}", fmt_num(v))).checked(v == cur).on_click(move |_, _w, cx| {
+                let st = cx.global_mut::<AppState>();
+                set(deform_of(&mut st.settings.style, which), v);
+                st.save_settings();
+            }))
+        })
+    })
+}
+
+const LEVELS: [f32; 11] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+
+/// 笔画变形 / 字形扭曲 / 字形倾斜 / 小尾巴: how strong each kind of deformation is (0 = off).
+fn degree_rows(d: &Deformation, which: Option<usize>) -> Div {
+    let tails = d.remove_tails;
+    v_flex()
+        .gap_1p5()
+        .child(
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .child(degree_menu("stroke-deg", which, "笔画变形", "", d.stroke_degree, &[0.0, 0.5, 1.0, 1.5, 2.0], |d, v| d.stroke_degree = v))
+                // Pin the slant first, so changing the warp no longer moves it.
+                .child(degree_menu("warp-deg", which, "字形扭曲", "", d.shape_degree, &LEVELS, |d, v| {
+                    d.slant_degree.get_or_insert(d.shape_degree);
+                    d.shape_degree = v;
+                }))
+                .child(degree_menu("slant-deg", which, "字形倾斜", "", d.slant(), &LEVELS, |d, v| d.slant_degree = Some(v))),
+        )
+        .child(
+            h_flex()
+                .gap_2()
+                .child(Checkbox::new(("tails", which.unwrap_or(9))).small().label("随机删除小尾巴").checked(tails).on_click(move |v: &bool, _w, cx| {
+                    let st = cx.global_mut::<AppState>();
+                    deform_of(&mut st.settings.style, which).remove_tails = *v;
+                    st.save_settings();
+                }))
+                .when(tails, |el| {
+                    el.child(degree_menu("tail-pct", which, "概率", "%", d.tail_pct, &[10.0, 20.0, 30.0, 50.0, 70.0, 100.0], |d, v| d.tail_pct = v))
+                        .child(degree_menu("tail-len", which, "长度上限", "mm", d.tail_max_mm, &[0.1, 0.2, 0.3, 0.5, 0.8, 1.0], |d, v| d.tail_max_mm = v))
+                }),
+        )
 }
 
 fn fmt_num(v: f32) -> String {

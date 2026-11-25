@@ -28,10 +28,17 @@ pub struct Deformation {
     pub rotation_deg: Span,
     /// Stroke deformation amplitude (笔画变形幅度), slider 0–2; 0 disables the stroke shift.
     pub stroke_degree: f32,
-    /// Shape deformation amplitude (字形变形幅度), slider 0–10; 0 disables shape deformation.
+    /// Shape deformation amplitude (字形变形幅度), slider 0–10: the smooth warp (字形扭曲), and
+    /// the slant too unless `slant_degree` is set.
     pub shape_degree: f32,
+    /// 字形倾斜幅度 0–10, on its own; `None` = `shape_degree` (ChiXie3 has one slider for both).
+    pub slant_degree: Option<f32>,
     /// 随机删除小尾巴: with base deformation, sometimes drop a stroke's short end hook.
     pub remove_tails: bool,
+    /// Chance per stroke, percent, that its end hook is dropped (小尾巴概率).
+    pub tail_pct: f32,
+    /// A hook is at most this long, mm (小尾巴长度).
+    pub tail_max_mm: f32,
 }
 
 impl Default for Deformation {
@@ -46,7 +53,10 @@ impl Default for Deformation {
             rotation_deg: Span::new(-2.0, 2.0),
             stroke_degree: 1.0,
             shape_degree: 7.0,
+            slant_degree: None,
             remove_tails: true,
+            tail_pct: TAIL_PCT,
+            tail_max_mm: TAIL_MAX_MM,
         }
     }
 }
@@ -66,7 +76,12 @@ impl Deformation {
     }
 
     pub fn is_active(&self) -> bool {
-        self.enabled && (self.base || (self.shape && self.shape_degree > 0.0))
+        self.enabled && (self.base || (self.shape && (self.shape_degree > 0.0 || self.slant() > 0.0)))
+    }
+
+    /// 字形倾斜幅度 in effect.
+    pub fn slant(&self) -> f32 {
+        self.slant_degree.unwrap_or(self.shape_degree)
     }
 
     /// Deform one glyph's strokes (glyph units, y down). `mm_per_unit` converts the mm-valued
@@ -101,9 +116,9 @@ impl Deformation {
             }
         }
 
-        if self.shape && self.shape_degree > 0.0 && cjk {
+        if self.shape && (self.shape_degree > 0.0 || self.slant() > 0.0) && cjk {
             // Slant: on paper x shifts right as y goes up; glyph y is down, so use (cy - y).
-            let k = SHAPE_SHEAR.sample(rng) * self.shape_degree;
+            let k = SHAPE_SHEAR.sample(rng) * self.slant();
             let amp = unit(SHAPE_NOISE_MM * self.shape_degree);
             let warp = Tps::random(amp, rng);
             let (w, h) = (w.max(1e-3), h.max(1e-3));
@@ -117,9 +132,10 @@ impl Deformation {
         if self.base && self.remove_tails {
             // Its own stream, drawn after everything above, so the other effects are unchanged.
             let mut trng = Rng::new(rng.next_u64());
-            let max_len = unit(TAIL_MAX_MM);
+            let max_len = unit(self.tail_max_mm);
+            let p = self.tail_pct / 100.0;
             for s in &mut out {
-                if trng.unit() < TAIL_P {
+                if trng.unit() < p {
                     drop_tail(s, max_len);
                 }
             }
@@ -217,9 +233,10 @@ fn solve<const S: usize, const W: usize>(a: &mut [[f64; W]; S]) {
     }
 }
 
-/// Chance per stroke that its end hook is dropped (随机删除小尾巴). Best guess, VERIFY.
-const TAIL_P: f32 = 0.3;
-/// A hook is at most this long (mm).
+/// Default chance per stroke, percent, that its end hook is dropped (随机删除小尾巴). Best guess,
+/// VERIFY.
+const TAIL_PCT: f32 = 30.0;
+/// Default hook length limit (mm).
 const TAIL_MAX_MM: f32 = 0.3;
 
 /// Drop a short end hook: the trailing points within `max_len` of the stroke's end, when they
@@ -352,6 +369,43 @@ mod tests {
         assert_eq!(d.apply(&glyph, true, 1.0, &mut Rng::new(5)), d.apply(&glyph, true, 1.0, &mut Rng::new(5)));
         let off = Deformation { remove_tails: false, ..d };
         assert!((0..50).all(|k| off.apply(&glyph, true, 1.0, &mut Rng::new(k))[0].len() == 4));
+    }
+
+    #[test]
+    fn tail_chance_and_length_are_adjustable() {
+        let d = Deformation {
+            enabled: true,
+            base: true,
+            h_scale_pct: Span::new(100.0, 100.0),
+            v_scale_pct: Span::new(100.0, 100.0),
+            rotation_deg: Span::new(0.0, 0.0),
+            stroke_degree: 0.0,
+            ..Default::default()
+        };
+        let glyph = vec![vec![(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (3.9, 0.15)]];
+        let cut = |d: &Deformation| (0..100).filter(|&k| d.apply(&glyph, true, 1.0, &mut Rng::new(k))[0].len() == 3).count();
+        assert_eq!(cut(&Deformation { tail_pct: 0.0, ..d.clone() }), 0);
+        assert_eq!(cut(&Deformation { tail_pct: 100.0, ..d.clone() }), 100);
+        // The hook is 0.18 long: a 0.1 limit keeps it.
+        assert_eq!(cut(&Deformation { tail_pct: 100.0, tail_max_mm: 0.1, ..d }), 0);
+    }
+
+    #[test]
+    fn slant_and_warp_are_adjustable_apart() {
+        let vertical = vec![vec![(0.0, 0.0), (0.0, 10.0)]];
+        let lean = |d: &Deformation| {
+            let out = d.apply(&vertical, true, 1.0, &mut Rng::new(9));
+            (out[0][0].0 - out[0][1].0) / 10.0
+        };
+        // Slant alone: the same lean as level 7, and no warp.
+        let slant = Deformation { enabled: true, shape: true, shape_degree: 0.0, slant_degree: Some(7.0), ..Default::default() };
+        assert!(slant.is_active());
+        assert!((0.10..=0.15).contains(&lean(&slant)), "lean {}", lean(&slant));
+        assert!(affine_residual(&dense(), &slant.apply(&dense(), true, 1.0, &mut Rng::new(2))) < 1e-4);
+        // Warp alone: upright, but warped.
+        let warp = Deformation { slant_degree: Some(0.0), shape_degree: 7.0, ..slant };
+        assert!(lean(&warp).abs() < 0.03, "lean {}", lean(&warp));
+        assert!(affine_residual(&dense(), &warp.apply(&dense(), true, 1.0, &mut Rng::new(2))) > 0.01);
     }
 
     /// A dense CJK-sized glyph (6×6 mm at 1 unit = 1 mm) as 7 strokes of 13 points.
