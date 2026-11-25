@@ -395,3 +395,21 @@
 - 布局 › 排版: 排版规则 ▾ big menu (checked items with full wording: 避头尾, 两个字母占一格,
   作文格分词) + 页面尺寸 button (icon, label, current size; opens 模板管理).
 - New embedded icons: ListOrdered, FileDigit, Moon, Scaling, Spline, TextWrap, Proportions.
+
+## 2026-11-25: 笔画与落笔 (committed on master, not pushed)
+- `3544787` 消除标点空格 (中英文 group, next to 中英空格): spaces around Chinese punctuation go;
+  ASCII punctuation keeps English spacing. `find::punct_spaces`.
+- `83b9093` per-kind deformation strength: `slant_degree` (字形倾斜, None = shape_degree),
+  `tail_pct` / `tail_max_mm` (小尾巴); 写字偏好 dropdowns for 笔画变形 / 字形扭曲 / 字形倾斜 /
+  小尾巴, on 中文 and on 英文/数字 own deformation. Defaults byte-identical.
+- `9bb1308` 连笔: `HandwritingStyle.cursive` (距离 % of em, 概率 %) joins strokes inside a char
+  with a quadratic curve; `PageParams::reshape` = 变形 then 连笔; cache fingerprint covers it.
+  Ribbon 手写 › 笔画 › 连笔.
+- `6aa24c7` 字符轻重: `Attrs.weight` (−2…+2, 字符微调 轻重 dropdown), `press_jitter` (随机轻重);
+  `DeviceProfile.press_step` (轻重每级, default 0.2) moves pen-down Z per stroke
+  (`Written.press`, empty when all standard). Preview draws heavier ink thicker.
+- `92ce5a1` 落笔校准 (设备 pane): 11-line depth ladder (`gcode::depth_ladder`,
+  `DeviceProfile::ladder_levels`); click a number to set 落笔高度. The job is flagged
+  `calibration`, so 断点续写 state is untouched.
+- Not verified: GUI click-through (BOSS at screen); ladder and 轻重 on the real board; whether
+  0.2 mm per 轻重 step suits the pen.
