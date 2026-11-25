@@ -291,6 +291,8 @@ impl ChixieRsApp {
             ribbon::row().child(ribbon::field_label(label, cx)).child(font).child(size).child(shape).into_any_element()
         };
         let doc = self.doc.clone();
+        let doc2 = self.doc.clone();
+        let done = |n: usize| if n == 0 { "没有需要消除的空格".to_string() } else { format!("已消除 {n} 处空格") };
         group(
             cx,
             "script",
@@ -302,12 +304,19 @@ impl ChixieRsApp {
                     row(1, "数字", Role::Number),
                     ribbon::row()
                         .child(
-                            small("cjk-space", "消除中英空格", IconName::RemoveFormatting)
+                            small("cjk-space", "中英空格", IconName::RemoveFormatting)
                                 .tooltip("删除中文与英文、数字之间的空格（有选中时只处理选中部分）")
                                 .on_click(move |_: &ClickEvent, w, cx| {
                                     let n = doc.update(cx, |d, cx| d.remove_cjk_latin_spaces(cx));
-                                    let msg = if n == 0 { "没有需要消除的空格".to_string() } else { format!("已消除 {n} 处空格") };
-                                    w.push_notification(gpui_kit::component::notification::Notification::info(msg), cx);
+                                    w.push_notification(gpui_kit::component::notification::Notification::info(done(n)), cx);
+                                }),
+                        )
+                        .child(
+                            small("punct-space", "标点空格", IconName::RemoveFormatting)
+                                .tooltip("删除标点符号与文字之间的空格；英文标点后的正常空格保留（有选中时只处理选中部分）")
+                                .on_click(move |_: &ClickEvent, w, cx| {
+                                    let n = doc2.update(cx, |d, cx| d.remove_punct_spaces(cx));
+                                    w.push_notification(gpui_kit::component::notification::Notification::info(done(n)), cx);
                                 }),
                         )
                         .into_any_element(),

@@ -636,6 +636,14 @@ impl DocView {
         }
         n
     }
+    /// 消除标点空格 in the selection (or everywhere); returns how many gaps went.
+    pub fn remove_punct_spaces(&mut self, cx: &mut Context<Self>) -> usize {
+        let n = self.doc.remove_punct_spaces();
+        if n > 0 {
+            self.edited(cx);
+        }
+        n
+    }
     /// Replace several ranges (替换 / 全部替换, one undo step).
     pub fn replace_ranges(&mut self, edits: Vec<(Range<usize>, String)>, cx: &mut Context<Self>) {
         self.doc.replace_many(edits);

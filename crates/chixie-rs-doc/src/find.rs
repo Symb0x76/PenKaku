@@ -68,6 +68,30 @@ fn is_gap(c: char) -> bool {
 /// Every run of spaces inside `within` that sits between a Chinese char and an ASCII letter or
 /// digit (either order, on one line), left to right. Spaces between two Latin words stay.
 pub fn cjk_latin_spaces(hay: &[char], within: Range<usize>) -> Vec<Range<usize>> {
+    let latin = |c: char| c.is_ascii_alphanumeric();
+    gap_runs(hay, within, |l, r| (is_cjk(l) && latin(r)) || (latin(l) && is_cjk(r)))
+}
+
+/// Chinese / fullwidth punctuation, quotes, dashes and the ellipsis.
+fn is_wide_punct(c: char) -> bool {
+    matches!(c as u32, 0x3001..=0x303F | 0xFF01..=0xFF0F | 0xFF1A..=0xFF20 | 0xFF3B..=0xFF40 | 0xFF5B..=0xFF65 | 0x2010..=0x2027 | 0x00B7)
+}
+
+/// Every run of spaces inside `within` between punctuation and text (on one line). Around
+/// Chinese punctuation every space goes. ASCII punctuation keeps English spacing: a space before
+/// `, . ; : ! ? ) ] }` or after `( [ {` goes; the space after a closing mark (or before an
+/// opening one) goes only when the text on the other side is Chinese.
+pub fn punct_spaces(hay: &[char], within: Range<usize>) -> Vec<Range<usize>> {
+    let closing = |c: char| matches!(c, ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '}');
+    let opening = |c: char| matches!(c, '(' | '[' | '{');
+    gap_runs(hay, within, |l, r| {
+        is_wide_punct(l) || is_wide_punct(r) || closing(r) || opening(l) || (closing(l) && is_cjk(r)) || (is_cjk(l) && opening(r))
+    })
+}
+
+/// Every run of spaces inside `within` (on one line) whose neighbours `hit(left, right)` accepts,
+/// left to right.
+fn gap_runs(hay: &[char], within: Range<usize>, hit: impl Fn(char, char) -> bool) -> Vec<Range<usize>> {
     let end = within.end.min(hay.len());
     let mut out = Vec::new();
     let mut i = within.start;
@@ -81,8 +105,7 @@ pub fn cjk_latin_spaces(hay: &[char], within: Range<usize>) -> Vec<Range<usize>>
             i += 1;
         }
         let (Some(&l), Some(&r)) = (start.checked_sub(1).and_then(|k| hay.get(k)), hay.get(i)) else { continue };
-        let latin = |c: char| c.is_ascii_alphanumeric();
-        if (is_cjk(l) && latin(r)) || (latin(l) && is_cjk(r)) {
+        if hit(l, r) {
             out.push(start..i.min(end));
         }
     }
@@ -96,6 +119,19 @@ impl EditDoc {
         let sel = self.selection();
         let within = if sel.is_empty() { 0..self.len() } else { sel };
         let hits = cjk_latin_spaces(self.chars(), within);
+        let n = hits.len();
+        if n > 0 {
+            self.replace_many(hits.into_iter().map(|r| (r, String::new())).collect());
+        }
+        n
+    }
+
+    /// 消除标点空格: spaces between punctuation and text in the selection, or the whole text when
+    /// nothing is selected (one undo step); returns how many runs were removed.
+    pub fn remove_punct_spaces(&mut self) -> usize {
+        let sel = self.selection();
+        let within = if sel.is_empty() { 0..self.len() } else { sel };
+        let hits = punct_spaces(self.chars(), within);
         let n = hits.len();
         if n > 0 {
             self.replace_many(hits.into_iter().map(|r| (r, String::new())).collect());
@@ -157,6 +193,19 @@ mod tests {
         let mut d = EditDoc::from_text("中 \nA 中 文");
         assert_eq!(d.remove_cjk_latin_spaces(), 1);
         assert_eq!(d.text(), "中 \nA中 文");
+    }
+
+    #[test]
+    fn punct_spaces_go_english_spacing_stays() {
+        let src = "你好 ， 世界 。 「 引 」 Hello , world ( x ) ok. 中文, 好 (注)\n句号 \u{3000}。";
+        let mut d = EditDoc::from_text(src);
+        assert_eq!(d.remove_punct_spaces(), 14);
+        assert_eq!(d.text(), "你好，世界。「引」Hello, world (x) ok.中文,好(注)\n句号。");
+        assert!(d.undo());
+        assert_eq!(d.text(), src);
+        // Between two words, or across a newline, nothing goes.
+        let mut d = EditDoc::from_text("中 文 a b ok. \n，x");
+        assert_eq!(d.remove_punct_spaces(), 0);
     }
 
     #[test]
