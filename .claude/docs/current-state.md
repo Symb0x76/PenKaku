@@ -346,3 +346,23 @@
   selection or whole doc, one undo step).
 - `AUTOTEST_NAV` + `SHOT_NAV_MISSING` / `SHOT_NAV_SEARCH`. Workspace tests + clippy clean.
 - VERIFY (BOSS): hover feel of the mini bar, right-click selection behaviour, 从此处开始书写 on hardware.
+
+## 2026-11-25: 书写流程 — 选页书写 / 换纸卡片 / 行间走笔 (uncommitted, branch feat/nav-pane-editor-menus)
+- 路径规划 has three choices (设备 › 参数设置): 之字形：永远左起(默认) / 弓字形：左右左(蛇形) /
+  自动选择最近路径 (`PathPlan::Nearest`, serde `nearest`). `plan.rs::order_rows` writes rows top to
+  bottom; Nearest starts each row from the end nearer to where the previous row ended (first row:
+  the origin, turned with 页面旋转). Nearest also applies to 作文格 (弓字形 still leaves grids
+  alone for ChiXie3 parity). Default unchanged → golden G-code untouched (no BLESS).
+- 选页书写: every job is one page. 设备 › 书写: big 书写 + page picker ▾ (第 n / N 页; picking
+  moves the caret to that page, `goto_page`; the caret's page is what 书写 writes). Removed
+  开始书写(全部), 从此页起 and every 已换纸继续 button; `JobScope` and `JobState.awaiting` gone; the
+  GUI ignores `Event::AwaitingSheet` (never sent for one-page jobs; device crate unchanged).
+- After a page finishes (Done): pen parks at 写完位置 (default 原点), toast "第 n 页已写完…请换纸",
+  the next page is selected, and a non-modal 请换纸 card sits in the task pane (+ status bar)
+  until the next 书写 or 关闭. Jog / 设为原点 / everything stays usable (no job is running).
+  Last page → "全部 N 页已写完" toast, no card. Stopped / failed jobs: no card.
+- 断点续写 and 右键 从此处开始书写 write from the char to the end of that page only, then the same
+  换纸 → 书写 flow.
+- AUTOTEST_DEVICE: write page 1 → card `(0,1)` + page 2 selected → jog 1 mm + zero checked via sim
+  MPos → write page 2 → no card. `AUTOTEST_RESUME … next_page=Some(1)`. Both now grepped in CI.
+- VERIFY (BOSS): 自动选择最近路径 on hardware (travel between rows); the 换纸 card flow on paper.

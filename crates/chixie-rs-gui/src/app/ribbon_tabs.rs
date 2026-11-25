@@ -13,7 +13,7 @@ use chixie_rs_core::layout::{Align, Ruling};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{ChixieRsApp, JobScope, PageTool, Stage, fmt_num};
+use super::{ChixieRsApp, PageTool, Stage, fmt_num};
 use chixie_rs_device::job::PatrolMode;
 use crate::doc_view::{self, DocView};
 use crate::ribbon::{self, big, big_menu, group, small, stack};
@@ -552,7 +552,7 @@ impl ChixieRsApp {
         let job = dev.job;
         let running = job.is_some();
         let paused = job.is_some_and(|j| j.paused);
-        let awaiting = job.and_then(|j| j.awaiting);
+        let (page, pages) = (self.write_page(cx), self.doc.read(cx).layout_doc().pages.len().max(1));
         h_flex()
             .h_full()
             .child(group(
@@ -580,16 +580,27 @@ impl ChixieRsApp {
                 "书写",
                 h_flex()
                     .gap_0p5()
-                    .child(big("start", "开始书写", IconName::PencilLine).disabled(!connected || running).on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.start_job(JobScope::All, w, cx))))
+                    .child(
+                        big("start", "书写", IconName::PencilLine)
+                            .disabled(!connected || running)
+                            .tooltip("书写选中的页；写完后换纸，再选下一页书写")
+                            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.start_job(w, cx))),
+                    )
                     .child(stack([
-                        small("write-page", "书写此页", IconName::File)
-                            .disabled(!connected || running)
-                            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.start_job(JobScope::ThisPage, w, cx)))
-                            .into_any_element(),
-                        small("write-from", "从此页起", IconName::ArrowDown)
-                            .disabled(!connected || running)
-                            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.start_job(JobScope::FromHere, w, cx)))
-                            .into_any_element(),
+                        {
+                            let this = cx.entity().downgrade();
+                            small("write-page-pick", format!("第 {} / {pages} 页", page + 1), IconName::File)
+                                .tooltip("选择要书写的页")
+                                .dropdown_menu(move |m, _w, _cx| {
+                                    (0..pages).fold(m, |m, k| {
+                                        let this = this.clone();
+                                        m.item(PopupMenuItem::new(format!("第 {} 页", k + 1)).checked(k == page).on_click(move |_, _w, cx| {
+                                            let _ = this.update(cx, |t, cx| t.goto_page(k, cx));
+                                        }))
+                                    })
+                                })
+                                .into_any_element()
+                        },
                         small("write-resume", "断点续写", IconName::Redo)
                             .disabled(running)
                             .tooltip("从选中的字符继续书写被中断的页面")
@@ -603,15 +614,10 @@ impl ChixieRsApp {
                         .into_any_element()]))
                     .child(
                         big(if paused { "resume" } else { "pause" }, if paused { "继续" } else { "暂停" }, if paused { IconName::Play } else { IconName::Pause })
-                            .disabled(!running || awaiting.is_some())
+                            .disabled(!running)
                             .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.device.update(cx, |d, cx| d.toggle_pause(cx)))),
                     )
-                    .child(big("stop", "停止", IconName::Square).disabled(!running).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.device.update(cx, |d, cx| d.stop(cx)))))
-                    .when(awaiting.is_some(), |el| {
-                        el.child(Button::new("next").small().primary().label("已换纸，继续").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
-                            t.device.update(cx, |d, cx| d.next_sheet(cx))
-                        })))
-                    }),
+                    .child(big("stop", "停止", IconName::Square).disabled(!running).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.device.update(cx, |d, cx| d.stop(cx))))),
                 None,
             ))
             .child(group(

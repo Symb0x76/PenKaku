@@ -69,6 +69,8 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then run="xvfb-run -a"; else run=""; fi
           $run ./target/debug/chixie-rs${{ runner.os == 'Windows' && '.exe' || '' }} | tee autotest.log
           grep -q 'AUTOTEST_DOCX round_trip=true' autotest.log
+          grep -q 'AUTOTEST_DEVICE connected=Some("模拟设备") pages_done=2/2 sheet_card=Some(((0, 1), 1)) jog_zero_while_waiting=true card_after_last=None recoveries=0 outcome=Some(Done)' autotest.log
+          grep -q 'AUTOTEST_RESUME from=Some(.*) next_page=Some(1) outcome=Some(Done)' autotest.log
           grep -q 'AUTOTEST_TYPESET align=Right indent=true half_space=true right_at_margin=true punct_issues=0' autotest.log
           grep -q 'AUTOTEST_BACKSTAGE closed=Ok(true)' autotest.log
           grep -q 'AUTOTEST_FONTS watched=true english_routed=true export_import=true' autotest.log

@@ -138,12 +138,11 @@ impl ChixieRsApp {
         };
         let layout = self.doc.read(cx).document();
         let Some(page) = layout.boxes.get(i).map(|b| b.page) else { return };
-        let pages = layout.pages.len();
         let app = cx.entity();
         window.open_alert_dialog(cx, move |a, _w, _cx| {
             let app = app.clone();
             a.title(format!("从「{ch}」开始书写？"))
-                .description(format!("从第 {} 页的「{ch}」写到文档末尾（第 {}–{pages} 页），之前的内容跳过。请确认纸张已放好、笔已装好，起点为当前原点。", page + 1, page + 1))
+                .description(format!("从第 {} 页的「{ch}」写到本页末尾，之前的内容跳过；写完后换纸，再选下一页书写。请确认纸张已放好、笔已装好，起点为当前原点。", page + 1))
                 .confirm()
                 .ok_text("开始")
                 .on_ok(move |_, w, cx| {
@@ -153,7 +152,8 @@ impl ChixieRsApp {
         });
     }
 
-    /// Write from char `i` (its first stroke) to the end of the document.
+    /// Write from char `i` (its first stroke) to the end of its page; the next page follows the
+    /// usual 换纸 → 书写 flow.
     fn start_from(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let device = self.device.read(cx);
         if device.connected.is_none() || device.busy() {
@@ -164,15 +164,14 @@ impl ChixieRsApp {
         let Some(page_ix) = layout.boxes.get(i).map(|b| b.page) else { return };
         let profile = cx.global::<AppState>().settings.device.profile.clone();
         let written = self.written_pages(cx);
-        let pages = &written[page_ix..];
-        let mut codes: Vec<PageCode> = pages.iter().map(|w| gcode::emit_written(w, &profile)).collect();
-        let k = pages[0].page.first_stroke_from(i);
-        codes[0] = codes[0].from_stroke(k);
-        let mut first = pages[0].clone();
+        let Some(page) = written.get(page_ix) else { return };
+        let k = page.page.first_stroke_from(i);
+        let codes: Vec<PageCode> = vec![gcode::emit_written(page, &profile).from_stroke(k)];
+        let mut first = page.clone();
         first.page.stroke_chars.drain(..k.min(first.page.stroke_chars.len()));
-        let metas: Vec<Written> = std::iter::once(first).chain(pages[1..].iter().cloned()).collect();
         let ids = self.doc.read(cx).doc().ids().to_vec();
-        self.resume.job_started(Some(JobMeta::new(page_ix, &codes, &metas, &ids)));
+        self.resume.job_started(Some(JobMeta::new(page_ix, &codes, &[first], &ids)));
+        self.writing_started(page_ix);
         let job = super::job_of(page_ix, codes);
         self.resume.open = false;
         self.device.update(cx, |d, cx| d.run(job, cx));

@@ -68,15 +68,24 @@ impl OutputOptions {
 /// the G-code stays byte-identical to the layout's.
 pub fn plan(doc: &Document, k: usize, o: &OutputOptions) -> Page {
     let mut page = doc.pages[k].clone();
-    // ChiXie3 reverses a row's text, not a grid's cells: 弓字型 leaves 作文格 pages as they are
-    // (captured 2026-11-17, docs/protocol.md).
-    if o.path_plan == PathPlan::Serpentine && !doc.grid {
-        serpentine(doc, &mut page);
-    }
     let turn = o.rotation.turns(k);
     let (ox, oy) = o.sheet.origin_point(o.origin);
+    let (w, h) = o.sheet.frame();
+    match o.path_plan {
+        PathPlan::Raster => {}
+        // ChiXie3 reverses a row's text, not a grid's cells: 弓字型 leaves 作文格 pages as they
+        // are (captured 2026-11-17, docs/protocol.md).
+        PathPlan::Serpentine if doc.grid => {}
+        PathPlan::Serpentine => order_rows(doc, &mut page, (0.0, 0.0), |row, _, _, _| row % 2 == 1),
+        PathPlan::Nearest => {
+            // The pen starts at the origin; in layout mm that is the origin point, turned with
+            // the page (the 180° turn is its own inverse).
+            let start = if turn { (w - ox, -h - oy) } else { (ox, oy) };
+            let d = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).hypot(a.1 - b.1);
+            order_rows(doc, &mut page, start, |_, pen, fwd, back| d(pen, back) < d(pen, fwd));
+        }
+    }
     if turn || (ox, oy) != (0.0, 0.0) {
-        let (w, h) = o.sheet.frame();
         // 180° about the frame centre (w/2, -h/2): the turned page fills the same frame.
         let f = |(x, y): (f32, f32)| {
             let (x, y) = if turn { (w - x, -h - y) } else { (x, y) };
@@ -143,24 +152,36 @@ fn reorder(page: &mut Page, order: &[usize]) {
     page.stroke_chars = order.iter().map(|&i| page.stroke_chars[i]).collect();
 }
 
-/// 弓字型: on every second row of the page (by line, top to bottom), characters run right to left.
-/// Each character's strokes keep their order; strokes without a character stay where they are.
-fn serpentine(doc: &Document, page: &mut Page) {
+/// Rows of the page (by line, top to bottom; only rows that carry ink, so blank lines don't
+/// count) written in turn, each left to right unless `reverse(row, pen, fwd, back)` says right to
+/// left. `pen` is where the previous row ended (`start` before the first); `fwd` / `back` are the
+/// row's first point written either way. Each character's strokes keep their order.
+fn order_rows(doc: &Document, page: &mut Page, start: (f32, f32), mut reverse: impl FnMut(usize, (f32, f32), (f32, f32), (f32, f32)) -> bool) {
     if page.stroke_chars.len() != page.strokes.len() {
         return;
     }
-    // Rows that carry ink, top to bottom: blank lines don't flip the direction.
     let line_of = |c: usize| doc.boxes.get(c).map_or(0, |b| b.line);
-    let mut lines: Vec<usize> = page.stroke_chars.iter().map(|&c| line_of(c)).collect();
-    lines.sort_unstable();
-    lines.dedup();
-    let key = |c: usize| -> (usize, i64) {
-        let row = lines.binary_search(&line_of(c)).unwrap_or_else(|i| i);
-        (row, if row % 2 == 1 { -(c as i64) } else { c as i64 })
-    };
     let mut order: Vec<usize> = (0..page.strokes.len()).collect();
-    order.sort_by_key(|&i| key(page.stroke_chars[i]));
-    reorder(page, &order);
+    // Stable: a character's strokes stay in writing order.
+    order.sort_by_key(|&i| (line_of(page.stroke_chars[i]), page.stroke_chars[i]));
+    let first = |ix: &[usize]| ix.iter().find_map(|&i| page.strokes[i].first().copied());
+    let last = |ix: &[usize]| ix.iter().rev().find_map(|&i| page.strokes[i].last().copied());
+    let mut out = Vec::with_capacity(order.len());
+    let mut pen = start;
+    for (row, ix) in order.chunk_by(|&a, &b| line_of(page.stroke_chars[a]) == line_of(page.stroke_chars[b])).enumerate() {
+        // The row's characters, each a run of its strokes.
+        let chars: Vec<&[usize]> = ix.chunk_by(|&a, &b| page.stroke_chars[a] == page.stroke_chars[b]).collect();
+        let fwd = first(ix).unwrap_or(pen);
+        let back = chars.iter().rev().find_map(|c| first(c)).unwrap_or(pen);
+        let at = out.len();
+        if reverse(row, pen, fwd, back) {
+            chars.iter().rev().for_each(|c| out.extend_from_slice(c));
+        } else {
+            out.extend_from_slice(ix);
+        }
+        pen = last(&out[at..]).unwrap_or(pen);
+    }
+    reorder(page, &out);
 }
 
 #[cfg(test)]
@@ -213,6 +234,22 @@ mod tests {
         let d = doc("abc\n\nabc");
         let p = plan(&d, 0, &OutputOptions { path_plan: PathPlan::Serpentine, ..opts() });
         assert_eq!(char_order(&p), vec![0, 1, 2, 7, 6, 5]);
+    }
+
+    #[test]
+    fn nearest_starts_each_row_at_the_nearer_end() {
+        let near = OutputOptions { path_plan: PathPlan::Nearest, ..opts() };
+        // Full rows: the pen ends each row at the far side, so this is 弓字型.
+        let d = doc("abc\nabc\nabc");
+        assert_eq!(char_order(&plan(&d, 0, &near)), vec![0, 1, 2, 6, 5, 4, 8, 9, 10]);
+        // A one-char first row leaves the pen on the left: the second row runs left to right
+        // (弓字型 would reverse it), the third comes back.
+        let d = doc("a\nabc\nabc");
+        assert_eq!(char_order(&plan(&d, 0, &near)), vec![0, 2, 3, 4, 8, 7, 6]);
+        assert_eq!(char_order(&plan(&d, 0, &OutputOptions { path_plan: PathPlan::Serpentine, ..opts() })), vec![0, 4, 3, 2, 6, 7, 8]);
+        // A turned page starts from the other corner: the first row runs right to left.
+        let turned = OutputOptions { rotation: PageRotation::All180, ..near };
+        assert_eq!(char_order(&plan(&doc("abc"), 0, &turned)), vec![2, 1, 0]);
     }
 
     #[test]

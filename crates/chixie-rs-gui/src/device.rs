@@ -34,8 +34,6 @@ pub struct JobState {
     pub done: usize,
     pub total: usize,
     pub paused: bool,
-    /// Waiting for the user to put sheet `n` (0-based) in place.
-    pub awaiting: Option<usize>,
     /// 多色绘制: waiting for the user to put in this pen.
     pub pen: Option<chixie_rs_core::profile::Rgb>,
     /// The link dropped; the actor is on reconnect attempt `n`.
@@ -56,7 +54,6 @@ pub enum Notice {
     Info(String),
     Warn(String),
     Error(String),
-    AwaitingSheet(usize),
     /// 换笔提示: put in this pen.
     AwaitingPen(chixie_rs_core::profile::Rgb),
     /// The board entered an alarm: toast with a 解锁 action.
@@ -247,7 +244,7 @@ impl DevicePanel {
     }
     pub fn run(&mut self, job: Job, cx: &mut Context<Self>) {
         let (page, pages) = (job.first_page, job.first_page + job.pages.len());
-        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, awaiting: None, pen: None, reconnecting: None, recovered: None });
+        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, pen: None, reconnecting: None, recovered: None });
         self.handle.send(Command::Run(job));
         cx.notify();
     }
@@ -277,7 +274,7 @@ impl DevicePanel {
     }
     pub fn next_sheet(&mut self, cx: &mut Context<Self>) {
         if let Some(j) = &mut self.job {
-            (j.awaiting, j.pen) = (None, None);
+            j.pen = None;
         }
         self.handle.send(Command::NextSheet);
         cx.notify();
@@ -336,8 +333,7 @@ impl DevicePanel {
             }
             Event::Recovered { page, line, rebooted } => {
                 if let Some(j) = &mut self.job {
-                    // A pending sheet prompt is asked again after the resume.
-                    (j.reconnecting, j.recovered, j.awaiting, j.page, j.done) = (None, Some((line, rebooted)), None, page, line);
+                    (j.reconnecting, j.recovered, j.page, j.done) = (None, Some((line, rebooted)), page, line);
                 }
                 Notice::Warn(if rebooted {
                     "设备已重新连接，但控制板重启过、坐标已丢失：请把笔移回纸张原点，点「设为原点」，再点「继续书写」".into()
@@ -373,12 +369,8 @@ impl DevicePanel {
                 }
                 Notice::None
             }
-            Event::AwaitingSheet { next } => {
-                if let Some(j) = &mut self.job {
-                    j.awaiting = Some(next);
-                }
-                Notice::AwaitingSheet(next)
-            }
+            // The app sends one page per job (选页书写), so the actor never waits for a sheet.
+            Event::AwaitingSheet { .. } => Notice::None,
             Event::AwaitingPen { colour, .. } => {
                 if let Some(j) = &mut self.job {
                     j.pen = Some(colour);
@@ -533,16 +525,15 @@ impl DevicePanel {
         let theme = cx.theme();
         let (muted, primary, track) = (theme.muted_foreground, theme.primary, theme.border);
         let Some(j) = self.job else {
-            return div().text_sm().text_color(muted).child("在「设备」选项卡点「开始书写」").into_any_element();
+            return div().text_sm().text_color(muted).child("在「设备 › 书写」选页，点「书写」").into_any_element();
         };
         let pct = j.percent();
-        let label = match (j.reconnecting, j.recovered, j.awaiting) {
-            (Some(n), ..) => format!("设备断开，正在自动重连…（第 {n} 次）"),
-            (_, Some((_, true)), _) => "控制板重启过：请把笔移回纸张原点，点「设为原点」后继续".into(),
-            (_, Some((line, false)), _) => format!("已重新连接：将从第 {} 页第 {line} 行附近继续", j.page + 1),
-            (_, _, Some(n)) => format!("等待换纸：第 {} 页", n + 1),
+        let label = match (j.reconnecting, j.recovered) {
+            (Some(n), _) => format!("设备断开，正在自动重连…（第 {n} 次）"),
+            (_, Some((_, true))) => "控制板重启过：请把笔移回纸张原点，点「设为原点」后继续".into(),
+            (_, Some((line, false))) => format!("已重新连接：将从第 {} 页第 {line} 行附近继续", j.page + 1),
             _ if j.pen.is_some() => format!("等待换笔：{}", j.pen.map(chixie_rs_core::profile::colour_name).unwrap_or_default()),
-            _ => format!("第 {}/{} 页 · {}/{} 行 · {pct:.0}%{}", j.page + 1, j.pages, j.done, j.total, if j.paused { " · 已暂停" } else { "" }),
+            _ => format!("第 {} 页 · {}/{} 行 · {pct:.0}%{}", j.page + 1, j.done, j.total, if j.paused { " · 已暂停" } else { "" }),
         };
         let interrupted = j.reconnecting.is_some() || j.recovered.is_some();
         v_flex()
@@ -559,13 +550,10 @@ impl DevicePanel {
                         })
                         .child(Button::new("resume-job").small().primary().label("继续书写").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.resume_job(cx))))
                     })
-                    .when(j.awaiting.is_some() && !interrupted, |el| {
-                        el.child(Button::new("next-sheet").small().primary().label("已换纸，继续").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.next_sheet(cx))))
-                    })
                     .when(j.pen.is_some() && !interrupted, |el| {
                         el.child(Button::new("next-pen").small().primary().label("换笔完成").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.next_sheet(cx))))
                     })
-                    .when(j.awaiting.is_none() && j.pen.is_none() && !interrupted, |el| {
+                    .when(j.pen.is_none() && !interrupted, |el| {
                         el.child(Button::new("pause").small().label(if j.paused { "继续" } else { "暂停" }).on_click(cx.listener(
                             |t, _: &ClickEvent, _w, cx| t.toggle_pause(cx),
                         )))

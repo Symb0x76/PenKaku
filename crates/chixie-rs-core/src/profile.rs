@@ -217,14 +217,17 @@ pub enum PathPlan {
     Raster,
     /// 弓字型: every second row right to left (each character's own strokes keep their order).
     Serpentine,
+    /// 自动选择最近路径: each row starts from whichever end is nearer to where the pen stopped.
+    Nearest,
 }
 
 impl PathPlan {
-    pub const ALL: [PathPlan; 2] = [PathPlan::Raster, PathPlan::Serpentine];
+    pub const ALL: [PathPlan; 3] = [PathPlan::Raster, PathPlan::Serpentine, PathPlan::Nearest];
     pub fn label(self) -> &'static str {
         match self {
-            PathPlan::Raster => "之字型(默认)",
-            PathPlan::Serpentine => "弓字型",
+            PathPlan::Raster => "之字形：永远左起(默认)",
+            PathPlan::Serpentine => "弓字形：左右左(蛇形)",
+            PathPlan::Nearest => "自动选择最近路径",
         }
     }
 }
