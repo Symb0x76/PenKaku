@@ -172,9 +172,28 @@ fn big_inner(id: impl Into<ElementId>, label: SharedString, icon: IconName, care
     )
 }
 
+/// Height of one control row; every ribbon group lays out up to three of them on this grid so
+/// rows line up across groups (small inputs are 24 px too).
+pub const ROW_H: f32 = 24.0;
+
 /// Small ribbon button: 16 px icon + label, for 3-row stacks.
 pub fn small(id: impl Into<ElementId>, label: impl Into<SharedString>, icon: IconName) -> Button {
-    Button::new(id).ghost().xsmall().h(px(22.)).justify_start().icon(Icon::new(icon).with_size(px(15.))).label(label)
+    Button::new(id).ghost().xsmall().h(px(ROW_H)).justify_start().icon(Icon::new(icon).with_size(px(15.))).label(label)
+}
+
+/// One control row on the ribbon grid.
+pub fn row() -> Div {
+    h_flex().h(px(ROW_H)).items_center().gap_1()
+}
+
+/// Up to three rows, as a block of the given width (rows fill it).
+pub fn rows(w: f32, items: impl IntoIterator<Item = AnyElement>) -> Div {
+    v_flex().w(px(w)).gap_0p5().justify_center().children(items)
+}
+
+/// A fixed-width caption in front of a row's controls (字号, 英文, …), so the controls line up.
+pub fn field_label(text: &'static str, cx: &App) -> Div {
+    div().w(px(28.)).flex_shrink_0().text_xs().text_color(cx.theme().muted_foreground).child(text)
 }
 
 /// Icon-only small button (ribbon, status bar).
@@ -184,7 +203,7 @@ pub fn icon_btn(id: impl Into<ElementId>, icon: IconName, tip: impl Into<SharedS
 
 /// Up to three small controls stacked vertically.
 pub fn stack(items: impl IntoIterator<Item = AnyElement>) -> Div {
-    v_flex().gap_0p5().justify_center().children(items)
+    v_flex().gap_0p5().justify_center().children(items.into_iter().map(|it| row().child(it)))
 }
 
 /// A captioned ribbon group followed by a short inset divider, with an optional ↘ launcher.

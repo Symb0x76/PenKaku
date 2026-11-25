@@ -35,8 +35,15 @@ const GAP: f32 = 24.0;
 /// px per mm that shows paper at roughly its physical size on a 96-dpi screen.
 pub const ZOOM_100: f32 = 96.0 / 25.4;
 /// Zoom limits (px per mm).
-pub const ZOOM_MIN: f32 = 0.4;
-pub const ZOOM_MAX: f32 = 6.0;
+pub const ZOOM_MIN: f32 = ZOOM_100 * 0.1;
+pub const ZOOM_MAX: f32 = ZOOM_100 * 5.0;
+
+/// Pages per row, as in Word's print layout: as many as fit across the viewport (so zooming out
+/// lays pages side by side), at least two with 双页, never more than there are pages.
+fn page_cols(viewport_w: f32, page_w: f32, pages: usize, double: bool) -> usize {
+    let fit = ((viewport_w - GAP) / (page_w + GAP)).floor().max(1.0) as usize;
+    fit.max(if double { 2 } else { 1 }).min(pages.max(1))
+}
 pub const KEY_CONTEXT: &str = "ChixieRsEditor";
 
 mod format;
@@ -906,7 +913,9 @@ impl Render for DocView {
         let page_prepaint = page.clone();
         let pages = self.layout.pages.len().max(1);
         let ui = settings.ui.clone();
-        let cols = if ui.double_page { 2 } else { 1 };
+        let page_w_px = page.paper.0 * self.zoom;
+        let double = ui.double_page;
+        let cols = page_cols(f32::from(self.scroll.bounds().size.width), page_w_px, pages, double);
         let rows = pages.div_ceil(cols);
         let total_h = GAP + rows as f32 * (page.paper.1 * self.zoom + GAP);
         let total_w = cols as f32 * page.paper.0 * self.zoom + (cols + 1) as f32 * GAP;
@@ -928,6 +937,7 @@ impl Render for DocView {
         let menu_geom = self.geom.clone();
         let reveal = std::mem::take(&mut self.reveal_caret);
         let scroll = self.scroll.clone();
+        let scroll_cols = self.scroll.clone();
         let this_reveal = entity.clone();
         let menu_entity = entity.clone();
         let mini = self.mini_bar(cx);
@@ -994,7 +1004,12 @@ impl Render for DocView {
             .cursor(CursorStyle::IBeam)
             .child(
                 canvas(
-                    move |bounds, _w, _cx| {
+                    move |bounds, window, _cx| {
+                        // `cols` came from the viewport width of the last frame; after a resize,
+                        // draw once more with the new width.
+                        if page_cols(f32::from(scroll_cols.bounds().size.width), page_w_px, pages, double) != cols {
+                            window.refresh();
+                        }
                         let g = Geom::new(bounds, &page_prepaint, zoom, cols);
                         geom_out.set(Some(g));
                         g
@@ -1389,5 +1404,18 @@ mod geom_tests {
         // Single page: one column.
         let g1 = Geom::new(bounds, &page, 2.0, 1);
         assert_eq!(g1.page_origin(1).x, g1.page_origin(0).x);
+    }
+
+    #[core::prelude::v1::test]
+    fn columns_follow_viewport_width() {
+        let pw = 210.0 * ZOOM_100 * 0.3; // A4 at 30 %
+        assert_eq!(page_cols(1600.0, pw, 20, false), ((1600.0 - GAP) / (pw + GAP)) as usize);
+        assert!(page_cols(1600.0, pw, 20, false) > 2);
+        // Never more columns than pages; 100 % in a narrow window stays one page wide.
+        assert_eq!(page_cols(1600.0, pw, 2, false), 2);
+        assert_eq!(page_cols(800.0, 210.0 * ZOOM_100, 5, false), 1);
+        // 双页 keeps two even when they do not fit.
+        assert_eq!(page_cols(800.0, 210.0 * ZOOM_100, 5, true), 2);
+        assert!((ZOOM_MIN / ZOOM_100 - 0.1).abs() < 1e-6 && (ZOOM_MAX / ZOOM_100 - 5.0).abs() < 1e-6);
     }
 }

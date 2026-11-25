@@ -2,7 +2,7 @@
 //! one function holding every tab's temporaries overflowed the 1 MB debug main-thread stack.
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::WindowExt as _;
@@ -29,6 +29,9 @@ const MARGINS: [(&str, Margins); 4] = [
     ("适中", (19.1, 25.4, 19.1, 25.4)),
     ("宽", (31.8, 25.4, 31.8, 25.4)),
 ];
+/// Widths of the 开始 tab's multi-row groups (each row fills its group).
+const FONT_GROUP_W: f32 = 224.0;
+const SCRIPT_GROUP_W: f32 = 256.0;
 
 /// Click handler that runs an editor action with focus handed back to the page (so ribbon
 /// buttons behave exactly like their shortcuts).
@@ -55,7 +58,8 @@ impl ChixieRsApp {
     #[inline(never)]
     fn tab_home(&self, cx: &mut Context<Self>) -> AnyElement {
         let act = |a: Box<dyn Action>| editor_action(self.doc.clone(), a);
-        let has_fonts = !self.font_ids.is_empty();
+        // The first id is the 字体库… entry.
+        let has_fonts = self.font_ids.len() > 1;
         let font_size = cx.global::<AppState>().settings.page.font_size;
         let pen_menu = self.pen_colour_menu();
         let ruling = cx.global::<AppState>().active_template().map(|t| t.ruling());
@@ -93,13 +97,13 @@ impl ChixieRsApp {
                 cx,
                 "font",
                 "字体",
-                v_flex()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .gap_1()
+                ribbon::rows(
+                    FONT_GROUP_W,
+                    [
+                        // The picker's first entry opens 字体库 (see `FontItem::library`).
+                        ribbon::row()
                             .child(
-                                div().w(px(190.)).child(
+                                div().flex_1().child(
                                     Select::new(&self.font_select)
                                         .small()
                                         .placeholder(if sel && fs.font.is_none() {
@@ -109,25 +113,24 @@ impl ChixieRsApp {
                                         } else {
                                             "（无收藏字体）"
                                         })
-                                        .menu_width(px(260.)),
+                                        .menu_width(px(300.)),
                                 ),
                             )
-                            .child(small("fontlib", "字体库…", IconName::Type).on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_fonts(w, cx)))),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(div().text_xs().child("字号"))
-                            .child(div().w(px(96.)).child(NumberInput::new(&self.font_size).small()))
+                            .into_any_element(),
+                        ribbon::row()
+                            .child(ribbon::field_label("字号", cx))
+                            .child(div().flex_1().child(NumberInput::new(&self.font_size).small()))
                             .child(ribbon::icon_btn("grow", IconName::AArrowUp, "增大字号").on_click(cx.listener(move |t, _: &ClickEvent, w, cx| {
                                 t.bump_size(10.0, font_size, w, cx)
                             })))
                             .child(ribbon::icon_btn("shrink", IconName::AArrowDown, "减小字号").on_click(cx.listener(move |t, _: &ClickEvent, w, cx| {
                                 t.bump_size(-10.0, font_size, w, cx)
                             })))
-                            .child(pen_menu),
-                    )
-                    .child(self.format_buttons(&fs)),
+                            .child(pen_menu)
+                            .into_any_element(),
+                        self.format_buttons(&fs),
+                    ],
+                ),
                 None,
             ))
             .child(self.script_group(cx))
@@ -135,11 +138,11 @@ impl ChixieRsApp {
                 cx,
                 "para",
                 "段落",
-                v_flex()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .gap_0p5()
+                ribbon::rows(
+                    132.0,
+                    [
+                        ribbon::row()
+                            .justify_between()
                             .child(ribbon::icon_btn("al-left", IconName::TextAlignStart, "左对齐").selected(align == Align::Left).on_click(act(Box::new(doc_view::AlignLeft))))
                             .child(ribbon::icon_btn("al-center", IconName::TextAlignCenter, "居中").selected(align == Align::Center).on_click(act(Box::new(doc_view::AlignCenter))))
                             .child(ribbon::icon_btn("al-right", IconName::TextAlignEnd, "右对齐").selected(align == Align::Right).on_click(act(Box::new(doc_view::AlignRight))))
@@ -152,24 +155,25 @@ impl ChixieRsApp {
                                 ribbon::icon_btn("indent", IconName::ListIndentIncrease, "首行缩进 (Tab)")
                                     .selected(indented)
                                     .on_click(act(Box::new(doc_view::ToggleIndent))),
-                            ),
-                    )
-                    .child(h_flex().gap_1().child(div().text_xs().child("行距")).child(div().w(px(104.)).child(NumberInput::new(&self.line_height).small().suffix("mm"))))
-                    .child(
-                        h_flex()
-                            .gap_1()
+                            )
+                            .into_any_element(),
+                        ribbon::row()
                             .child(
                                 small("combine", "合并内容", IconName::Combine)
                                     .disabled(!grid)
                                     .tooltip(if grid { "选中的几个字写在同一格内（再点一次取消）" } else { "仅作文格可用" })
                                     .on_click(act(Box::new(doc_view::Combine))),
                             )
+                            .into_any_element(),
+                        ribbon::row()
                             .child(
                                 small("tune", "字符微调", IconName::Move)
                                     .tooltip("微调选中字符的位置、大小和变形")
                                     .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.open_tune(cx))),
-                            ),
-                    ),
+                            )
+                            .into_any_element(),
+                    ],
+                ),
                 None,
             ))
             .when(table, |el| {
@@ -178,9 +182,10 @@ impl ChixieRsApp {
                     cx,
                     "table",
                     "表格功能",
-                    stack([
+                    h_flex().gap_1().child(stack([
                         small("next-cell", "下一格 (Tab)", IconName::ArrowRight).on_click(act(Box::new(doc_view::ToggleIndent))).into_any_element(),
                         small("prev-cell", "上一格 (Shift+Tab)", IconName::ArrowLeft).on_click(act(Box::new(doc_view::PrevCell))).into_any_element(),
+                    ])).child(stack([
                         small("overflow", if overflowing > 0 { format!("批量溢出 ({overflowing})") } else { "批量溢出".to_string() }, IconName::TriangleAlert)
                             .on_click({
                                 let view = view.clone();
@@ -200,7 +205,7 @@ impl ChixieRsApp {
                                     .item(PopupMenuItem::new("刷新数据(所有页)").on_click(move |_, w, cx| crate::table_ui::refresh_data(&v2, true, w, cx)))
                             })
                             .into_any_element(),
-                    ]),
+                    ])),
                     None,
                 ))
             })
@@ -224,12 +229,30 @@ impl ChixieRsApp {
     fn script_group(&self, cx: &mut Context<Self>) -> AnyElement {
         use super::fonts_ctl::Role;
         const PCTS: [f32; 9] = [70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 110.0, 120.0];
-        let hw = &cx.global::<AppState>().settings.style.handwriting;
+        let st = cx.global::<AppState>();
+        let hw = &st.settings.style.handwriting;
         let scales = [hw.english.scale_pct, hw.number.scale_pct];
+        let fonts = st.fonts.list();
+        // The button shows the role's font, so the row reads 英文 [巴拉体 ▾] [100% ▾] [字形].
+        let font_name = |role: Role| -> SharedString {
+            role.get(&st.settings.fonts.roles)
+                .and_then(|key| fonts.iter().find(|f| f.id == key.local_id()))
+                .map_or_else(|| "同中文".into(), |f| f.name.clone().into())
+        };
+        let names = [font_name(Role::English), font_name(Role::Number)];
         let app = cx.entity();
         let row = |k: usize, label: &'static str, role: Role| {
             let (a1, a2, a3) = (app.clone(), app.clone(), app.clone());
-            let font = Button::new(("script-font", k)).xsmall().outline().label("字体").dropdown_caret(true).tooltip(role.label()).dropdown_menu(move |m, _w, cx| {
+            let font = Button::new(("script-font", k))
+                .xsmall()
+                .outline()
+                .h(px(ribbon::ROW_H))
+                .w(px(92.))
+                .justify_between()
+                .child(div().flex_1().min_w_0().truncate().child(names[k].clone()))
+                .dropdown_caret(true)
+                .tooltip(format!("{}：{}", role.label(), names[k]))
+                .dropdown_menu(move |m, _w, cx| {
                 let st = cx.global::<AppState>();
                 let current = role.get(&st.settings.fonts.roles).map(|key| key.local_id());
                 let a = a1.clone();
@@ -239,7 +262,16 @@ impl ChixieRsApp {
                     m.item(PopupMenuItem::new(f.name).checked(current == Some(f.id)).on_click(move |_, w, cx| a.update(cx, |t, cx| t.set_role(f.id, role, w, cx))))
                 })
             });
-            let size = Button::new(("script-size", k)).xsmall().outline().label(format!("{}%", fmt_num(scales[k]))).dropdown_caret(true).tooltip("大小（相对中文字号）").dropdown_menu(move |m, _w, cx| {
+            let size = Button::new(("script-size", k))
+                .xsmall()
+                .outline()
+                .h(px(ribbon::ROW_H))
+                .w(px(64.))
+                .justify_between()
+                .label(format!("{}%", fmt_num(scales[k])))
+                .dropdown_caret(true)
+                .tooltip("大小（相对中文字号）")
+                .dropdown_menu(move |m, _w, cx| {
                 let cur = cx.global::<AppState>().settings.style.handwriting.clone();
                 let cur = if k == 0 { cur.english.scale_pct } else { cur.number.scale_pct };
                 PCTS.iter().fold(m, |m, &p| {
@@ -254,27 +286,34 @@ impl ChixieRsApp {
                     }))
                 })
             });
-            let shape = Button::new(("script-shape", k)).xsmall().ghost().label("字形…").tooltip("基线、浮动和变形").on_click(move |_: &ClickEvent, w, cx| a3.update(cx, |t, cx| t.open_style_tab(k + 1, w, cx)));
-            h_flex().gap_1().items_center().child(div().w(px(28.)).text_xs().child(label)).child(font).child(size).child(shape)
+            let shape = small(("script-shape", k), "字形", IconName::Settings2)
+                .tooltip(if k == 0 { "英文字形：基线、上下浮动和变形" } else { "数字字形：基线、上下浮动和变形" })
+                .on_click(move |_: &ClickEvent, w, cx| a3.update(cx, |t, cx| t.open_style_tab(k + 1, w, cx)));
+            ribbon::row().child(ribbon::field_label(label, cx)).child(font).child(size).child(shape).into_any_element()
         };
         let doc = self.doc.clone();
         group(
             cx,
             "script",
             "中英文",
-            v_flex()
-                .gap_1()
-                .child(row(0, "英文", Role::English))
-                .child(row(1, "数字", Role::Number))
-                .child(
-                    small("cjk-space", "消除中英空格", IconName::RemoveFormatting)
-                        .tooltip("删除中文与英文、数字之间的空格（有选中时只处理选中部分）")
-                        .on_click(move |_: &ClickEvent, w, cx| {
-                            let n = doc.update(cx, |d, cx| d.remove_cjk_latin_spaces(cx));
-                            let msg = if n == 0 { "没有需要消除的空格".to_string() } else { format!("已消除 {n} 处空格") };
-                            w.push_notification(gpui_kit::component::notification::Notification::info(msg), cx);
-                        }),
-                ),
+            ribbon::rows(
+                SCRIPT_GROUP_W,
+                [
+                    row(0, "英文", Role::English),
+                    row(1, "数字", Role::Number),
+                    ribbon::row()
+                        .child(
+                            small("cjk-space", "消除中英空格", IconName::RemoveFormatting)
+                                .tooltip("删除中文与英文、数字之间的空格（有选中时只处理选中部分）")
+                                .on_click(move |_: &ClickEvent, w, cx| {
+                                    let n = doc.update(cx, |d, cx| d.remove_cjk_latin_spaces(cx));
+                                    let msg = if n == 0 { "没有需要消除的空格".to_string() } else { format!("已消除 {n} 处空格") };
+                                    w.push_notification(gpui_kit::component::notification::Notification::info(msg), cx);
+                                }),
+                        )
+                        .into_any_element(),
+                ],
+            ),
             None,
         )
         .into_any_element()
@@ -307,8 +346,8 @@ impl ChixieRsApp {
         let act = |a: Box<dyn Action>| editor_action(self.doc.clone(), a);
         let doc = self.doc.clone();
         let (right, left) = (fs.tilt_right, fs.tilt_left);
-        h_flex()
-            .gap_0p5()
+        ribbon::row()
+            .justify_between()
             .child(ribbon::icon_btn("tilt", IconName::Italic, "倾斜").selected(right || left).dropdown_menu(move |m, _w, _cx| {
                 m.item(PopupMenuItem::new("右倾斜 (Ctrl+I)").checked(right).on_click(editor_action(doc.clone(), Box::new(doc_view::TiltRight))))
                     .item(PopupMenuItem::new("左倾斜").checked(left).on_click(editor_action(doc.clone(), Box::new(doc_view::TiltLeft))))
@@ -345,6 +384,8 @@ impl ChixieRsApp {
         let active = page.template.clone();
         let templates = st.templates.templates.clone();
         let portrait = page.paper.0 <= page.paper.1;
+        // 行距 only spaces free lines; ruled, grid and table templates set their own row pitch.
+        let free_lines = st.active_template().is_none_or(|t| matches!(t.ruling(), Ruling::Free));
         let theme = cx.theme();
         let (accent, border, hover, muted) = (theme.primary, theme.border, theme.secondary, theme.muted_foreground);
 
@@ -423,7 +464,26 @@ impl ChixieRsApp {
 
         h_flex()
             .h_full()
-            .child(group(cx, "page", "页面设置", h_flex().gap_0p5().child(paper_menu).child(orient_menu).child(margin_menu), None))
+            .child(group(
+                cx,
+                "page",
+                "页面设置",
+                h_flex().gap_0p5().child(paper_menu).child(orient_menu).child(margin_menu).child(div().w(px(8.))).child(ribbon::rows(
+                    176.0,
+                    [
+                        ribbon::row()
+                            .child(ribbon::field_label("行距", cx))
+                            .child(div().flex_1().child(NumberInput::new(&self.line_height).small().suffix("mm").disabled(!free_lines)))
+                            .into_any_element(),
+                        ribbon::row()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(if free_lines { "空白页的行间距" } else { "当前模板自带行距" })
+                            .into_any_element(),
+                    ],
+                )),
+                None,
+            ))
             .child(group(
                 cx,
                 "templates",
