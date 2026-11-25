@@ -115,6 +115,15 @@ impl DocView {
         self.edited(cx);
     }
 
+    /// 字符轻重 of the selection: −2 更轻Ⅱ … +2 更重Ⅱ.
+    pub fn set_run_weight(&mut self, w: i8, cx: &mut Context<Self>) {
+        if self.doc.common(|a| a.weight) == Some(w) {
+            return;
+        }
+        self.doc.set_attrs(|a| a.weight = w);
+        self.edited(cx);
+    }
+
     /// 字号 of the selection, ChiXie3 units (100 = 20 pt).
     pub fn set_run_size(&mut self, size: f32, cx: &mut Context<Self>) {
         if self.format_state(cx).size == Some(size) {

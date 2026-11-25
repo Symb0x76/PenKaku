@@ -108,6 +108,18 @@ pub struct Written {
     /// (stroke index, colour) where each colour run starts, in writing order. Empty when
     /// 多色绘制 is off (one pen, no changes).
     pub pens: Vec<(usize, Rgb)>,
+    /// 字符轻重 of each stroke, in steps (see [`Written::with_press`]). Empty = all standard.
+    pub press: Vec<f32>,
+}
+
+impl Written {
+    /// Each stroke takes its char's pressure, `press_of[char]` (missing = standard). Stays empty
+    /// when every stroke is standard, so the G-code is unchanged.
+    pub fn with_press(mut self, press_of: &[f32]) -> Self {
+        let v: Vec<f32> = self.page.stroke_chars.iter().map(|&c| press_of.get(c).copied().unwrap_or(0.0)).collect();
+        self.press = if v.iter().any(|&p| p != 0.0) { v } else { Vec::new() };
+        self
+    }
 }
 
 /// Page `k` as written. `colours[c]` is character `c`'s pen colour (`None` = black). With
@@ -116,7 +128,7 @@ pub struct Written {
 pub fn write(doc: &Document, k: usize, colours: &[Option<Rgb>], multicolour: bool, o: &OutputOptions) -> Written {
     let mut page = plan(doc, k, o);
     if !multicolour || page.stroke_chars.len() != page.strokes.len() {
-        return Written { page, pens: Vec::new() };
+        return Written { page, pens: Vec::new(), press: Vec::new() };
     }
     let colour_of = |c: usize| colours.get(c).copied().flatten().unwrap_or(BLACK);
     let mut seen: Vec<Rgb> = Vec::new();
@@ -137,7 +149,7 @@ pub fn write(doc: &Document, k: usize, colours: &[Option<Rgb>], multicolour: boo
             pens.push((i, col));
         }
     }
-    Written { page, pens }
+    Written { page, pens, press: Vec::new() }
 }
 
 /// Every page of `doc` as written (see [`write`]).
@@ -301,7 +313,7 @@ mod tests {
         let mut order = w.page.stroke_chars.clone();
         order.dedup();
         assert_eq!(order, vec![0, 2, 4, 6, 1, 5], "reading order inside each colour");
-        assert_eq!(write(&d, 0, &colours, false, &opts()), Written { page: d.pages[0].clone(), pens: vec![] });
+        assert_eq!(write(&d, 0, &colours, false, &opts()), Written { page: d.pages[0].clone(), ..Default::default() });
         // A one-colour page still names its pen, so the device can ask for it.
         assert_eq!(write(&d, 0, &[], true, &opts()).pens, vec![(0, BLACK)]);
     }

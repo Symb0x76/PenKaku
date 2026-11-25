@@ -230,9 +230,11 @@ impl StyleDialog {
         };
         let cur = style.handwriting.cursive.clone();
         let cursive_menu = |id: &'static str, label: &'static str, v: f32, opts: &'static [f32], set: fn(&mut StyleFile, f32)| {
-            Button::new(id).small().outline().label(format!("{label} {}%", fmt_num(v))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+            let unit = if id == "press-jitter" { " 级" } else { "%" };
+            let shown = move |x: f32| if id == "press-jitter" { format!("±{}{unit}", fmt_num(x)) } else { format!("{}{unit}", fmt_num(x)) };
+            Button::new(id).small().outline().label(format!("{label} {}", shown(v))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
                 opts.iter().fold(m, |m, &o| {
-                    m.item(PopupMenuItem::new(format!("{}%", fmt_num(o))).checked(o == v).on_click(move |_, _w, cx| {
+                    m.item(PopupMenuItem::new(shown(o)).checked(o == v).on_click(move |_, _w, cx| {
                         let st = cx.global_mut::<AppState>();
                         set(&mut st.settings.style, o);
                         st.save_settings();
@@ -241,13 +243,19 @@ impl StyleDialog {
             })
         };
         col.child(degree_rows(&style.deformation, None))
-            .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("连笔"))
+            .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("笔画"))
             .child(
                 h_flex()
                     .gap_2()
                     .child(Checkbox::new("cursive").small().label("启用连笔").checked(cur.enabled).on_click(edit(|s, v| s.handwriting.cursive.enabled = v)))
                     .child(cursive_menu("cursive-gap", "连笔距离", cur.max_gap_pct, &[20.0, 30.0, 40.0, 60.0, 80.0, 100.0], |s, v| s.handwriting.cursive.max_gap_pct = v))
                     .child(cursive_menu("cursive-chance", "连笔概率", cur.chance_pct, &[20.0, 40.0, 60.0, 80.0, 100.0], |s, v| s.handwriting.cursive.chance_pct = v)),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(cursive_menu("press-jitter", "随机轻重", style.handwriting.press_jitter, &[0.0, 0.5, 1.0, 1.5, 2.0], |s, v| s.handwriting.press_jitter = v))
+                    .child(div().text_xs().text_color(muted).child("随机排布开启时生效；单个字的轻重在字符微调里设")),
             )
             .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("细节"))
             .child(

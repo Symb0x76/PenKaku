@@ -43,6 +43,9 @@ pub struct Attrs {
     /// 标题 (`w:b`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub title: bool,
+    /// 字符轻重: −2 更轻Ⅱ … +2 更重Ⅱ, pen pressure (custom XML part only).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub weight: i8,
 }
 
 fn is_zero(v: &i8) -> bool {
@@ -66,9 +69,9 @@ impl Attrs {
     }
 
     /// Only the character formats (字体, 字号, 倾斜, rules, script, 标题) cleared: 清除格式 keeps the
-    /// colour, 合并内容 and 字符微调.
+    /// pen (colour, 轻重), 合并内容 and 字符微调.
     pub fn cleared(&self) -> Attrs {
-        Attrs { colour: self.colour, combine_next: self.combine_next, tuning: self.tuning, ..Attrs::default() }
+        Attrs { colour: self.colour, weight: self.weight, combine_next: self.combine_next, tuning: self.tuning, ..Attrs::default() }
     }
 
     /// This char with `src`'s character formats (格式刷: font, size, colour, tilt, rules, script,

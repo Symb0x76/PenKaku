@@ -133,7 +133,9 @@ impl ChixieRsApp {
         let view = self.doc.read(cx);
         let d = view.doc().document();
         let colours: Vec<_> = (0..view.doc().len()).map(|i| d.attrs(i).colour).collect();
-        gcode::plan_all(&view.document(), &colours, settings.page.multicolour, &opts)
+        let (hw, ids) = (&settings.style.handwriting, view.doc().ids());
+        let press: Vec<f32> = (0..view.doc().len()).map(|i| hw.press(d.attrs(i).weight, ids[i])).collect();
+        gcode::plan_all(&view.document(), &colours, settings.page.multicolour, &opts).into_iter().map(|w| w.with_press(&press)).collect()
     }
 
     pub fn new(

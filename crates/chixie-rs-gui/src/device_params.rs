@@ -25,14 +25,16 @@ enum F {
     Pause,
     UpZ,
     DownZ,
+    PressStep,
 }
 
-const NUMS: [(F, &str, &str, f64, f64); 5] = [
+const NUMS: [(F, &str, &str, f64, f64); 6] = [
     (F::WriteSpeed, "写字速度", "mm/min", 100.0, 500.0),
     (F::TravelSpeed, "空走速度", "mm/min", 100.0, 500.0),
     (F::Pause, "落笔后暂停", "秒", 0.0, 0.1),
     (F::UpZ, "抬笔高度", "mm", -50.0, 0.5),
     (F::DownZ, "落笔高度", "mm", -50.0, 0.5),
+    (F::PressStep, "轻重每级", "mm", 0.0, 0.05),
 ];
 
 pub struct DeviceParams {
@@ -114,6 +116,7 @@ impl DeviceParams {
             (F::Pause, p.pause_after_down_s),
             (F::UpZ, p.pen_up_z),
             (F::DownZ, p.pen_down_z),
+            (F::PressStep, p.press_step),
         ] {
             let e = self.input(f);
             set(&e, fmt_num(v), window, cx);
@@ -148,6 +151,9 @@ impl DeviceParams {
         }
         if let Some(v) = num(F::DownZ, cx) {
             p.pen_down_z = v;
+        }
+        if let Some(v) = num(F::PressStep, cx) {
+            p.press_step = v.clamp(0.0, 5.0);
         }
         let (up, down) = (text(&self.custom_up, cx), text(&self.custom_down, cx));
         if !up.is_empty() {
@@ -425,6 +431,7 @@ impl DeviceParams {
             let (l, unit) = match (servo, f) {
                 (true, F::UpZ) => ("抬笔角度", "度"),
                 (true, F::DownZ) => ("落笔角度", "度"),
+                (true, F::PressStep) => (l, "度"),
                 _ => (l, unit),
             };
             row(l, NumberInput::new(&self.input(f)).small().suffix(unit).into_any_element())
@@ -449,6 +456,7 @@ impl DeviceParams {
             })
             .child(num(F::Pause))
             .when(!custom, |el| el.child(num(F::UpZ)).child(num(F::DownZ)))
+            .when(matches!(p.device_type, DeviceType::StepperPenUp | DeviceType::ServoPenUp), |el| el.child(num(F::PressStep)))
             .when(custom, |el| {
                 el.child(row("抬笔指令", Input::new(&self.custom_up).small().into_any_element()))
                     .child(row("落笔指令", Input::new(&self.custom_down).small().into_any_element()))

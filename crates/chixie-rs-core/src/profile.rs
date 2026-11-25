@@ -124,6 +124,8 @@ pub struct DeviceProfile {
     pub pen_change: PenChange,
     /// 笔锋 (experimental, stepper lift only): lift the pen gradually over each stroke's tail.
     pub tip_taper: Option<TipTaper>,
+    /// 字符轻重: pen-down Z moves this much per step (更轻Ⅰ = −1 step). 0 = ignore 轻重.
+    pub press_step: f32,
 }
 
 /// 笔锋: over the last `len_mm` of a stroke, Z moves linearly from `pen_down_z` to `z_end`, so a
@@ -272,9 +274,13 @@ impl Default for DeviceProfile {
             path_plan: PathPlan::default(),
             pen_change: PenChange::default(),
             tip_taper: None,
+            press_step: PRESS_STEP,
         }
     }
 }
+
+/// Default Z per 字符轻重 step (mm for a stepper lift). A guess; tune per pen.
+pub const PRESS_STEP: f32 = 0.2;
 
 /// `2.0` → "2", `1.25` → "1.25" (keeps the historical `Z0` / `Z2` literals byte-identical).
 pub fn num(v: f32) -> String {
@@ -294,6 +300,17 @@ impl DeviceProfile {
             DeviceType::CustomZ => self.pen_down.clone(),
             _ => format!("G1G90 Z{}", num(self.pen_down_z)),
         }
+    }
+
+    /// 字符轻重 moves the pen-down Z: stepper and servo lifts only.
+    pub fn supports_press(&self) -> bool {
+        matches!(self.device_type, DeviceType::StepperPenUp | DeviceType::ServoPenUp) && self.press_step != 0.0
+    }
+
+    /// Pen-down Z at `press` 轻重 steps: heavier goes further from the pen-up position.
+    pub fn pen_down_z_at(&self, press: f32) -> f32 {
+        let away = if self.pen_down_z >= self.pen_up_z { 1.0 } else { -1.0 };
+        self.pen_down_z + away * press * self.press_step
     }
 }
 

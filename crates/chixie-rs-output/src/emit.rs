@@ -69,12 +69,13 @@ impl PageCode {
 
 /// `emit` with the line index of every stroke start.
 pub fn emit_mapped(page: &Page, d: &DeviceProfile) -> PageCode {
-    emit_runs(page, &[], d)
+    emit_runs(page, &[], &[], d)
 }
 
-/// A written page (see [`crate::plan::write`]) with its pen stops or changer macros.
+/// A written page (see [`crate::plan::write`]) with its pen stops or changer macros and each
+/// stroke's 字符轻重.
 pub fn emit_written(w: &Written, d: &DeviceProfile) -> PageCode {
-    emit_runs(&w.page, &w.pens, d)
+    emit_runs(&w.page, &w.pens, &w.press, d)
 }
 
 /// The automatic changer's macro in front of a run: put the held pen back, pick the next one.
@@ -118,7 +119,8 @@ fn taper_points(s: &[P], len: f32, z0: f32, z1: f32) -> Vec<(P, Option<f32>)> {
 }
 
 /// `runs`: (stroke index, colour) where each colour run starts; empty = one pen, no changes.
-fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode {
+/// `press`: 字符轻重 per stroke (empty = standard); a pressed stroke goes down to its own Z.
+fn emit_runs(page: &Page, runs: &[(usize, Rgb)], press: &[f32], d: &DeviceProfile) -> PageCode {
     let slots: &[PenSlot] = match &d.pen_change {
         PenChange::Auto { slots } => slots,
         PenChange::Manual => &[],
@@ -148,7 +150,13 @@ fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode 
         }
         let improved = d.route.apply(stroke);
         let pts = improved.as_deref().unwrap_or(stroke);
-        let tapered = taper.map(|t| taper_points(pts, t.len_mm, d.pen_down_z, t.z_end));
+        let pressed = press.get(k).copied().filter(|&p| p != 0.0 && d.supports_press());
+        let z_down = pressed.map_or(d.pen_down_z, |p| d.pen_down_z_at(p));
+        let down: std::borrow::Cow<str> = match pressed {
+            Some(_) => format!("G1G90 Z{}", num(z_down)).into(),
+            None => down.as_str().into(),
+        };
+        let tapered = taper.map(|t| taper_points(pts, t.len_mm, z_down, t.z_end));
         let zs: Vec<(P, Option<f32>)> = match tapered {
             Some(v) => v,
             None => pts.iter().map(|&p| (p, None)).collect(),
@@ -216,7 +224,7 @@ mod tests {
 
     fn two_colour_page() -> Written {
         let s = |x: f32| vec![(x, 0.0), (x + 1.0, 0.0)];
-        Written { page: Page { strokes: vec![s(0.0), s(2.0), s(4.0)], ..Default::default() }, pens: vec![(0, [0, 0, 0]), (2, [255, 0, 0])] }
+        Written { page: Page { strokes: vec![s(0.0), s(2.0), s(4.0)], ..Default::default() }, pens: vec![(0, [0, 0, 0]), (2, [255, 0, 0])], press: vec![] }
     }
 
     #[test]
@@ -233,6 +241,24 @@ mod tests {
         assert!(zs.windows(2).all(|w| w[1] <= w[0]) && zs.first() == Some(&2.0) && zs.last() == Some(&0.5), "{pts:?}");
         // Off, or not a stepper: unchanged.
         assert_eq!(emit(&line, &DeviceProfile { device_type: DeviceType::ServoPenUp, ..d.clone() }), emit(&line, &DeviceProfile { device_type: DeviceType::ServoPenUp, ..Default::default() }));
+    }
+
+    #[test]
+    fn press_moves_each_strokes_pen_down_z() {
+        let mut w = two_colour_page();
+        w.pens.clear();
+        w.page.stroke_chars = vec![0, 1, 2];
+        let w = w.with_press(&[0.0, 1.0, -2.0]);
+        let downs = |d: &DeviceProfile| emit_written(&w, d).text.lines().filter(|l| l.starts_with("G1G90 Z") && !l.starts_with(&format!("{} ", d.pen_up_cmd()))).map(str::to_owned).collect::<Vec<_>>();
+        // Standard at Z2; 更重Ⅰ 0.2 deeper; 更轻Ⅱ 0.4 shallower.
+        assert_eq!(downs(&DeviceProfile::default()), ["G1G90 Z2 F8000", "G1G90 Z2.2 F8000", "G1G90 Z1.6 F8000"]);
+        // An inverted lift (down below up) presses the other way; custom pens ignore 轻重.
+        let inv = DeviceProfile { pen_up_z: 5.0, pen_down_z: 2.0, ..Default::default() };
+        assert_eq!(downs(&inv), ["G1G90 Z2 F8000", "G1G90 Z1.8 F8000", "G1G90 Z2.4 F8000"]);
+        let custom = DeviceProfile { device_type: DeviceType::CustomZ, ..Default::default() };
+        assert_eq!(emit_written(&w, &custom).text, emit(&w.page, &custom));
+        // All standard: no press vector, byte-identical output.
+        assert!(w.clone().with_press(&[0.0; 3]).press.is_empty());
     }
 
     #[test]

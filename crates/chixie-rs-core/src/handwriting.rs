@@ -101,6 +101,19 @@ pub struct HandwritingStyle {
     pub number: ScriptStyle,
     /// 连笔 (not in ChiXie3). Its own switch, independent of `enabled`.
     pub cursive: Cursive,
+    /// 随机轻重: each char's pen pressure varies by up to ± this many 轻重 steps (with `enabled`).
+    pub press_jitter: f32,
+}
+
+/// 字符轻重 steps: 更轻Ⅱ −2, 更轻Ⅰ −1, 标准 0, 更重Ⅰ +1, 更重Ⅱ +2. Random 轻重 may reach ±3.
+pub const PRESS_MAX: f32 = 3.0;
+
+impl HandwritingStyle {
+    /// Pen pressure of the char with id `id` and 轻重 `tier`, in steps (0 = standard).
+    pub fn press(&self, tier: i8, id: u64) -> f32 {
+        let r = if self.enabled && self.press_jitter > 0.0 { (rng_for(self.seed, SALT_PRESS, id).unit() * 2.0 - 1.0) * self.press_jitter } else { 0.0 };
+        (f32::from(tier) + r).clamp(-PRESS_MAX, PRESS_MAX)
+    }
 }
 
 /// 连笔: inside a character, the pen stays down from one stroke's end to the next stroke's start
@@ -227,6 +240,7 @@ impl Default for HandwritingStyle {
             english: ScriptStyle::default(),
             number: ScriptStyle::default(),
             cursive: Cursive::default(),
+            press_jitter: 0.0,
         }
     }
 }
@@ -267,6 +281,8 @@ pub const SALT_RULE: u64 = 0x5255_4C45_0000_0008;
 pub const SALT_DEFORM: u64 = 0x4445_464F_0000_0004;
 /// 连笔 joins.
 pub const SALT_CURSIVE: u64 = 0x4355_5253_0000_0009;
+/// 随机轻重.
+const SALT_PRESS: u64 = 0x5052_4553_0000_000A;
 
 /// Jitter values for each character, keyed by the character's stable id.
 pub struct Jitter<'a> {
@@ -406,6 +422,19 @@ mod tests {
         assert_eq!(none.join(&[a.clone(), b.clone()], 7.0, &mut Rng::new(1)), vec![a.clone(), b.clone()]);
         let half = Cursive { chance_pct: 50.0, ..all };
         assert_eq!(half.join(&[a.clone(), b.clone()], 7.0, &mut Rng::new(3)), half.join(&[a, b], 7.0, &mut Rng::new(3)));
+    }
+
+    #[test]
+    fn press_is_the_tier_plus_bounded_jitter() {
+        let off = HandwritingStyle { press_jitter: 1.0, ..Default::default() }; // enabled = false
+        assert_eq!((off.press(0, 5), off.press(-2, 5), off.press(2, 5)), (0.0, -2.0, 2.0));
+        let on = HandwritingStyle { enabled: true, seed: 3, press_jitter: 1.0, ..Default::default() };
+        let v: Vec<f32> = (0..200).map(|id| on.press(1, id)).collect();
+        assert!(v.iter().all(|p| (0.0..=2.0).contains(p)) && v.iter().any(|&p| p != 1.0));
+        assert_eq!(on.press(1, 7), on.press(1, 7));
+        // Never past ±PRESS_MAX.
+        let wild = HandwritingStyle { press_jitter: 5.0, ..on };
+        assert!((0..200).all(|id| wild.press(2, id).abs() <= PRESS_MAX));
     }
 
     #[test]

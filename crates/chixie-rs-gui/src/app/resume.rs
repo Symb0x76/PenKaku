@@ -226,7 +226,7 @@ mod tests {
     fn break_point_names_the_character() {
         // Page 2 of a job starting at page 2: strokes at lines 1, 6, 11 draw chars 0, 0, 3.
         let codes = [PageCode { text: String::new(), stroke_lines: vec![1, 6, 11], pens: vec![] }];
-        let pages = [Written { page: chixie_rs_core::layout::Page { stroke_chars: vec![0, 0, 3], ..Default::default() }, pens: vec![] }];
+        let pages = [Written { page: chixie_rs_core::layout::Page { stroke_chars: vec![0, 0, 3], ..Default::default() }, ..Default::default() }];
         let meta = JobMeta::new(2, &codes, &pages, &[10, 11, 12, 13]);
         assert_eq!(meta.char_id(2, 7), Some(10));
         assert_eq!(meta.char_id(2, 12), Some(13));

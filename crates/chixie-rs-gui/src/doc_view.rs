@@ -193,7 +193,8 @@ pub struct DocView {
     doc: EditDoc,
     layout: Arc<Document>,
     /// Pen colour per char, computed with the layout.
-    ink_of: Arc<Vec<Option<chixie_rs_core::profile::Rgb>>>,
+    /// Pen of each char: colour and 字符轻重 (steps).
+    ink_of: Arc<Vec<(Option<chixie_rs_core::profile::Rgb>, f32)>>,
     /// Built page paths, reused across frames (scroll, caret blink) while layout and zoom stay.
     paths: Rc<RefCell<PathCache>>,
     /// Deformed glyphs kept between relayouts (one per font set).
@@ -333,7 +334,9 @@ impl DocView {
         self.load_run_fonts(cx);
         self.layout = Arc::new(crate::perf::time(crate::perf::Kind::Relayout, || self.lay_out(&params, cx)));
         let d = self.doc.document();
-        self.ink_of = Arc::new((0..self.doc.len()).map(|i| d.attrs(i).colour).collect());
+        let hw = &cx.global::<AppState>().settings.style.handwriting;
+        let ids = self.doc.ids();
+        self.ink_of = Arc::new((0..self.doc.len()).map(|i| (d.attrs(i).colour, hw.press(d.attrs(i).weight, ids[i]))).collect());
         cx.notify();
     }
 
@@ -536,6 +539,7 @@ impl DocView {
         self.doc.attrs_same_chars(|a| {
             a.font = src.font.clone();
             a.size_pt = src.size_pt;
+            a.weight = src.weight;
             let mut t = src.tuning.unwrap_or_default();
             if !with_deform {
                 t.reroll = a.tuning.map_or(0, |own| own.reroll);
@@ -1327,31 +1331,30 @@ impl PathCache {
 
 struct PagePaths {
     guides: Option<Path<Pixels>>,
-    /// One path per pen colour.
+    /// One path per pen colour and 轻重 (heavier is drawn thicker).
     ink: Vec<(Hsla, Path<Pixels>)>,
 }
 
 impl PagePaths {
-    fn build(d: &Document, ink_of: &[Option<chixie_rs_core::profile::Rgb>], g: &Geom, k: usize) -> Self {
+    fn build(d: &Document, ink_of: &[(Option<chixie_rs_core::profile::Rgb>, f32)], g: &Geom, k: usize) -> Self {
         let o = g.page_origin(k);
         let local = |x: f32, y: f32| g.screen(k, x, y) - o;
         let Some(p) = d.pages.get(k) else { return Self { guides: None, ink: Vec::new() } };
         let guides = guide_path(&p.guides, local);
-        let stroke_w = px((0.35 * g.zoom).clamp(0.6, 2.5));
-        let colour_at = |i: usize| p.stroke_chars.get(i).and_then(|&c| ink_of.get(c).copied().flatten());
-        let mut inks: Vec<Option<chixie_rs_core::profile::Rgb>> = vec![None];
+        let stroke_w = (0.35 * g.zoom).clamp(0.6, 2.5);
+        // (colour, 轻重 in half steps): one path each.
+        let pen_at = |i: usize| p.stroke_chars.get(i).and_then(|&c| ink_of.get(c)).map_or((None, 0), |&(c, w)| (c, (w * 2.0).round() as i8));
+        let mut inks: Vec<(Option<chixie_rs_core::profile::Rgb>, i8)> = vec![(None, 0)];
         for i in 0..p.strokes.len() {
-            if let Some(c) = colour_at(i)
-                && !inks.contains(&Some(c))
-            {
-                inks.push(Some(c));
+            if !inks.contains(&pen_at(i)) {
+                inks.push(pen_at(i));
             }
         }
         let mut ink = Vec::new();
         for pen in inks {
-            let mut path = PathBuilder::stroke(stroke_w);
+            let mut path = PathBuilder::stroke(px(stroke_w * (1.0 + 0.1 * f32::from(pen.1)).max(0.3)));
             let mut any = false;
-            for s in p.strokes.iter().enumerate().filter(|(i, _)| colour_at(*i) == pen).map(|(_, s)| s) {
+            for s in p.strokes.iter().enumerate().filter(|(i, _)| pen_at(*i) == pen).map(|(_, s)| s) {
                 let mut pts = s.iter().map(|&(x, y)| local(x, y));
                 let Some(first) = pts.next() else { continue };
                 path.move_to(first);
@@ -1366,7 +1369,7 @@ impl PagePaths {
                 }
             }
             if any && let Ok(path) = path.build() {
-                let colour = pen.map_or(gpui_kit::black(), |[r, g, b]| Hsla::from(Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }));
+                let colour = pen.0.map_or(gpui_kit::black(), |[r, g, b]| Hsla::from(Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }));
                 ink.push((colour, path));
             }
         }

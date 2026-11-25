@@ -112,6 +112,21 @@ impl ChixieRsApp {
                     m.item(PopupMenuItem::new(super::fmt_num(s)).on_click(move |_, _w, cx| e.update(cx, |d, cx| d.set_run_size(s, cx))))
                 })
             });
+        let e = entity.clone();
+        let weight = doc.common(|a| a.weight);
+        let weight_btn = Button::new("tune-weight")
+            .small()
+            .outline()
+            .label(weight.map_or("（混合）", weight_label))
+            .dropdown_caret(true)
+            .disabled(!has)
+            .tooltip("落笔轻重：步进/舵机抬笔时按「轻重每级」调整落笔深度")
+            .dropdown_menu(move |m, _w, _cx| {
+                (-2..=2).rev().fold(m, |m, w: i8| {
+                    let e = e.clone();
+                    m.item(PopupMenuItem::new(weight_label(w)).checked(weight == Some(w)).on_click(move |_, _w, cx| e.update(cx, |d, cx| d.set_run_weight(w, cx))))
+                })
+            });
         let bump = |id: &'static str, label: &'static str, tip: &'static str, factor: f32| {
             let e = entity.clone();
             Button::new(id).small().ghost().label(label).tooltip(tip).disabled(!has).on_click(move |_: &ClickEvent, _w, cx| e.update(cx, |d, cx| d.scale_run_size(factor, cx)))
@@ -144,7 +159,7 @@ impl ChixieRsApp {
         let same = DropdownButton::new("tune-same")
             .small()
             .disabled(!has)
-            .button(Button::new("tune-same-main").label("应用至同字符").tooltip("把选中字符的字体、字号和微调用到文中所有相同的字").on_click(cx.listener(
+            .button(Button::new("tune-same-main").label("应用至同字符").tooltip("把选中字符的字体、字号、轻重和微调用到文中所有相同的字").on_click(cx.listener(
                 |t, _: &ClickEvent, w, cx| {
                     if t.tune_ready(w, cx) {
                         t.doc.update(cx, |d, cx| d.apply_tune_to_same(false, cx));
@@ -192,6 +207,7 @@ impl ChixieRsApp {
             )
             .child(row("字体：").child(font_btn))
             .child(row("字号：").child(size_btn).child(bump("tune-bigger", "A+", "增大字号5%", 1.0 + STEP_PCT)).child(bump("tune-smaller", "A−", "缩小字号5%", 1.0 - STEP_PCT)))
+            .child(row("轻重：").child(weight_btn))
             .child(row("微调：").child(pad).child(div().flex_1()).child(shape))
             .child(
                 h_flex()
@@ -221,6 +237,17 @@ impl ChixieRsApp {
 }
 
 /// The selected character as laid out (with its 微调 and 变形), fitted into the preview box.
+/// 落笔轻重 names, as in ChiXie3's N1 settings.
+fn weight_label(w: i8) -> &'static str {
+    match w {
+        ..=-2 => "更轻Ⅱ",
+        -1 => "更轻Ⅰ",
+        0 => "标准(默认)",
+        1 => "更重Ⅰ",
+        _ => "更重Ⅱ",
+    }
+}
+
 fn glyph_preview(strokes: Vec<Stroke>, color: Hsla) -> impl IntoElement {
     canvas(
         |_, _, _| (),
