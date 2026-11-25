@@ -3,7 +3,7 @@
 use super::{Align, CELL_BREAK, CellBox, CellFit, CellInfo, CharBox, CharStyle, Document, EM_UNITS, Guide, LineInfo, Page, PageBox, PageParams, Ruling, SUB_DROP, SUPER_RAISE, Script, Tuning, VAlign};
 use crate::font::fontset::Glyphs;
 use crate::font::{Font, Glyph};
-use crate::handwriting::{Jitter, SALT_DEFORM, SALT_ROWS, SALT_RULE, is_cjk, rng_for};
+use crate::handwriting::{Jitter, SALT_ROWS, SALT_RULE, is_cjk, rng_for};
 
 /// Ruled columns as (left x, width) in mm: `widths` when it names every column (scaled down if
 /// they overrun the page), else `columns` equal columns `gap` apart.
@@ -535,9 +535,9 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
     let deform_id = id.wrapping_add(u64::from(t.reroll).wrapping_mul(0x9E37_79B9_7F4A_7C15));
     let row_w = pen.line_w;
     let voff = voff + if p.style.enabled { jit.vertical_for(ch, id, x, row_w) } else { 0.0 };
-    if p.deformation_for(ch).is_active() {
+    if p.reshapes_char(ch) {
         let cjk = is_cjk(ch);
-        let make = || p.deformation_for(ch).apply(&glyph.strokes, cjk, sy, &mut rng_for(p.style.seed, SALT_DEFORM, deform_id));
+        let make = || p.reshape(&glyph.strokes, ch, sy, deform_id);
         match pen.deform_cache {
             Some(c) => {
                 let strokes = c.get_or((std::ptr::from_ref(glyph) as usize, deform_id, sy.to_bits(), cjk), make);

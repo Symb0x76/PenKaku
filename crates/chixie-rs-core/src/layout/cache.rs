@@ -53,7 +53,7 @@ impl DeformCache {
     /// differ from the ones it was filled with.
     pub(super) fn begin(&self, p: &super::PageParams) {
         let mut h = DefaultHasher::new();
-        format!("{:?}{:?}{:?}", p.deformation, p.style.english.deformation, p.style.number.deformation).hash(&mut h);
+        format!("{:?}{:?}{:?}{:?}", p.deformation, p.style.english.deformation, p.style.number.deformation, p.style.cursive).hash(&mut h);
         p.style.seed.hash(&mut h);
         let fp = h.finish();
         if let Ok(mut i) = self.inner.lock()

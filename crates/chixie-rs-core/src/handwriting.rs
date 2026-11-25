@@ -99,6 +99,73 @@ pub struct HandwritingStyle {
     /// 中英文分开设置: Latin letters and digits can differ from Chinese (not in ChiXie3).
     pub english: ScriptStyle,
     pub number: ScriptStyle,
+    /// 连笔 (not in ChiXie3). Its own switch, independent of `enabled`.
+    pub cursive: Cursive,
+}
+
+/// 连笔: inside a character, the pen stays down from one stroke's end to the next stroke's start
+/// when they are close, drawing a short curve between them like a fast hand does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Cursive {
+    pub enabled: bool,
+    /// 连笔距离: join only gaps up to this, percent of the character height.
+    pub max_gap_pct: f32,
+    /// 连笔概率: chance, percent, that a close pair is joined.
+    pub chance_pct: f32,
+}
+
+impl Default for Cursive {
+    fn default() -> Self {
+        Self { enabled: false, max_gap_pct: 40.0, chance_pct: 60.0 }
+    }
+}
+
+/// Points on a joining curve, end points excluded.
+const JOIN_STEPS: usize = 6;
+
+impl Cursive {
+    /// Join one glyph's strokes (glyph units, y down; `em` units = one character height). Draws
+    /// two values per stroke from `rng`, so a stroke's fate doesn't depend on the ones before it.
+    pub fn join(&self, strokes: &[crate::layout::Stroke], em: f32, rng: &mut Rng) -> Vec<crate::layout::Stroke> {
+        let max_gap = em * self.max_gap_pct / 100.0;
+        let p = self.chance_pct / 100.0;
+        let mut out: Vec<crate::layout::Stroke> = Vec::with_capacity(strokes.len());
+        for s in strokes {
+            let (draw, bulge) = (rng.unit(), rng.unit() * 2.0 - 1.0);
+            if let (Some(prev), Some(&b)) = (out.last_mut(), s.first())
+                && let Some(&a) = prev.last()
+            {
+                let gap = (b.0 - a.0).hypot(b.1 - a.1);
+                if gap <= max_gap && draw < p {
+                    // Leave a in the direction the stroke was going, bend a little to one side.
+                    let dir = match prev.len().checked_sub(2).map(|i| prev[i]) {
+                        Some(q) if (a.0 - q.0).hypot(a.1 - q.1) > 1e-6 => {
+                            let l = (a.0 - q.0).hypot(a.1 - q.1);
+                            ((a.0 - q.0) / l, (a.1 - q.1) / l)
+                        }
+                        _ => (0.0, 0.0),
+                    };
+                    if gap > 1e-6 {
+                        let perp = (-(b.1 - a.1) / gap, (b.0 - a.0) / gap);
+                        let c = (
+                            (a.0 + b.0) / 2.0 + gap * (0.3 * dir.0 + 0.2 * bulge * perp.0),
+                            (a.1 + b.1) / 2.0 + gap * (0.3 * dir.1 + 0.2 * bulge * perp.1),
+                        );
+                        for k in 1..=JOIN_STEPS {
+                            let t = k as f32 / (JOIN_STEPS + 1) as f32;
+                            let u = 1.0 - t;
+                            prev.push((u * u * a.0 + 2.0 * u * t * c.0 + t * t * b.0, u * u * a.1 + 2.0 * u * t * c.1 + t * t * b.1));
+                        }
+                    }
+                    prev.extend_from_slice(s);
+                    continue;
+                }
+            }
+            out.push(s.clone());
+        }
+        out
+    }
 }
 
 /// Size, baseline, float and deformation of one script (English letters or digits), on top of
@@ -159,6 +226,7 @@ impl Default for HandwritingStyle {
             first_line_indent: None,
             english: ScriptStyle::default(),
             number: ScriptStyle::default(),
+            cursive: Cursive::default(),
         }
     }
 }
@@ -197,6 +265,8 @@ pub const SALT_ROWS: u64 = 0x524F_5753_0000_0005;
 pub const SALT_RULE: u64 = 0x5255_4C45_0000_0008;
 /// Deformation draws from its own stream so toggling jitter doesn't change deformation.
 pub const SALT_DEFORM: u64 = 0x4445_464F_0000_0004;
+/// 连笔 joins.
+pub const SALT_CURSIVE: u64 = 0x4355_5253_0000_0009;
 
 /// Jitter values for each character, keyed by the character's stable id.
 pub struct Jitter<'a> {
@@ -316,6 +386,27 @@ pub fn resolve(file: Option<StyleFile>, seed: Option<u64>, no_jitter: bool, defo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursive_joins_close_strokes_with_a_curve() {
+        let a = vec![(0.0, 0.0), (3.0, 0.0)];
+        let b = vec![(3.0, 1.0), (3.0, 4.0)];
+        let far = vec![(0.0, 7.0), (3.0, 7.0)];
+        let all = Cursive { enabled: true, max_gap_pct: 20.0, chance_pct: 100.0 };
+        let out = all.join(&[a.clone(), b.clone(), far.clone()], 7.0, &mut Rng::new(1));
+        // a + b are 1 apart (≤ 1.4): one stroke through a curve; `far` is 3 away: on its own.
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].len(), a.len() + JOIN_STEPS + b.len());
+        assert_eq!((out[0][0], *out[0].last().unwrap()), (a[0], b[1]));
+        assert_eq!(out[1], far);
+        // The curve runs from a's end to b's start without jumps.
+        assert!(out[0].windows(2).all(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1) <= 3.0 + 1e-4));
+        // Chance 0: nothing joins; stable per seed.
+        let none = Cursive { chance_pct: 0.0, ..all.clone() };
+        assert_eq!(none.join(&[a.clone(), b.clone()], 7.0, &mut Rng::new(1)), vec![a.clone(), b.clone()]);
+        let half = Cursive { chance_pct: 50.0, ..all };
+        assert_eq!(half.join(&[a.clone(), b.clone()], 7.0, &mut Rng::new(3)), half.join(&[a, b], 7.0, &mut Rng::new(3)));
+    }
 
     #[test]
     fn rng_is_stable_and_in_range() {

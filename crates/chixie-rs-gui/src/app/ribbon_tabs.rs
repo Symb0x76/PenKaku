@@ -596,6 +596,17 @@ impl ChixieRsApp {
             ))
             .child(group(
                 cx,
+                "strokes",
+                "笔画",
+                stack([ribbon::toggle("cursive", "连笔", IconName::Spline, hw.cursive.enabled, "连笔：同一字内相近的笔画不抬笔，用短弧线连起来（距离和概率在写字偏好里调）")
+                    .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
+                        t.edit_settings(cx, |st| st.settings.style.handwriting.cursive.enabled ^= true);
+                    }))
+                    .into_any_element()]),
+                None,
+            ))
+            .child(group(
+                cx,
                 "seed",
                 "笔迹",
                 h_flex()

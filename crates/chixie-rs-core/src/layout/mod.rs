@@ -474,6 +474,28 @@ impl PageParams {
     pub fn any_deformation(&self) -> bool {
         self.deformation.is_active() || [&self.style.english, &self.style.number].iter().any(|s| s.deformation.as_ref().is_some_and(Deformation::is_active))
     }
+
+    /// Glyph strokes change before placement (变形 or 连笔) for some char.
+    pub fn reshapes(&self) -> bool {
+        self.any_deformation() || self.style.cursive.enabled
+    }
+
+    /// Glyph strokes change before placement for `c`.
+    pub fn reshapes_char(&self, c: char) -> bool {
+        self.deformation_for(c).is_active() || self.style.cursive.enabled
+    }
+
+    /// `strokes` of `c` after 变形 and 连笔, each from its own stream keyed by `id`. `sy`: mm per
+    /// glyph unit.
+    pub fn reshape(&self, strokes: &[Stroke], c: char, sy: f32, id: u64) -> Vec<Stroke> {
+        let d = self.deformation_for(c);
+        let out = if d.is_active() { d.apply(strokes, is_cjk(c), sy, &mut rng_for(self.style.seed, SALT_DEFORM, id)) } else { strokes.to_vec() };
+        if self.style.cursive.enabled {
+            self.style.cursive.join(&out, EM_UNITS, &mut rng_for(self.style.seed, crate::handwriting::SALT_CURSIVE, id))
+        } else {
+            out
+        }
+    }
 }
 
 /// Lay out `text` with `font`, using character positions as ids (`0..n`). Unknown characters
@@ -617,7 +639,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
     let table = matches!(p.ruling, Ruling::Table { .. });
     let (ox, oy) = p.origin;
     let jitter_on = p.style.enabled;
-    let deform_on = p.any_deformation();
+    let deform_on = p.reshapes();
     let mut jit = Jitter::new(&p.style);
 
     let grid = match p.ruling {
@@ -884,7 +906,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
         } else {
             let voff = if jitter_on { jit.vertical_for(ch, id, pen.cx, pen.line_w) } else { 0.0 };
             let cjk = is_cjk(ch);
-            let make = || p.deformation_for(ch).apply(&glyph.strokes, cjk, s, &mut rng_for(p.style.seed, SALT_DEFORM, id));
+            let make = || p.reshape(&glyph.strokes, ch, s, id);
             let strokes = match deform_cache.filter(|_| deform_on) {
                 Some(c) => c.get_or((std::ptr::from_ref(glyph) as usize, id, s.to_bits(), cjk), make),
                 None => std::sync::Arc::new(make()),

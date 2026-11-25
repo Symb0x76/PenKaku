@@ -693,6 +693,34 @@ fn deform_cache_matches_uncached_layout() {
     assert!(cache.len() <= filled);
 }
 
+#[test]
+fn cursive_joins_strokes_within_chars_only() {
+    let font = Font::from_json(FIXTURE).unwrap();
+    let lay = |p: &PageParams, cache: Option<&DeformCache>| {
+        let chars: Vec<char> = "你好你好".chars().collect();
+        let ids: Vec<u64> = (0..chars.len() as u64).collect();
+        layout_flow(&Flow { chars: &chars, ids: &ids, deform_cache: cache, ..Default::default() }, &font, p)
+    };
+    let off = lay(&PageParams::default(), None);
+    let mut p = PageParams::default();
+    p.style.cursive = crate::handwriting::Cursive { enabled: true, max_gap_pct: 100.0, chance_pct: 100.0 };
+    let on = lay(&p, None);
+    let (n_off, n_on) = (off.pages[0].strokes.len(), on.pages[0].strokes.len());
+    assert!(n_on < n_off, "{n_on} strokes joined from {n_off}");
+    // Joins stay inside a char: every char still has its own strokes, in the same order.
+    let chars_of = |d: &Document| {
+        let mut v = d.pages[0].stroke_chars.clone();
+        v.dedup();
+        v
+    };
+    assert_eq!(chars_of(&on), chars_of(&off));
+    // Cached and uncached agree; the switch is part of the cache's fingerprint.
+    let cache = DeformCache::new();
+    assert_eq!(lay(&p, Some(&cache)), on);
+    p.style.cursive.enabled = false;
+    assert_eq!(lay(&p, Some(&cache)), off);
+}
+
 fn script_params(f: impl FnOnce(&mut crate::handwriting::ScriptStyle)) -> PageParams {
     let mut p = PageParams::default();
     f(&mut p.style.english);

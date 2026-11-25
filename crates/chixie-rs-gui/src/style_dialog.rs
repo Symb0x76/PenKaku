@@ -228,7 +228,27 @@ impl StyleDialog {
                 st.save_settings();
             }
         };
+        let cur = style.handwriting.cursive.clone();
+        let cursive_menu = |id: &'static str, label: &'static str, v: f32, opts: &'static [f32], set: fn(&mut StyleFile, f32)| {
+            Button::new(id).small().outline().label(format!("{label} {}%", fmt_num(v))).dropdown_caret(true).dropdown_menu(move |m, _w, _cx| {
+                opts.iter().fold(m, |m, &o| {
+                    m.item(PopupMenuItem::new(format!("{}%", fmt_num(o))).checked(o == v).on_click(move |_, _w, cx| {
+                        let st = cx.global_mut::<AppState>();
+                        set(&mut st.settings.style, o);
+                        st.save_settings();
+                    }))
+                })
+            })
+        };
         col.child(degree_rows(&style.deformation, None))
+            .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("连笔"))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Checkbox::new("cursive").small().label("启用连笔").checked(cur.enabled).on_click(edit(|s, v| s.handwriting.cursive.enabled = v)))
+                    .child(cursive_menu("cursive-gap", "连笔距离", cur.max_gap_pct, &[20.0, 30.0, 40.0, 60.0, 80.0, 100.0], |s, v| s.handwriting.cursive.max_gap_pct = v))
+                    .child(cursive_menu("cursive-chance", "连笔概率", cur.chance_pct, &[20.0, 40.0, 60.0, 80.0, 100.0], |s, v| s.handwriting.cursive.chance_pct = v)),
+            )
             .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("细节"))
             .child(
                 Checkbox::new("drift")
