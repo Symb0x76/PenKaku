@@ -40,6 +40,8 @@ pub struct JobState {
     pub reconnecting: Option<u32>,
     /// Back after a drop, waiting for 继续书写: resume line, and whether the board rebooted.
     pub recovered: Option<(usize, bool)>,
+    /// A 落笔校准 test, not the document: its end touches no 书写 / 断点续写 state.
+    pub calibration: bool,
 }
 
 impl JobState {
@@ -244,9 +246,68 @@ impl DevicePanel {
     }
     pub fn run(&mut self, job: Job, cx: &mut Context<Self>) {
         let (page, pages) = (job.first_page, job.first_page + job.pages.len());
-        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, pen: None, reconnecting: None, recovered: None });
+        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, pen: None, reconnecting: None, recovered: None, calibration: false });
         self.handle.send(Command::Run(job));
         cx.notify();
+    }
+
+    /// 落笔校准: write one line per depth in `zs` from the current origin.
+    fn run_ladder(&mut self, zs: &[f32], cx: &mut Context<Self>) {
+        let profile = cx.global::<AppState>().settings.device.profile.clone();
+        let code = chixie_rs_output::depth_ladder(zs, &profile);
+        self.job = Some(JobState { page: 0, pages: 1, done: 0, total: 0, paused: false, pen: None, reconnecting: None, recovered: None, calibration: true });
+        self.handle.send(Command::Run(Job { pages: vec![code.text], maps: vec![code.stroke_lines], ..Default::default() }));
+        cx.notify();
+    }
+
+    /// The picked 落笔校准 line becomes the 落笔高度.
+    fn set_pen_down(&mut self, z: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let st = cx.global_mut::<AppState>();
+        st.settings.device.profile.pen_down_z = z;
+        let p = st.settings.device.profile.clone();
+        st.save_settings();
+        self.handle.send(Command::SetProfile(p));
+        window.push_notification(Notification::success(format!("落笔高度已设为 {}", chixie_rs_core::profile::num(z))), cx);
+        cx.notify();
+    }
+
+    /// 落笔校准: 开始测试 writes a row of short lines, each a little deeper than the last; the user
+    /// clicks the best one and its depth becomes the 落笔高度.
+    fn open_pen_calibration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use chixie_rs_core::profile::{DeviceType, num};
+        let p = cx.global::<AppState>().settings.device.profile.clone();
+        if !matches!(p.device_type, DeviceType::StepperPenUp | DeviceType::ServoPenUp) {
+            window.push_notification(Notification::warning("落笔校准只适用于步进或舵机抬笔的设备"), cx);
+            return;
+        }
+        let zs = p.ladder_levels();
+        let unit = if p.device_type == DeviceType::ServoPenUp { "°" } else { " mm" };
+        let panel = cx.entity();
+        window.open_dialog(cx, move |d, _w, cx| {
+            let muted = cx.theme().muted_foreground;
+            let cur = cx.global::<AppState>().settings.device.profile.pen_down_z;
+            let ready = panel.read(cx).is_connected() && !panel.read(cx).busy();
+            let (pt, zt) = (panel.clone(), zs.clone());
+            let start = Button::new("ladder-start").small().primary().label("开始测试").disabled(!ready).on_click(move |_: &ClickEvent, _w, cx| pt.update(cx, |v, cx| v.run_ladder(&zt, cx)));
+            let picks = zs.iter().enumerate().fold(h_flex().flex_wrap().gap_1(), |row, (i, &z)| {
+                let pp = panel.clone();
+                let b = Button::new(("ladder-pick", i)).small().label(format!("{} · {}{unit}", i + 1, num(z)));
+                let b = if (z - cur).abs() < 1e-4 { b.primary() } else { b.outline() };
+                row.child(b.on_click(move |_: &ClickEvent, w, cx| pp.update(cx, |v, cx| v.set_pen_down(z, w, cx))))
+            });
+            d.title("落笔校准").w(px(480.)).child(
+                v_flex()
+                    .gap_2()
+                    .child(div().text_sm().child(format!(
+                        "1. 放好纸，把笔移到空白处并「设为原点」。\n2. 点「开始测试」：从原点向右画 {} 条竖线（间距 {} mm），从浅到深。\n3. 选出线条最清楚、又不划纸的那一条，点下面对应的编号，它的深度就成为落笔高度。",
+                        zs.len(),
+                        num(chixie_rs_output::LADDER_GAP_MM)
+                    )))
+                    .child(div().text_xs().text_color(muted).child("第 1、6、11 条更长，方便数。当前落笔高度高亮显示。"))
+                    .child(h_flex().child(start).when(!ready, |el| el.child(div().pl_2().text_xs().text_color(muted).child("请先连接设备，并等当前任务结束"))))
+                    .child(picks),
+            )
+        });
     }
     /// 继续书写 after a drop.
     pub fn resume_job(&mut self, cx: &mut Context<Self>) {
@@ -514,7 +575,15 @@ impl DevicePanel {
                             )
                             .child(h_flex().gap_1().child(cmd("pen-up", "抬笔", || Command::Pen(Pen::Up))).child(cmd("pen-down", "落笔", || Command::Pen(Pen::Down))))
                             .child(h_flex().gap_1().child(cmd("zero", "设为原点", || Command::Zero)).child(cmd("origin", "回原点", || Command::BackOrigin)))
-                            .child(cmd("unlock", "解锁 $X", || Command::Unlock)),
+                            .child(
+                                h_flex().gap_1().child(cmd("unlock", "解锁 $X", || Command::Unlock)).child(
+                                    Button::new("pen-calib")
+                                        .small()
+                                        .label("落笔校准…")
+                                        .tooltip("画一排深浅不同的线，点选最合适的一条来设定落笔高度")
+                                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_pen_calibration(w, cx))),
+                                ),
+                            ),
                     ),
             )
             .into_any_element()
@@ -533,7 +602,13 @@ impl DevicePanel {
             (_, Some((_, true))) => "控制板重启过：请把笔移回纸张原点，点「设为原点」后继续".into(),
             (_, Some((line, false))) => format!("已重新连接：将从第 {} 页第 {line} 行附近继续", j.page + 1),
             _ if j.pen.is_some() => format!("等待换笔：{}", j.pen.map(chixie_rs_core::profile::colour_name).unwrap_or_default()),
-            _ => format!("第 {} 页 · {}/{} 行 · {pct:.0}%{}", j.page + 1, j.done, j.total, if j.paused { " · 已暂停" } else { "" }),
+            _ => format!(
+                "{} · {}/{} 行 · {pct:.0}%{}",
+                if j.calibration { "落笔校准".to_string() } else { format!("第 {} 页", j.page + 1) },
+                j.done,
+                j.total,
+                if j.paused { " · 已暂停" } else { "" }
+            ),
         };
         let interrupted = j.reconnecting.is_some() || j.recovered.is_some();
         v_flex()

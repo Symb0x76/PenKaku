@@ -307,6 +307,14 @@ impl DeviceProfile {
         matches!(self.device_type, DeviceType::StepperPenUp | DeviceType::ServoPenUp) && self.press_step != 0.0
     }
 
+    /// 落笔校准 depths: 11 pen-down Z values around today's, 0.2 mm apart (3° on a servo),
+    /// shallow to deep, leaving out any at or behind the pen-up position.
+    pub fn ladder_levels(&self) -> Vec<f32> {
+        let away = if self.pen_down_z >= self.pen_up_z { 1.0 } else { -1.0 };
+        let step = if self.device_type == DeviceType::ServoPenUp { 3.0 } else { 0.2 };
+        (-5..=5).map(|k| self.pen_down_z + away * k as f32 * step).filter(|z| (z - self.pen_up_z) * away > 1e-4).map(|z| (z * 1000.0).round() / 1000.0).collect()
+    }
+
     /// Pen-down Z at `press` 轻重 steps: heavier goes further from the pen-up position.
     pub fn pen_down_z_at(&self, press: f32) -> f32 {
         let away = if self.pen_down_z >= self.pen_up_z { 1.0 } else { -1.0 };
@@ -317,6 +325,21 @@ impl DeviceProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ladder_levels_go_shallow_to_deep_and_stay_down() {
+        let d = DeviceProfile::default(); // up 0, down 2
+        assert_eq!(d.ladder_levels(), [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0]);
+        // Close to the pen-up position: the levels at or above it are left out.
+        let near = DeviceProfile { pen_down_z: 0.6, ..Default::default() };
+        assert_eq!(near.ladder_levels(), [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6]);
+        // Down below up: deeper is lower.
+        let inv = DeviceProfile { pen_up_z: 5.0, pen_down_z: 2.0, ..Default::default() };
+        assert_eq!(inv.ladder_levels().first(), Some(&3.0));
+        assert_eq!(inv.ladder_levels().last(), Some(&1.0));
+        let servo = DeviceProfile { device_type: DeviceType::ServoPenUp, pen_up_z: 30.0, pen_down_z: 60.0, ..Default::default() };
+        assert_eq!(servo.ladder_levels()[..2], [45.0, 48.0]);
+    }
 
     #[test]
     fn settings_with_the_old_end_position_still_load() {

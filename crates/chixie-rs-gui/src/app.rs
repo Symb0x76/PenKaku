@@ -948,7 +948,11 @@ impl ChixieRsApp {
     }
 
     fn on_device_event(&mut self, ev: DevEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let at = {
+        // A 落笔校准 test is not the document: leave the break point alone.
+        let calibrating = self.device.read(cx).job.is_some_and(|j| j.calibration);
+        let at = if calibrating {
+            None
+        } else {
             let doc = self.doc.read(cx).doc();
             self.resume.observe(&ev, doc.chars(), doc.ids())
         };

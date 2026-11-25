@@ -69,13 +69,36 @@ impl PageCode {
 
 /// `emit` with the line index of every stroke start.
 pub fn emit_mapped(page: &Page, d: &DeviceProfile) -> PageCode {
-    emit_runs(page, &[], &[], d)
+    emit_runs(page, &[], &|_| None, d)
 }
 
 /// A written page (see [`crate::plan::write`]) with its pen stops or changer macros and each
 /// stroke's 字符轻重.
 pub fn emit_written(w: &Written, d: &DeviceProfile) -> PageCode {
-    emit_runs(&w.page, &w.pens, &w.press, d)
+    let z = |k: usize| w.press.get(k).copied().filter(|&p| p != 0.0 && d.supports_press()).map(|p| d.pen_down_z_at(p));
+    emit_runs(&w.page, &w.pens, &z, d)
+}
+
+/// Spacing (mm) of the 落笔校准 lines.
+pub const LADDER_GAP_MM: f32 = 4.0;
+/// Length (mm) of a 落笔校准 line; every fifth is longer, to count by.
+pub const LADDER_LEN_MM: f32 = 10.0;
+
+/// 落笔校准: from the current origin, one short vertical line per pen-down Z in `zs`, left to
+/// right `LADDER_GAP_MM` apart, going down the paper; lines 1, 6, 11 … are half as long again so
+/// they can be counted. The user picks the best line and its Z becomes the 落笔高度.
+pub fn depth_ladder(zs: &[f32], d: &DeviceProfile) -> PageCode {
+    let strokes = zs
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let x = i as f32 * LADDER_GAP_MM;
+            let len = if i % 5 == 0 { LADDER_LEN_MM * 1.5 } else { LADDER_LEN_MM };
+            vec![(x, 0.0), (x, -len)]
+        })
+        .collect();
+    let page = Page { strokes, ..Default::default() };
+    emit_runs(&page, &[], &|k| zs.get(k).copied(), d)
 }
 
 /// The automatic changer's macro in front of a run: put the held pen back, pick the next one.
@@ -119,8 +142,8 @@ fn taper_points(s: &[P], len: f32, z0: f32, z1: f32) -> Vec<(P, Option<f32>)> {
 }
 
 /// `runs`: (stroke index, colour) where each colour run starts; empty = one pen, no changes.
-/// `press`: 字符轻重 per stroke (empty = standard); a pressed stroke goes down to its own Z.
-fn emit_runs(page: &Page, runs: &[(usize, Rgb)], press: &[f32], d: &DeviceProfile) -> PageCode {
+/// `z_of(k)`: stroke `k`'s own pen-down Z (字符轻重, 落笔校准); `None` = the profile's.
+fn emit_runs(page: &Page, runs: &[(usize, Rgb)], z_of: &dyn Fn(usize) -> Option<f32>, d: &DeviceProfile) -> PageCode {
     let slots: &[PenSlot] = match &d.pen_change {
         PenChange::Auto { slots } => slots,
         PenChange::Manual => &[],
@@ -150,10 +173,10 @@ fn emit_runs(page: &Page, runs: &[(usize, Rgb)], press: &[f32], d: &DeviceProfil
         }
         let improved = d.route.apply(stroke);
         let pts = improved.as_deref().unwrap_or(stroke);
-        let pressed = press.get(k).copied().filter(|&p| p != 0.0 && d.supports_press());
-        let z_down = pressed.map_or(d.pen_down_z, |p| d.pen_down_z_at(p));
-        let down: std::borrow::Cow<str> = match pressed {
-            Some(_) => format!("G1G90 Z{}", num(z_down)).into(),
+        let own = z_of(k).filter(|_| d.device_type != DeviceType::CustomZ);
+        let z_down = own.unwrap_or(d.pen_down_z);
+        let down: std::borrow::Cow<str> = match own {
+            Some(z) => format!("G1G90 Z{}", num(z)).into(),
             None => down.as_str().into(),
         };
         let tapered = taper.map(|t| taper_points(pts, t.len_mm, z_down, t.z_end));
@@ -259,6 +282,18 @@ mod tests {
         assert_eq!(emit_written(&w, &custom).text, emit(&w.page, &custom));
         // All standard: no press vector, byte-identical output.
         assert!(w.clone().with_press(&[0.0; 3]).press.is_empty());
+    }
+
+    #[test]
+    fn depth_ladder_draws_one_line_per_depth() {
+        let d = DeviceProfile::default();
+        let pc = depth_ladder(&[1.0, 1.5, 2.0, 2.5, 3.0, 3.5], &d);
+        let downs: Vec<&str> = pc.text.lines().filter(|l| l.starts_with("G1G90 Z") && !l.starts_with("G1G90 Z0 ")).collect();
+        assert_eq!(downs, ["G1G90 Z1 F8000", "G1G90 Z1.5 F8000", "G1G90 Z2 F8000", "G1G90 Z2.5 F8000", "G1G90 Z3 F8000", "G1G90 Z3.5 F8000"]);
+        assert_eq!(pc.stroke_lines.len(), 6);
+        // Lines 1 and 6 are the long counting lines; the pen ends up.
+        assert!(pc.text.contains("G1 X0.000 Y-15.000") && pc.text.contains("G1 X20.000 Y-15.000") && pc.text.contains("G1 X4.000 Y-10.000"));
+        assert!(pc.text.ends_with("G1G90 Z0 F8000\n"));
     }
 
     #[test]
