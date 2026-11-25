@@ -385,3 +385,13 @@
 - Zoom 10 %–500 % like Word (`ZOOM_MIN/MAX` = 0.1 / 5 × `ZOOM_100`). Pages per row follow the
   viewport width (`doc_view::page_cols`: as many as fit, ≥ 2 with 双页, ≤ page count); after a
   resize the canvas prepaint re-checks and calls `window.refresh()`. Test `columns_follow_viewport_width`.
+- PR #5 merged 2026-11-25.
+
+## 2026-11-25: ribbon toggles instead of checkboxes (uncommitted, branch feat/ribbon-toggles)
+- No `Checkbox` left on the ribbon. `ribbon::toggle` = small icon + short label, full width in
+  its stack, highlighted (`selected`) while on; the long explanation is the tooltip.
+- 视图: 显示 = 模板格线 / 行号 / 页码 toggles; 外观 = big 深色模式 (Moon) toggle.
+- 手写 › 效果: 随机排布 / 基础变形 / 字形变形 toggles; ↘ launcher kept.
+- 布局 › 排版: 排版规则 ▾ big menu (checked items with full wording: 避头尾, 两个字母占一格,
+  作文格分词) + 页面尺寸 button (icon, label, current size; opens 模板管理).
+- New embedded icons: ListOrdered, FileDigit, Moon, Scaling, Spline, TextWrap, Proportions.
