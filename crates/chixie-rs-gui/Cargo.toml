@@ -23,3 +23,7 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image.workspace = true
+
+[build-dependencies]
+# Same version gpui already builds with; embeds the Windows icon (build.rs).
+embed-resource = "3.0.12"

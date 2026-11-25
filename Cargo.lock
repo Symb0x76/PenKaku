@@ -1093,6 +1093,7 @@ dependencies = [
  "chixie-rs-import",
  "chixie-rs-output",
  "chixie-rs-template",
+ "embed-resource",
  "env_logger",
  "gpui-kit",
  "image",

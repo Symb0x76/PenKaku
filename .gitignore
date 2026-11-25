@@ -1,7 +1,21 @@
+# Targets
 /target
+
+# OG Software net captures
 /captures
+
+# Local tools
 /tools
 /docs/chixie3-analysis/tools
+
+# AI Handoff
 /docs/HANDOFF.md
+
+#VS Code
 *.code-workspace
+
+# Real tests
 /crates/chixie-rs-import/tests/forms-real
+
+# Original icon
+/docs/OriginIcon.png

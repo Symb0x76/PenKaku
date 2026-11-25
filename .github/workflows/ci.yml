@@ -84,11 +84,39 @@ jobs:
           grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
           grep -q 'AUTOTEST_PERF pages=' autotest.log
 
+      # Windows: the exes (icon embedded by build.rs). macOS: chixie-rs.app with its .icns.
+      # Linux: binaries, .desktop entry, hicolor icons and install.sh. macOS and Linux are tarred
+      # because artifact zips drop the executable bit.
+      - name: Package
+        shell: bash
+        run: |
+          t=target/debug; r=crates/chixie-rs-gui/resources
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            Windows)
+              cp $t/chixie-rs.exe $t/chixie-rs-cli.exe dist/ ;;
+            macOS)
+              app=dist/chixie-rs.app/Contents
+              mkdir -p $app/MacOS $app/Resources
+              cp $t/chixie-rs $app/MacOS/
+              cp $r/macos/Info.plist $app/
+              cp $r/icon/chixie-rs.icns $app/Resources/
+              plutil -lint $app/Info.plist
+              codesign --force --deep --sign - dist/chixie-rs.app
+              cp $t/chixie-rs-cli dist/
+              tar -czf chixie-rs-macOS.tar.gz -C dist . ;;
+            Linux)
+              p=dist/chixie-rs
+              mkdir -p $p/icons
+              cp $t/chixie-rs $t/chixie-rs-cli $r/linux/chixie-rs.desktop $r/linux/install.sh $p/
+              cp $r/icon/png/*.png $p/icons/
+              chmod +x $p/install.sh
+              tar -czf chixie-rs-Linux.tar.gz -C dist chixie-rs ;;
+          esac
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
           name: chixie-rs-${{ runner.os }}-debug
-          path: |
-            target/debug/chixie-rs${{ runner.os == 'Windows' && '.exe' || '' }}
-            target/debug/chixie-rs-cli${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: ${{ runner.os == 'Windows' && 'dist/' || format('chixie-rs-{0}.tar.gz', runner.os) }}
           if-no-files-found: error

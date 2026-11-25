@@ -31,7 +31,16 @@ CH340 在电机负载下可能掉线，重连后串口号会变；端口请保�
 ## 下载
 
 GitHub Actions 每次 CI 都会上传 Windows、macOS、Linux 的 `chixie-rs-<OS>-debug` 构建
-（图形界面 `chixie-rs` 和命令行 `chixie-rs-cli`）。
+（图形界面 `chixie-rs` 和命令行 `chixie-rs-cli`）：
+
+- **Windows：** `chixie-rs.exe` 和 `chixie-rs-cli.exe`，直接运行。
+- **macOS：** `chixie-rs-macOS.tar.gz`，内含 `chixie-rs.app`。解压后把应用拖到“应用程序”。
+  应用未经公证，第一次启动需要右键 › 打开。
+- **Linux：** `chixie-rs-Linux.tar.gz`。解压后运行 `./chixie-rs/install.sh`，安装到 `~/.local`，
+  并添加应用菜单项和图标（给所有用户安装用 `PREFIX=/usr/local`）。
+
+应用图标由 `crates/chixie-rs-gui/resources/icon/make_icons.py` 从 `docs/OriginIcon.png`（不入库）生成，
+生成的文件已提交。
 
 ## 从源码构建
 

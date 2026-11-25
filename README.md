@@ -40,7 +40,16 @@ port; leave the port on 自动 (auto) so the client finds it again.
 ## Download
 
 Each CI run on GitHub Actions uploads `chixie-rs-<OS>-debug` builds for Windows, macOS and Linux
-(the GUI `chixie-rs` and the command line `chixie-rs-cli`).
+(the GUI `chixie-rs` and the command line `chixie-rs-cli`):
+
+- **Windows:** `chixie-rs.exe` and `chixie-rs-cli.exe`; run directly.
+- **macOS:** `chixie-rs-macOS.tar.gz` with `chixie-rs.app`. Unpack and move the app to
+  Applications. The app is not notarised, so the first start needs right-click › Open.
+- **Linux:** `chixie-rs-Linux.tar.gz`. Unpack and run `./chixie-rs/install.sh` to install into
+  `~/.local` with an application-menu entry and icon (`PREFIX=/usr/local` for everyone).
+
+The app icon is generated from `docs/OriginIcon.png` (kept out of git) by
+`crates/chixie-rs-gui/resources/icon/make_icons.py`; the generated files are committed.
 
 ## Build from source
 

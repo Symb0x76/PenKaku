@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- chixie-rs.app/Contents/Info.plist, assembled by the CI Package step. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>chixie-rs</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.symb0x76.chixie-rs</string>
+	<key>CFBundleName</key>
+	<string>chixie-rs</string>
+	<key>CFBundleDisplayName</key>
+	<string>chixie-rs</string>
+	<key>CFBundleIconFile</key>
+	<string>chixie-rs</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>
