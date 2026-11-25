@@ -2,12 +2,11 @@
 //! one function holding every tab's temporaries overflowed the 1 MB debug main-thread stack.
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::select::Select;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, ThemeMode, h_flex, v_flex};
 use chixie_rs_core::layout::{Align, Ruling};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -430,6 +429,47 @@ impl ChixieRsApp {
             }))
         });
 
+        // 排版规则 ▾: global rules, set once, so they live in a menu (full wording kept there).
+        let w4 = this.clone();
+        let rules = [
+            ("标点避头尾：标点不出现在行首", page.kinsoku, 0usize),
+            ("作文格：两个字母占一格（数字总是一格两个）", page.grid_pair_letters, 1),
+            ("作文格分词：词语不跨行", page.grid_keep_words, 2),
+        ];
+        let typeset_menu = big_menu("typeset-rules", "排版规则", IconName::TextWrap).tooltip("避头尾、作文格字母和分词规则").dropdown_menu(move |m, _w, _cx| {
+            rules.iter().fold(m, |m, &(label, on, k)| {
+                let this = w4.clone();
+                m.item(PopupMenuItem::new(label).checked(on).on_click(move |_, _w, cx| {
+                    let _ = this.update(cx, |t, cx| {
+                        t.edit_settings(cx, |st| {
+                            let p = &mut st.settings.page;
+                            match k {
+                                0 => p.kinsoku = !on,
+                                1 => p.grid_pair_letters = !on,
+                                _ => p.grid_keep_words = !on,
+                            }
+                        })
+                    });
+                }))
+            })
+        });
+        // 页面尺寸: the actual page (a template can set its own), opening 模板管理 to change it.
+        let page_size = Button::new("page-size")
+            .ghost()
+            .h(px(70.))
+            .min_w(px(64.))
+            .px_1p5()
+            .tooltip("页面尺寸（模板可自带尺寸）：在模板管理中自定义")
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_1()
+                    .child(Icon::new(IconName::Proportions).with_size(px(28.)))
+                    .child(div().text_xs().child("页面尺寸"))
+                    .child(div().text_xs().text_color(muted).child(format!("{:.0} × {:.0} mm", page.paper.0, page.paper.1))),
+            )
+            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_backstage(Stage::Templates, w, cx)));
+
         // Template gallery: 空白 + every stored template, the active one outlined.
         let card = |id: usize, name: String, icon: IconName, t: Option<chixie_rs_template::Template>, selected: bool| {
             v_flex()
@@ -497,38 +537,9 @@ impl ChixieRsApp {
                 cx,
                 "typeset",
                 "排版",
-                stack([
-                    Checkbox::new("kinsoku")
-                        .small()
-                        .label("避头尾（标点不出现在行首）")
-                        .checked(page.kinsoku)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.page.kinsoku = v);
-                        }))
-                        .into_any_element(),
-                    Checkbox::new("pair-letters")
-                        .small()
-                        .label("作文格：两个字母占一格（数字总是）")
-                        .checked(page.grid_pair_letters)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.page.grid_pair_letters = v);
-                        }))
-                        .into_any_element(),
-                    Checkbox::new("keep-words")
-                        .small()
-                        .label("作文格分词（词语不跨行）")
-                        .checked(page.grid_keep_words)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.page.grid_keep_words = v);
-                        }))
-                        .into_any_element(),
-                ]),
+                h_flex().gap_0p5().child(typeset_menu).child(page_size),
                 None,
             ))
-            .child(div().px_2().text_xs().text_color(muted).child(format!("{:.0} × {:.0} mm", page.paper.0, page.paper.1)))
             .into_any_element()
     }
 
@@ -536,6 +547,7 @@ impl ChixieRsApp {
     fn tab_style(&self, cx: &mut Context<Self>) -> AnyElement {
         let st = &cx.global::<AppState>().settings.style;
         let (hw, df) = (st.handwriting.clone(), st.deformation.clone());
+        let (jit_on, base_on, shape_on) = (hw.enabled, df.enabled && df.base, df.enabled && df.shape);
         let this = cx.entity().downgrade();
         let launcher: ribbon::ClickFn = Box::new(move |_, w, cx| {
             let _ = this.update(cx, |t, cx| t.open_style_dialog(w, cx));
@@ -547,37 +559,25 @@ impl ChixieRsApp {
                 "effects",
                 "效果",
                 stack([
-                    Checkbox::new("jitter")
-                        .small()
-                        .label("随机排布（字距 / 行首 / 上下浮动）")
-                        .checked(hw.enabled)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.style.handwriting.enabled = v);
+                    ribbon::toggle("jitter", "随机排布", IconName::Shuffle, jit_on, "随机排布：字距、行首位置和上下浮动")
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
+                            t.edit_settings(cx, |st| st.settings.style.handwriting.enabled = !jit_on);
                         }))
                         .into_any_element(),
-                    Checkbox::new("base")
-                        .small()
-                        .label("基础变形（胖瘦 / 高矮 / 旋转）")
-                        .checked(df.enabled && df.base)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
+                    ribbon::toggle("base", "基础变形", IconName::Scaling, base_on, "基础变形：胖瘦、高矮和旋转")
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
                             t.edit_settings(cx, |st| {
                                 let d = &mut st.settings.style.deformation;
-                                d.base = v;
+                                d.base = !base_on;
                                 d.enabled = d.base || d.shape;
                             });
                         }))
                         .into_any_element(),
-                    Checkbox::new("shape")
-                        .small()
-                        .label("字形变形（倾斜 / 笔画扰动）")
-                        .checked(df.enabled && df.shape)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
+                    ribbon::toggle("shape", "字形变形", IconName::Spline, shape_on, "字形变形：倾斜和笔画扰动")
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
                             t.edit_settings(cx, |st| {
                                 let d = &mut st.settings.style.deformation;
-                                d.shape = v;
+                                d.shape = !shape_on;
                                 d.enabled = d.base || d.shape;
                             });
                         }))
@@ -788,31 +788,19 @@ impl ChixieRsApp {
                 "show",
                 "显示",
                 stack([
-                    Checkbox::new("guides")
-                        .small()
-                        .label("模板格线")
-                        .checked(show_guides)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.ui.show_guides = v);
+                    ribbon::toggle("guides", "格线", IconName::Grid3x3, show_guides, "在页面上显示模板的格线（不会写出）")
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
+                            t.edit_settings(cx, |st| st.settings.ui.show_guides = !show_guides);
                         }))
                         .into_any_element(),
-                    Checkbox::new("line-numbers")
-                        .small()
-                        .label("行号")
-                        .checked(ui.line_numbers)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.ui.line_numbers = v);
+                    ribbon::toggle("line-numbers", "行号", IconName::ListOrdered, ui.line_numbers, "在每行左侧显示行号")
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
+                            t.edit_settings(cx, |st| st.settings.ui.line_numbers = !st.settings.ui.line_numbers);
                         }))
                         .into_any_element(),
-                    Checkbox::new("page-numbers")
-                        .small()
-                        .label("页码")
-                        .checked(ui.page_numbers)
-                        .on_click(cx.listener(|t, v: &bool, _w, cx| {
-                            let v = *v;
-                            t.edit_settings(cx, |st| st.settings.ui.page_numbers = v);
+                    ribbon::toggle("page-numbers", "页码", IconName::FileDigit, ui.page_numbers, "在每页下方显示页码")
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
+                            t.edit_settings(cx, |st| st.settings.ui.page_numbers = !st.settings.ui.page_numbers);
                         }))
                         .into_any_element(),
                 ]),
@@ -822,18 +810,12 @@ impl ChixieRsApp {
                 cx,
                 "look",
                 "外观",
-                stack([Checkbox::new("dark")
-                    .small()
-                    .label("深色模式")
-                    .checked(dark)
-                    .on_click(|v: &bool, window, cx| {
-                        let v = *v;
-                        ribbon::set_theme(v, Some(window), cx);
-                        let st = cx.global_mut::<AppState>();
-                        st.settings.ui.dark = v;
-                        st.save_settings();
-                    })
-                    .into_any_element()]),
+                big("dark", "深色模式", IconName::Moon).selected(dark).tooltip("切换深色 / 浅色界面").on_click(move |_: &ClickEvent, window, cx| {
+                    ribbon::set_theme(!dark, Some(window), cx);
+                    let st = cx.global_mut::<AppState>();
+                    st.settings.ui.dark = !dark;
+                    st.save_settings();
+                }),
                 None,
             ))
             .into_any_element()

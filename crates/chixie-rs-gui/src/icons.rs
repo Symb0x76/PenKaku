@@ -63,6 +63,13 @@ gpui_kit::assets::icon_assets!(
         Dot,
         FileInput,
         FolderInput,
+        ListOrdered,
+        FileDigit,
+        Moon,
+        Scaling,
+        Spline,
+        TextWrap,
+        Proportions,
     ]
 );
 

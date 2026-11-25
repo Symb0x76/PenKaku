@@ -5,7 +5,7 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Selectable as _, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -179,6 +179,13 @@ pub const ROW_H: f32 = 24.0;
 /// Small ribbon button: 16 px icon + label, for 3-row stacks.
 pub fn small(id: impl Into<ElementId>, label: impl Into<SharedString>, icon: IconName) -> Button {
     Button::new(id).ghost().xsmall().h(px(ROW_H)).justify_start().icon(Icon::new(icon).with_size(px(15.))).label(label)
+}
+
+/// On/off ribbon setting: a small icon + short label button, highlighted while on (Word's
+/// toggle buttons, not a checkbox); the long explanation goes in the tooltip.
+pub fn toggle(id: impl Into<ElementId>, label: impl Into<SharedString>, icon: IconName, on: bool, tip: impl Into<SharedString>) -> Button {
+    // Full width, so the highlights in one stack are the same size.
+    small(id, label, icon).w_full().selected(on).tooltip(tip)
 }
 
 /// One control row on the ribbon grid.
