@@ -413,3 +413,14 @@
   `calibration`, so 断点续写 state is untouched.
 - Not verified: GUI click-through (BOSS at screen); ladder and 轻重 on the real board; whether
   0.2 mm per 轻重 step suits the pen.
+- Later pushed (`ec93d21`, with `docs/OriginIcon.png`).
+
+## 2026-11-25: portable build (pushed on master)
+- `config::portable_dir(exe)`: a `portable` file next to the exe (or next to `X.app` for a
+  macOS bundle) makes `Settings::default_path` return `<that dir>/data/settings.toml`; fonts,
+  templates, drafts and caches follow since they all sit next to settings. Test
+  `portable_marker_moves_data_next_to_the_program`.
+- CI: on workflow_dispatch and tags only (fat LTO is slow), `cargo build --release` and upload
+  `chixie-rs-<OS>-portable` (Windows zip, macOS/Linux tar.gz) with the marker. README (en/zh).
+- Not verified: the release build and portable packaging in CI (needs a manual run); GUI start
+  from a portable folder on this machine. Keyring passwords do not travel.

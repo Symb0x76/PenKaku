@@ -121,3 +121,43 @@ jobs:
           name: chixie-rs-${{ runner.os }}-debug
           path: ${{ runner.os == 'Windows' && 'dist/' || format('chixie-rs-{0}.tar.gz', runner.os) }}
           if-no-files-found: error
+
+      # Portable release build: optimised binaries plus a `portable` marker, so settings, fonts
+      # and templates go to a `data` folder beside the program (next to chixie-rs.app on macOS).
+      # Fat LTO is slow, so only on manual runs and tags.
+      - name: Build release
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        run: cargo build --release -p chixie-rs-gui -p chixie-rs-cli
+
+      - name: Package portable
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          t=target/release; r=crates/chixie-rs-gui/resources; p=portable/chixie-rs
+          mkdir -p $p
+          touch $p/portable
+          case "$RUNNER_OS" in
+            Windows)
+              cp $t/chixie-rs.exe $t/chixie-rs-cli.exe $p/
+              (cd portable && 7z a -tzip ../chixie-rs-portable-Windows.zip chixie-rs) ;;
+            macOS)
+              app=$p/chixie-rs.app/Contents
+              mkdir -p $app/MacOS $app/Resources
+              cp $t/chixie-rs $app/MacOS/
+              cp $r/macos/Info.plist $app/
+              cp $r/icon/chixie-rs.icns $app/Resources/
+              codesign --force --deep --sign - $p/chixie-rs.app
+              cp $t/chixie-rs-cli $p/
+              tar -czf chixie-rs-portable-macOS.tar.gz -C portable chixie-rs ;;
+            Linux)
+              cp $t/chixie-rs $t/chixie-rs-cli $p/
+              tar -czf chixie-rs-portable-Linux.tar.gz -C portable chixie-rs ;;
+          esac
+
+      - name: Upload portable
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: chixie-rs-${{ runner.os }}-portable
+          path: ${{ runner.os == 'Windows' && 'chixie-rs-portable-Windows.zip' || format('chixie-rs-portable-{0}.tar.gz', runner.os) }}
+          if-no-files-found: error

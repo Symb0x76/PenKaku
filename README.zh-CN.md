@@ -138,6 +138,8 @@ GitHub Actions 每次 CI 都会在 `windows-latest`、`macos-latest`、`ubuntu-l
 - **macOS：** 解压 `chixie-rs-macOS.tar.gz`，将 `chixie-rs.app` 拖入"应用程序"。因未进行 Apple 公证，首次启动需右键点击应用选择 **打开**（或执行 `xattr -dr com.apple.quarantine`）。
 - **Linux：** 解压 `chixie-rs-Linux.tar.gz`，运行 `./chixie-rs/install.sh` 安装到 `~/.local` 并注册桌面菜单与图标（全局安装可使用 `PREFIX=/usr/local`）。
 
+**便携版：** 手动运行 CI（Actions › CI › Run workflow）或推送 tag 时，还会上传经过优化的 `chixie-rs-<OS>-portable` 产物。里面是一个 `chixie-rs` 文件夹，带一个空的 `portable` 文件。只要这个文件和程序放在一起（macOS 上与 `chixie-rs.app` 放在一起），设置、草稿、字体和模板就都存到程序旁边的 `data` 文件夹，而不是上表中的位置，整个文件夹可以直接拷到 U 盘带走。删掉 `portable` 文件即恢复使用常规位置。记住的登录密码仍存在系统钥匙串里，不会随文件夹带走。
+
 应用图标由 [make_icons.py](crates/chixie-rs-gui/resources/icon/make_icons.py) 从 [OriginIcon.png](docs/OriginIcon.png) 生成，生成产物已随仓库提交。
 
 ---

@@ -207,8 +207,12 @@ impl Settings {
         }
     }
 
-    /// Default location: `<config dir>/chixie-rs/.../settings.toml`.
+    /// Default location: `<data dir>/settings.toml` for a portable copy (see [`portable_dir`]),
+    /// else `<config dir>/chixie-rs/.../settings.toml`.
     pub fn default_path() -> Result<PathBuf> {
+        if let Some(dir) = std::env::current_exe().ok().and_then(|exe| portable_dir(&exe)) {
+            return Ok(dir.join("settings.toml"));
+        }
         let dirs = directories::ProjectDirs::from("", "", "chixie-rs")
             .ok_or_else(|| Error::Config("no home directory".into()))?;
         Ok(dirs.config_dir().join("settings.toml"))
@@ -319,9 +323,40 @@ fn parse_ini(text: &str) -> HashMap<(String, String), String> {
     out
 }
 
+/// Marker file that makes a copy portable: with it next to the program, settings, fonts and
+/// templates live in a `data` folder beside it instead of the user's config dir.
+pub const PORTABLE_MARKER: &str = "portable";
+
+/// The portable data folder for the program at `exe`, if a [`PORTABLE_MARKER`] sits next to it.
+/// For a macOS bundle (`X.app/Contents/MacOS/exe`) the marker and `data` sit next to `X.app`,
+/// since writing inside the bundle breaks its signature.
+pub fn portable_dir(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let bundle = dir
+        .ends_with("Contents/MacOS")
+        .then(|| dir.parent()?.parent()?.parent())
+        .flatten();
+    [Some(dir), bundle].into_iter().flatten().find(|d| d.join(PORTABLE_MARKER).is_file()).map(|d| d.join("data"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_marker_moves_data_next_to_the_program() {
+        let root = std::env::temp_dir().join(format!("chixie-portable-{}", std::process::id()));
+        let app = root.join("chixie-rs.app/Contents/MacOS");
+        std::fs::create_dir_all(&app).unwrap();
+        let exe = root.join("chixie-rs.exe");
+        let mac = app.join("chixie-rs");
+        assert_eq!(portable_dir(&exe), None);
+        assert_eq!(portable_dir(&mac), None);
+        std::fs::write(root.join(PORTABLE_MARKER), "").unwrap();
+        assert_eq!(portable_dir(&exe), Some(root.join("data")));
+        assert_eq!(portable_dir(&mac), Some(root.join("data")));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn script_styles_round_trip_and_old_files_load() {

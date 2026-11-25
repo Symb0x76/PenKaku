@@ -136,6 +136,8 @@ Each CI run on GitHub Actions builds natively on `windows-latest`, `macos-latest
 - **macOS:** `chixie-rs-macOS.tar.gz` containing `chixie-rs.app`. Unpack and move it to Applications. The app is not notarized, so the first start requires right-click › Open (or `xattr -dr com.apple.quarantine`).
 - **Linux:** `chixie-rs-Linux.tar.gz`. Unpack and run `./chixie-rs/install.sh` to install into `~/.local` with a desktop menu entry and icon (`PREFIX=/usr/local` system-wide).
 
+**Portable build.** Manual runs (Actions › CI › Run workflow) and tag pushes also upload optimised `chixie-rs-<OS>-portable` artifacts. Each holds a `chixie-rs` folder with an empty `portable` file; while that file sits next to the program (next to `chixie-rs.app` on macOS), settings, drafts, fonts and templates go to a `data` folder beside it instead of the paths above, so the whole folder can be carried on a USB stick. Deleting `portable` makes any copy use the normal paths. Saved login passwords stay in the OS keychain and do not travel.
+
 The app icon is generated from [docs/OriginIcon.png](docs/OriginIcon.png) by [make_icons.py](crates/chixie-rs-gui/resources/icon/make_icons.py); generated assets are committed.
 
 ---
