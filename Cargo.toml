@@ -67,21 +67,26 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 opt-level = 2
 
 [profile.release]
-opt-level = 3     # 最高级别的代码优化（release 默认值）
-lto = "fat"       # 启用跨 crate 的链接时优化（Link Time Optimization），可显著提升性能；也可选 "thin" 以加快编译
-codegen-units = 1 # 限制并行代码生成单元为 1，让 LLVM 进行更全局的优化（会明显增加编译时间）
-panic = "abort"   # 遇到 panic 时直接终止进程而不是展开调用栈（unwind），减小体积并略微提升性能
-strip = "symbols" # 自动剥离调试符号，大幅减小最终可执行文件体积（也可选 "debuginfo"）
+opt-level = 3     # Maximum optimization (release default)
+lto = "fat"       # Enable cross-crate linking time optimization (Link Time Optimization), which can significantly improve performance; you can also choose "thin" to speed up compilation
+codegen-units = 1 # Limit the number of parallel code generation units to 1, allowing LLVM to perform more global optimizations (which will significantly increase compilation time)
+panic = "abort"   # When a panic occurs, terminate the process directly instead of unwinding the call stack (unwind), reducing the size and slightly improving performance
+strip = "symbols" # Automatically strip debug symbols, significantly reducing the final executable file size (you can also choose "debuginfo")
 
 [profile.relwithdebuginfo]
-inherits = "release" # 必须继承 release，否则会默认继承 dev（无优化）
-debug = true         # 或 debug = 1（仅保留行号表，体积更小）
-strip = "none"       # 确保不剥离符号信息
+inherits = "release" # Must inherit release, otherwise it will default to inheriting dev (no optimization)
+debug = true         # Or debug = 1 (only keep line number table, smaller size)
+strip = "none"       # Ensure no symbol information is stripped
 
 [profile.relminsize]
 inherits = "release"
-opt-level = "z"      # 专为最小化体积优化（比 "s" 更激进）
-lto = true           # 启用链接时优化以消除未使用的死代码
+opt-level = "z"      # Optimized for minimum size (more aggressive than "s")
+lto = true           # Enable linking time optimization to remove unused dead code
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[profile.relnative]
+inherits = "release"
+# Pwsh: $env:RUSTFLAGS="-C target-cpu=native" cargo build --release
+# -sh: RUSTFLAGS="-C target-cpu=native" cargo build --profile relnative
