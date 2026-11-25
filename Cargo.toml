@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/chixie-rs-core", "crates/chixie-rs-template", "crates/chixie-rs-import", "crates/chixie-rs-device", "crates/chixie-rs-doc", "crates/chixie-rs-output", "crates/chixie-rs-cli", "crates/chixie-rs-gui"]
+members = [
+    "crates/chixie-rs-core",
+    "crates/chixie-rs-template",
+    "crates/chixie-rs-import",
+    "crates/chixie-rs-device",
+    "crates/chixie-rs-doc",
+    "crates/chixie-rs-output",
+    "crates/chixie-rs-cli",
+    "crates/chixie-rs-gui",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,7 +30,13 @@ clap = { version = "4.6.7", features = ["derive"] }
 env_logger = "0.11.11"
 hmac = "0.12"
 log = "0.4.35"
-reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "multipart", "query", "rustls"] }
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "blocking",
+    "json",
+    "multipart",
+    "query",
+    "rustls",
+] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serialport = "4.10.1"
@@ -34,7 +49,9 @@ gpui-kit = "=0.9.0"
 async-channel = "2"
 toml = "1"
 # Documents are DOCX: our own minimal OOXML on zip + quick-xml (deflate only).
-zip = { version = "9.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.6", default-features = false, features = [
+    "deflate-flate2-zlib-rs",
+] }
 quick-xml = "0.41"
 proptest = "1.12"
 jieba-rs = "0.11"
@@ -48,3 +65,10 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 # ships stays responsive, while our own crates keep fast incremental compiles.
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.release]
+opt-level = 3     # 最高级别的代码优化（release 默认值）
+lto = "fat"       # 启用跨 crate 的链接时优化（Link Time Optimization），可显著提升性能；也可选 "thin" 以加快编译
+codegen-units = 1 # 限制并行代码生成单元为 1，让 LLVM 进行更全局的优化（会明显增加编译时间）
+panic = "abort"   # 遇到 panic 时直接终止进程而不是展开调用栈（unwind），减小体积并略微提升性能
+strip = "symbols" # 自动剥离调试符号，大幅减小最终可执行文件体积（也可选 "debuginfo"）
