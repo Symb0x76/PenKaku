@@ -262,31 +262,6 @@ impl ChixieRsApp {
         }
     }
 
-    /// 缺失字符: the characters no font in use has, with 复制.
-    pub(crate) fn open_missing_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let missing: String = self.doc.read(cx).document().missing.iter().collect();
-        let font = cx.global::<AppState>().active_font.as_ref().map(|f| f.name.clone()).unwrap_or_default();
-        window.open_dialog(cx, move |dialog, _w, cx| {
-            let muted = gpui_kit::component::ActiveTheme::theme(cx).muted_foreground;
-            let text = missing.clone();
-            dialog
-                .title("缺失字符")
-                .w(px(460.))
-                .child(
-                    gpui_kit::component::v_flex()
-                        .gap_3()
-                        .child(div().text_sm().text_color(muted).child(format!("当前所用字体（{font} 及其他角色、混用字体）都没有这些字，它们在页面上显示为虚线框，不会写出：")))
-                        .child(div().p_2().rounded_md().border_1().text_lg().child(missing.clone()))
-                        .child(
-                            gpui_kit::component::button::Button::new("missing-copy").label("复制").on_click(move |_: &ClickEvent, window, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                                window.push_notification(Notification::success("已复制"), cx);
-                            }),
-                        ),
-                )
-        });
-    }
-
     /// 选项 › 字体 › 更改…: move the default folder (fonts move with it).
     pub(crate) fn change_library_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: Some("选择字体文件夹".into()) });

@@ -174,14 +174,12 @@ fn emit_runs(page: &Page, runs: &[(usize, Rgb)], d: &DeviceProfile) -> PageCode 
 }
 
 /// A self-contained program for the SD card (上传SD卡书写): mm and absolute mode first, then the
-/// page body, then pen up and the 写完位置 move that a streamed job sends at its end.
+/// page body, then pen up and back to the origin, as a streamed job ends.
 pub fn standalone(body: &str, d: &DeviceProfile) -> String {
     let mut g = String::from("G21\nG90\n");
     g.push_str(body);
     let _ = writeln!(g, "{} F{:.0}", d.pen_up_cmd(), d.travel_speed);
-    if let Some((x, y)) = d.end_position.target(&d.axis_map) {
-        let _ = writeln!(g, "G90G0 X{}Y{}", num(x), num(y));
-    }
+    let _ = writeln!(g, "{}", chixie_rs_core::profile::PARK);
     g
 }
 
@@ -243,8 +241,6 @@ mod tests {
         let g = standalone(&emit(&page(), &d), &d);
         assert!(g.starts_with("G21\nG90\nG1G90 Z0 F8000\nG0 X10.000"), "{g}");
         assert!(g.ends_with("G1G90 Z0 F8000\nG1G90 Z0 F8000\nG90G0 X0Y0\n"), "{g}");
-        let stay = DeviceProfile { end_position: chixie_rs_core::profile::EndPosition::Stay, ..Default::default() };
-        assert!(standalone("", &stay).ends_with("Z0 F8000\n"));
     }
 
     #[test]

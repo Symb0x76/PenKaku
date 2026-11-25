@@ -5,7 +5,7 @@
 //!   dir so the real settings file and credential store are untouched.
 //! - `CHIXIE_RS_AUTOTEST=1` (implies FAKE): log in, load a font, type and edit on the page through
 //!   the IME input handler and editor actions, export, print one `AUTOTEST ...` line and quit.
-//!   Then connect to the simulated Grbl, run the 2-page job (sheet change included) and report.
+//!   Then connect to the simulated Grbl, write both pages one by one (换纸 card in between) and report.
 //!   Used to verify the UI without input injection.
 //! - FAKE mode connects 设备 to an in-process simulated Grbl (`sim.rs`);
 //!   `CHIXIE_RS_SIM_DELAY_MS` sets the per-line execution delay (default 3).
@@ -20,6 +20,7 @@ mod fake;
 mod file_ops;
 mod firmware;
 mod find_bar;
+mod nav_pane;
 mod import_ui;
 mod cloud_preview;
 mod font_preview;
@@ -43,7 +44,6 @@ use chixie_rs_core::font::library::FontKey;
 use chixie_rs_doc::EditDoc;
 use chixie_rs_core::session::{self, HEARTBEAT_EVERY};
 use chixie_rs_template::TemplateStore;
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use crate::app::ChixieRsApp;
@@ -261,6 +261,49 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
                 files,
             );
         });
+        // 导航 pane: 缺字 lists every missing char, 搜索 takes the selection; the mini toolbar.
+        let nav_shot = |name: &str| {
+            use std::io::Write as _;
+            println!("SHOT_{name}");
+            let _ = std::io::stdout().flush();
+        };
+        let _ = cx.update_window(handle, |_, window, cx| {
+            app.update(cx, |a, cx| a.open_nav(app::NavTabPub::Missing, window, cx));
+        });
+        cx.background_executor().timer(pause(400)).await;
+        nav_shot("NAV_MISSING");
+        cx.background_executor().timer(pause(2500)).await;
+        let _ = cx.update_window(handle, |_, window, cx| {
+            let doc = app.read(cx).doc.clone();
+            doc.update(cx, |d, cx| {
+                d.select(0..2, cx);
+                d.set_mini_open(true, cx);
+            });
+            app.update(cx, |a, cx| a.open_nav(app::NavTabPub::Search, window, cx));
+        });
+        cx.background_executor().timer(pause(400)).await;
+        cx.update(|cx| {
+            let a = app.read(cx);
+            let d = a.doc.read(cx);
+            println!(
+                "AUTOTEST_NAV open={} missing_at={} search_hits={} mini={}",
+                a.nav_open(),
+                d.document().missing_at.len(),
+                a.nav_hit_count(cx),
+                d.mini_open(),
+            );
+        });
+        nav_shot("NAV_SEARCH");
+        cx.background_executor().timer(pause(2500)).await;
+        let _ = cx.update_window(handle, |_, window, cx| {
+            app.update(cx, |a, cx| a.close_nav(window, cx));
+            let doc = app.read(cx).doc.clone();
+            doc.update(cx, |d, cx| {
+                d.set_mini_open(false, cx);
+                let end = d.doc().len();
+                d.select(end..end, cx);
+            });
+        });
         // DOCX: save the edited document and open it again; text, ids and seed must survive.
         cx.update(|cx| {
             let d = app.read(cx).doc.read(cx).doc().clone();
@@ -301,43 +344,55 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         });
         cx.background_executor().timer(pause(500)).await;
         let connected = cx.update(|cx| device.read(cx).connected.clone());
-        cx.update(|cx| {
-            let profile = cx.global::<AppState>().settings.device.profile.clone();
-            let codes: Vec<_> = app.read(cx).written_pages(cx).iter().map(|w| chixie_rs_output::emit_written(w, &profile)).collect();
-            let job = app::job_of(0, codes);
-            device.update(cx, |d, cx| d.run(job, cx));
-        });
-        let (mut sheet_prompts, mut recoveries) = (0, 0);
-        for _ in 0..300 {
-            cx.background_executor().timer(pause(100)).await;
-            let job = cx.update(|cx| device.read(cx).job);
-            match job {
-                None => break,
-                // After a simulated USB drop (CHIXIE_RS_SIM_DROP_AT): re-zero and continue.
-                Some(j) if j.recovered.is_some() => {
-                    recoveries += 1;
-                    cx.update(|cx| {
-                        device.update(cx, |d, cx| {
-                            d.send(chixie_rs_device::device::Command::Zero);
-                            d.resume_job(cx);
-                        })
-                    });
+        // 选页书写: one page per job. After page 1 the 换纸 card shows and page 2 is selected;
+        // meanwhile jog + 设为原点 work (nothing modal, no job). Then 书写 the selected page.
+        let mut recoveries = 0;
+        let (mut sheet_card, mut jog_ok, mut pages_done) = (None, false, 0);
+        let pages = cx.update(|cx| app.read(cx).doc.read(cx).layout_doc().pages.len());
+        cx.update(|cx| app.update(cx, |a, cx| a.goto_page(0, cx)));
+        for k in 0..pages {
+            cx.update(|cx| app.update(cx, |a, cx| a.run_page(a.write_page(cx), cx)));
+            for _ in 0..300 {
+                cx.background_executor().timer(pause(100)).await;
+                match cx.update(|cx| device.read(cx).job) {
+                    None => break,
+                    // After a simulated USB drop (CHIXIE_RS_SIM_DROP_AT): re-zero and continue.
+                    Some(j) if j.recovered.is_some() => {
+                        recoveries += 1;
+                        cx.update(|cx| {
+                            device.update(cx, |d, cx| {
+                                d.send(chixie_rs_device::device::Command::Zero);
+                                d.resume_job(cx);
+                            })
+                        });
+                    }
+                    Some(_) => {}
                 }
-                Some(j) if j.awaiting.is_some() => {
-                    sheet_prompts += 1;
-                    let _ = cx.update_window(handle, |_, window, cx| {
-                        window.close_dialog(cx);
-                        device.update(cx, |d, cx| d.next_sheet(cx));
-                    });
-                }
-                Some(_) => {}
+            }
+            cx.background_executor().timer(pause(300)).await;
+            if cx.update(|cx| device.read(cx).last_end.clone()) == Some(chixie_rs_device::device::JobOutcome::Done) {
+                pages_done += 1;
+            }
+            if k == 0 {
+                let (card, page) = cx.update(|cx| (app.read(cx).sheet_change, app.read(cx).write_page(cx)));
+                sheet_card = card.map(|c| (c, page));
+                // Fine-tune the new sheet with the card up: jog 1 mm (the pen parked at the
+                // origin), then zero. The sim reports MPos and G92 resets it.
+                let x = || cx.update(|cx| device.read(cx).status.as_ref().and_then(|s| s.mpos).map(|m| m[0]));
+                use chixie_rs_device::device::Command as C;
+                cx.update(|cx| device.read(cx).send(C::Jog { dx: 1.0, dy: 0.0, feed: 1500.0 }));
+                cx.background_executor().timer(pause(600)).await;
+                let jogged = x().is_some_and(|x| (x - 1.0).abs() < 0.01);
+                cx.update(|cx| device.read(cx).send(C::Zero));
+                cx.background_executor().timer(pause(600)).await;
+                jog_ok = jogged && x().is_some_and(|x| x.abs() < 0.01) && cx.update(|cx| app.read(cx).sheet_change.is_some());
             }
         }
-        cx.background_executor().timer(pause(400)).await;
+        let card_after = cx.update(|cx| app.read(cx).sheet_change);
         cx.update(|cx| {
             let d = device.read(cx);
             println!(
-                "AUTOTEST_DEVICE connected={connected:?} sheet_prompts={sheet_prompts} recoveries={recoveries} outcome={:?} job_running={} status={:?}",
+                "AUTOTEST_DEVICE connected={connected:?} pages_done={pages_done}/{pages} sheet_card={sheet_card:?} jog_zero_while_waiting={jog_ok} card_after_last={card_after:?} recoveries={recoveries} outcome={:?} job_running={} status={:?}",
                 d.last_end,
                 d.job.is_some(),
                 d.summary()
@@ -358,8 +413,12 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         let mut keys: Vec<Box<dyn Action>> = vec![Box::new(doc_view::DocStart)];
         keys.extend((0..3).map(|_| Box::new(doc_view::MoveRight) as Box<dyn Action>));
         keys.push(Box::new(doc_view::SelectRight));
-        dispatch(cx, keys);
+        dispatch(cx, keys.iter().map(|k| k.boxed_clone()).collect());
         cx.background_executor().timer(pause(300)).await;
+        let from = cx.update(|cx| {
+            let d = app.read(cx).doc.read(cx).doc();
+            d.chars().get(d.selection().start).copied()
+        });
         let _ = cx.update_window(handle, |_, window, cx| {
             app.update(cx, |a, cx| {
                 a.open_resume(cx);
@@ -368,22 +427,17 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<ChixieRsApp>, cx: &mut App)
         });
         for _ in 0..300 {
             cx.background_executor().timer(pause(100)).await;
-            let awaiting = cx.update(|cx| device.read(cx).job.and_then(|j| j.awaiting));
-            if awaiting.is_some() {
-                let _ = cx.update_window(handle, |_, window, cx| {
-                    window.close_dialog(cx);
-                    device.update(cx, |d, cx| d.next_sheet(cx));
-                });
-            }
             if cx.update(|cx| device.read(cx).job.is_none()) {
                 break;
             }
         }
-        cx.update(|cx| {
-            let d = app.read(cx).doc.read(cx);
-            let sel = d.doc().selection();
-            println!("AUTOTEST_RESUME from={:?} outcome={:?}", d.doc().chars().get(sel.start), device.read(cx).last_end)
-        });
+        cx.background_executor().timer(pause(300)).await;
+        // The page ends there: the next page is selected for the sheet change.
+        let next = cx.update(|cx| app.read(cx).sheet_change.map(|c| c.1));
+        cx.update(|cx| println!("AUTOTEST_RESUME from={from:?} next_page={next:?} outcome={:?}", device.read(cx).last_end));
+        // Put the selection back for the checks below.
+        dispatch(cx, keys);
+        cx.background_executor().timer(pause(300)).await;
         // `SHOT_*` lines tell an outside script when to take a screenshot (state held 2.5 s).
         let shot = |name: &str| {
             use std::io::Write as _;

@@ -7,7 +7,7 @@
 //! A `.cset` is a Python pickle of the same `{device name: {key: value}}` dict (see `pickle`).
 
 use crate::pickle;
-use crate::profile::{AxisMap, DeviceProfile, DeviceType, EndPosition, Firmware};
+use crate::profile::{AxisMap, DeviceProfile, DeviceType, Firmware};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -103,9 +103,6 @@ fn profile(name: &str, p: &Value) -> DeviceProfile {
     if let Some(v) = num("pauseTime") {
         d.pause_after_down_s = v.max(0.0) as f32;
     }
-    if let Some(v) = num("WriteDonePos") {
-        d.end_position = end_position(v as i64);
-    }
     // Each axis is labelled by its `+` side (`x_plus`); its `-` side (`x_reduce`) is the opposite
     // label, which stands in when the `+` one is missing.
     let dir = |k: &str| p.get(k).and_then(Value::text).unwrap_or_default().to_ascii_uppercase();
@@ -134,14 +131,6 @@ fn device_type(i: i64) -> DeviceType {
     }
 }
 
-/// ChiXie3 写完位置 (`WriteDonePos`) choices: 0 原点, 1 原点左侧2cm, 2 任务结束点.
-fn end_position(i: i64) -> EndPosition {
-    match i {
-        1 => EndPosition::OriginLeft { mm: EndPosition::ORIGIN_LEFT_MM },
-        2 => EndPosition::Stay,
-        _ => EndPosition::Origin,
-    }
-}
 
 /// `X+` ↔ `X-` and `Y+` ↔ `Y-`; empty for any other label.
 fn opposite(label: &str) -> String {
@@ -337,7 +326,6 @@ DeviceParams=@Variant(\0\0\0\b\0\0\0\x1\0\0\0\xe\0g\0u\0\x61\0n\0g\0k\0u\0\0\0\b
         assert_eq!((stepper.firmware, stepper.device_type), (Firmware::ChiXieEsp32Grbl, DeviceType::StepperPenUp));
         assert_eq!((stepper.pen_up_z, stepper.pen_down_z), (0.0, 2.0));
         assert_eq!((stepper.write_speed, stepper.travel_speed, stepper.pause_after_down_s), (19000.0, 19000.0, 0.5));
-        assert_eq!(stepper.end_position, EndPosition::OriginLeft { mm: 20.0 });
         assert!(stepper.axis_map.is_identity());
 
         let servo = &ds[1];
@@ -345,19 +333,10 @@ DeviceParams=@Variant(\0\0\0\b\0\0\0\x1\0\0\0\xe\0g\0u\0\x61\0n\0g\0k\0u\0\0\0\b
         assert_eq!((servo.firmware, servo.device_type), (Firmware::Grbl, DeviceType::ServoPenUp));
         assert_eq!((servo.pen_up_z, servo.pen_down_z), (90.0, 30.0));
         assert_eq!((servo.write_speed, servo.travel_speed, servo.pause_after_down_s), (8000.0, 8000.0, 0.2));
-        assert_eq!(servo.end_position, EndPosition::Stay);
         // x_plus is Y-, and y_plus is absent: it comes from y_reduce X- as X+.
         assert_eq!(servo.axis_map, AxisMap { swap_xy: true, invert_x: false, invert_y: true });
     }
 
-    #[test]
-    fn write_done_pos_maps_to_end_position() {
-        let at = |v: f32| {
-            let p = Value::Map(vec![("WriteDonePos".into(), Value::Double(f64::from(v)))]);
-            profile("d", &p).end_position
-        };
-        assert_eq!((at(0.0), at(1.0), at(2.0), at(7.0)), (EndPosition::Origin, EndPosition::OriginLeft { mm: 20.0 }, EndPosition::Stay, EndPosition::Origin));
-    }
 
     #[test]
     fn cset_must_be_a_dict_of_dicts() {

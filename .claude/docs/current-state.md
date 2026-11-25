@@ -329,3 +329,44 @@
     `IconName::X` vs gpui-kit-assets `default-icons.txt` + `icons.rs`).
   - Parallel sessions proposed (not started by BOSS yet): step 6 自定义命令 + history (`m9-commands`),
     step 7 `.cset` import (`m9-cset`).
+
+## 2026-11-25: 导航 / 右键 / 浮动工具栏 / 中英文 / 消除空格 (uncommitted)
+- `nav_pane.rs`: left 导航 pane, tabs 搜索 / 缺字. Ctrl+F (and the page menu's 查找…) opens 搜索
+  (selection becomes the query; Enter / Shift+Enter step); Ctrl+H still opens the replace bar.
+  Status-bar 缺字 opens the 缺字 tab (old 缺失字符 dialog removed). Rows: context ±10 chars,
+  第 p 页 第 l 行, click selects; capped at 500 rows.
+- Page menu: right click selects the char under the pointer (or moves the caret) first; adds
+  字符微调 submenu (move / size / width / 变形 / 恢复默认 / 微调面板…) and 从此处开始书写
+  (`WriteFromHere` → confirm → `start_from(i)`, shared with 断点续写).
+- `doc_view/mini_bar.rs`: Word mini toolbar on hovering the selection (字体, 字号, A+/A−, 标题,
+  倾斜, 下划线, 清除格式); sticky until the pointer moves over the page off the selection; flips
+  below the line when no room above.
+- 开始 › 中英文 group: 英文 / 数字 role font ▾, size % ▾, 字形… (opens 手写效果 on that tab, whose
+  大小/基线 inputs now re-read settings on open); 消除中英空格 (`chixie_rs_doc::find::cjk_latin_spaces`,
+  selection or whole doc, one undo step).
+- `AUTOTEST_NAV` + `SHOT_NAV_MISSING` / `SHOT_NAV_SEARCH`. Workspace tests + clippy clean.
+- VERIFY (BOSS): hover feel of the mini bar, right-click selection behaviour, 从此处开始书写 on hardware.
+
+## 2026-11-25: 书写流程 — 选页书写 / 换纸卡片 / 行间走笔 (uncommitted, branch feat/nav-pane-editor-menus)
+- 路径规划 has three choices (设备 › 参数设置): 之字形：永远左起(默认) / 弓字形：左右左(蛇形) /
+  自动选择最近路径 (`PathPlan::Nearest`, serde `nearest`). `plan.rs::order_rows` writes rows top to
+  bottom; Nearest starts each row from the end nearer to where the previous row ended (first row:
+  the origin, turned with 页面旋转). Nearest also applies to 作文格 (弓字形 still leaves grids
+  alone for ChiXie3 parity). Default unchanged → golden G-code untouched (no BLESS).
+- 选页书写: every job is one page. 设备 › 书写: big 书写 + page picker ▾ (第 n / N 页; picking
+  moves the caret to that page, `goto_page`; the caret's page is what 书写 writes). Removed
+  开始书写(全部), 从此页起 and every 已换纸继续 button; `JobScope` and `JobState.awaiting` gone; the
+  GUI ignores `Event::AwaitingSheet` (never sent for one-page jobs; device crate unchanged).
+- 写完位置 removed (BOSS 2026-11-25: the pen must go back to the origin set before the job): after
+  every finished job, and after 停止 when the hold settled, the device sends pen up + `PARK`
+  (`G90G0 X0Y0`, `profile.rs`); SD programs end the same way. `DeviceProfile.end_position` and the
+  ChiXie3 `WriteDonePos` import are gone; old settings files with `[end_position]` still load.
+- After a page finishes (Done): pen returns to the origin, toast "第 n 页已写完…请换纸",
+  the next page is selected, and a non-modal 请换纸 card sits in the task pane (+ status bar)
+  until the next 书写 or 关闭. Jog / 设为原点 / everything stays usable (no job is running).
+  Last page → "全部 N 页已写完" toast, no card. Stopped / failed jobs: no card.
+- 断点续写 and 右键 从此处开始书写 write from the char to the end of that page only, then the same
+  换纸 → 书写 flow.
+- AUTOTEST_DEVICE: write page 1 → card `(0,1)` + page 2 selected → jog 1 mm + zero checked via sim
+  MPos → write page 2 → no card. `AUTOTEST_RESUME … next_page=Some(1)`. Both now grepped in CI.
+- VERIFY (BOSS): 自动选择最近路径 on hardware (travel between rows); the 换纸 card flow on paper.

@@ -10,7 +10,7 @@ pub(crate) mod fonts_ctl;
 mod resume;
 mod sd;
 pub(crate) mod templates_ctl;
-mod tune;
+pub(crate) mod tune;
 mod ribbon_tabs;
 
 use std::path::PathBuf;
@@ -33,6 +33,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 pub use backstage::Stage;
+pub use crate::nav_pane::NavTab as NavTabPub;
 
 use crate::device::{DevicePanel, Notice};
 use crate::doc_view::{self, DocView};
@@ -57,16 +58,6 @@ pub(crate) enum PageTool {
     /// Mode, and range: `true` = 模板框线区域, `false` = 实际书写区域.
     Patrol(PatrolMode, bool),
     Ruling,
-}
-
-/// Which pages a writing job covers; "here" is the page holding the caret.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum JobScope {
-    All,
-    /// 书写此页.
-    ThisPage,
-    /// 从此页起.
-    FromHere,
 }
 
 pub struct ChixieRsApp {
@@ -99,11 +90,19 @@ pub struct ChixieRsApp {
     win_title: String,
     /// 断点续写 card and the break point of the last interrupted job.
     pub(crate) resume: resume::Resume,
+    /// Page of the running 书写 job (not 巡边 / 框线): when it ends done, the next page is
+    /// selected and the user is asked to change the sheet.
+    writing: Option<usize>,
+    /// 换纸 card: the page just written and the next one (selected, waiting for 书写).
+    pub(crate) sheet_change: Option<(usize, usize)>,
     /// The 字符微调 card is shown in the task pane.
     tune_open: bool,
     /// 查找 / 替换 bar above the page.
     find_bar: Entity<crate::find_bar::FindBar>,
     find_open: bool,
+    /// 导航 pane (搜索 / 缺字) left of the page.
+    nav: Entity<crate::nav_pane::NavPane>,
+    nav_open: bool,
     /// Library folders watched for added / removed fonts.
     library_watch: Option<fonts_ctl::LibraryWatch>,
     /// Template folders watched for added / changed / removed templates.
@@ -149,6 +148,7 @@ impl ChixieRsApp {
         let initial = file_ops::open_draft(&cx.global::<AppState>().settings_path).map(|l| l.doc).unwrap_or_else(|_| EditDoc::from_text("你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。"));
         let doc = cx.new(|cx| DocView::new(initial, window, cx));
         let find_bar = cx.new(|cx| crate::find_bar::FindBar::new(doc.clone(), window, cx));
+        let nav = cx.new(|cx| crate::nav_pane::NavPane::new(doc.clone(), window, cx));
         let page = cx.global::<AppState>().settings.page.clone();
         let font_size = cx.new(|cx| InputState::new(window, cx).step(5.0).min(5.0).max(1000.0).default_value(fmt_num(page.font_size)));
         let line_height = cx.new(|cx| InputState::new(window, cx).step(0.25).min(1.0).max(200.0).default_value(fmt_num(page.line_height)));
@@ -249,6 +249,9 @@ impl ChixieRsApp {
                     cx.notify();
                 }
             }),
+            cx.subscribe_in(&nav, window, |this, _p, ev: &crate::nav_pane::NavPaneEvent, window, cx| match ev {
+                crate::nav_pane::NavPaneEvent::Close => this.close_nav(window, cx),
+            }),
             cx.subscribe_in(&templates, window, |this, _v, ev: &TemplateEvent, window, cx| match ev {
                 TemplateEvent::Apply(name) => {
                     this.apply_template(Some(name.clone()), cx);
@@ -285,9 +288,13 @@ impl ChixieRsApp {
             zoom_slider,
             win_title: String::new(),
             resume: Default::default(),
+            writing: None,
+            sheet_change: None,
             tune_open: false,
             find_bar,
             find_open: false,
+            nav,
+            nav_open: false,
             library_watch: None,
             template_watch: None,
             gallery,
@@ -387,13 +394,36 @@ impl ChixieRsApp {
         cx.notify();
     }
 
-    /// 查找 (or 替换): show the bar and focus its search box.
+    /// 替换: show the bar and focus its search box (查找 opens the 导航 pane instead).
     pub(crate) fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.backstage.is_some() {
             return;
         }
         self.find_open = true;
         self.find_bar.update(cx, |b, cx| b.open(replace, window, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn nav_open(&self) -> bool {
+        self.nav_open
+    }
+    /// Matches the 搜索 tab lists (autotest).
+    pub(crate) fn nav_hit_count(&self, cx: &App) -> usize {
+        self.nav.read(cx).hit_count(cx)
+    }
+    pub(crate) fn close_nav(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.nav_open = false;
+        self.focus_doc(window, cx);
+        cx.notify();
+    }
+
+    /// 导航 pane on `tab` (Ctrl+F: 搜索; the status bar's 缺字: 缺字).
+    pub(crate) fn open_nav(&mut self, tab: crate::nav_pane::NavTab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.backstage.is_some() {
+            return;
+        }
+        self.nav_open = true;
+        self.nav.update(cx, |p, cx| p.open(tab, window, cx));
         cx.notify();
     }
 
@@ -712,6 +742,12 @@ impl ChixieRsApp {
     }
 
     fn open_style_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_style_tab(0, window, cx);
+    }
+
+    /// 手写效果范围 on tab `tab` (0 中文, 1 英文, 2 数字).
+    pub(crate) fn open_style_tab(&mut self, tab: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.style_dialog.update(cx, |d, cx| d.show_tab(tab, window, cx));
         let content = self.style_dialog.clone();
         window.open_dialog(cx, move |dialog, _w, _cx| dialog.title("手写效果范围").w(px(460.)).child(content.clone()));
     }
@@ -794,32 +830,37 @@ impl ChixieRsApp {
         });
     }
 
-    /// Confirm extents, then stream the chosen pages (sheet change prompts in between).
-    pub(crate) fn start_job(&mut self, scope: JobScope, window: &mut Window, cx: &mut Context<Self>) {
+    /// The page 书写 writes: the one holding the caret (选页 moves the caret).
+    pub(crate) fn write_page(&self, cx: &App) -> usize {
+        let view = self.doc.read(cx);
+        view.caret_page().min(view.layout_doc().pages.len().saturating_sub(1))
+    }
+
+    /// Put the caret at the start of page `k` and scroll there (选页).
+    pub(crate) fn goto_page(&mut self, k: usize, cx: &mut Context<Self>) {
+        let start = self.doc.read(cx).layout_doc().lines.iter().find(|l| l.page == k).map(|l| l.start);
+        if let Some(i) = start {
+            self.doc.update(cx, |d, cx| d.select(i..i, cx));
+        }
+        cx.notify();
+    }
+
+    /// 书写 (选页书写): confirm extents, then stream the selected page only. The pen returns to the
+    /// origin after it, and the next page is selected for after the sheet change.
+    pub(crate) fn start_job(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.device.read(cx).busy() {
             window.push_notification(Notification::warning("当前有书写任务正在进行中，请先结束任务"), cx);
             return;
         }
-        let doc = self.doc.read(cx).document();
-        let here = self.doc.read(cx).caret_page().min(doc.pages.len().saturating_sub(1));
-        let (first, count) = match scope {
-            JobScope::All => (0, doc.pages.len()),
-            JobScope::ThisPage => (here, 1),
-            JobScope::FromHere => (here, doc.pages.len() - here),
-        };
+        let first = self.write_page(cx);
         let written = self.written_pages(cx);
-        let chosen = &written[first..first + count];
+        let Some(chosen) = written.get(first..first + 1) else { return };
         let strokes: usize = chosen.iter().map(|w| w.page.strokes.len()).sum();
         if strokes == 0 {
-            let msg = if scope == JobScope::ThisPage { "该页没有书写内容" } else { "没有可书写的笔画（请先选择字体并输入文字）" };
-            window.push_notification(Notification::warning(msg), cx);
+            window.push_notification(Notification::warning(format!("第 {} 页没有书写内容", first + 1)), cx);
             return;
         }
         let profile = cx.global::<AppState>().settings.device.profile.clone();
-        let codes: Vec<gcode::PageCode> = chosen.iter().map(|w| gcode::emit_written(w, &profile)).collect();
-        let ids = self.doc.read(cx).doc().ids().to_vec();
-        self.resume.job_started(Some(resume::JobMeta::new(first, &codes, chosen, &ids)));
-        let job = job_of(first, codes);
         let pts = || chosen.iter().flat_map(|w| w.page.strokes.iter().flatten());
         let (w, h) = match pts().next() {
             Some(&(x, y)) => {
@@ -843,26 +884,56 @@ impl ChixieRsApp {
             window.push_notification(Notification::error("当前固件设置为 Marlin，暂不支持书写（设备 › 参数设置）"), cx);
             return;
         }
-        let which = match scope {
-            JobScope::All => format!("共 {count} 页"),
-            JobScope::ThisPage => format!("第 {} 页", first + 1),
-            JobScope::FromHere => format!("第 {}–{} 页", first + 1, first + count),
-        };
+        let pages = written.len();
         let desc = format!(
-            "{which}（{strokes} 笔），书写范围 {w:.1} × {h:.1} mm。{warn}请确认纸张已放好、笔已装好，起点为当前原点；写完后笔会停在{}。",
-            profile.end_position.label(),
+            "第 {} / {pages} 页（{strokes} 笔），书写范围 {w:.1} × {h:.1} mm。{warn}请确认纸张已放好、笔已装好，起点为当前原点；写完后笔会回到原点。",
+            first + 1,
         );
-        let title = if scope == JobScope::ThisPage { format!("是否立即书写第 {} 页？", first + 1) } else { "开始书写？".into() };
+        let title = format!("是否立即书写第 {} 页？", first + 1);
         self.show_pane = true;
-        let device = self.device.clone();
+        let app = cx.entity();
         window.open_alert_dialog(cx, move |a, _w, _cx| {
-            let device = device.clone();
-            let job = job.clone();
+            let app = app.clone();
             a.title(title.clone()).description(desc.clone()).confirm().ok_text("开始").on_ok(move |_, _w, cx| {
-                device.update(cx, |d, cx| d.run(job.clone(), cx));
+                app.update(cx, |t, cx| t.run_page(first, cx));
                 true
             })
         });
+    }
+
+    /// Stream page `page` now (no prompt).
+    pub(crate) fn run_page(&mut self, page: usize, cx: &mut Context<Self>) {
+        let written = self.written_pages(cx);
+        let Some(chosen) = written.get(page..page + 1) else { return };
+        let profile = cx.global::<AppState>().settings.device.profile.clone();
+        let codes: Vec<gcode::PageCode> = chosen.iter().map(|w| gcode::emit_written(w, &profile)).collect();
+        let ids = self.doc.read(cx).doc().ids().to_vec();
+        self.resume.job_started(Some(resume::JobMeta::new(page, &codes, chosen, &ids)));
+        self.writing_started(page);
+        let job = job_of(page, codes);
+        self.device.update(cx, |d, cx| d.run(job, cx));
+    }
+
+    /// A 书写 job on `page` starts: the 换纸 card is done with.
+    pub(crate) fn writing_started(&mut self, page: usize) {
+        (self.writing, self.sheet_change) = (Some(page), None);
+    }
+
+    /// A 书写 job ended: done → select the next page and ask for a new sheet (a toast and the
+    /// task pane card; nothing blocks jogging or 设为原点 meanwhile). Returns the toast text.
+    fn writing_ended(&mut self, ev: &DevEvent, cx: &mut Context<Self>) -> Option<String> {
+        let DevEvent::JobEnded { outcome, .. } = ev else { return None };
+        let page = self.writing.take()?;
+        if *outcome != JobOutcome::Done {
+            return None;
+        }
+        let pages = self.doc.read(cx).layout_doc().pages.len();
+        if page + 1 >= pages {
+            return Some(format!("第 {} 页已写完（全部 {pages} 页），笔已回到原点", page + 1));
+        }
+        self.sheet_change = Some((page, page + 1));
+        self.goto_page(page + 1, cx);
+        Some(format!("第 {} 页已写完，笔已回到原点。请换纸，然后点「书写」写第 {} 页（已选中）", page + 1, page + 2))
     }
 
     fn on_device_event(&mut self, ev: DevEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -871,10 +942,11 @@ impl ChixieRsApp {
             self.resume.observe(&ev, doc.chars(), doc.ids())
         };
         let interrupted = matches!(&ev, DevEvent::JobEnded { outcome: JobOutcome::Stopped | JobOutcome::Failed(_), .. });
+        let page_done = self.writing_ended(&ev, cx);
         let notice = self.device.update(cx, |d, cx| d.on_event(ev, cx));
         match notice {
             Notice::None => {}
-            Notice::Info(m) => window.push_notification(Notification::info(m), cx),
+            Notice::Info(m) => window.push_notification(Notification::info(page_done.unwrap_or(m)), cx),
             Notice::Warn(m) => {
                 let m = match at {
                     Some(c) if interrupted => format!("{m}。如需续写，可用「断点续写」（已记住「{c}」）"),
@@ -909,25 +981,6 @@ impl ChixieRsApp {
                         .description(format!("您已启用多色绘制，请更换笔颜色为：{name}"))
                         .confirm()
                         .ok_text("换笔完成")
-                        .cancel_text("停止任务")
-                        .on_ok(move |_, _w, cx| {
-                            ok.update(cx, |d, cx| d.next_sheet(cx));
-                            true
-                        })
-                        .on_cancel(move |_, _w, cx| {
-                            cancel.update(cx, |d, cx| d.stop(cx));
-                            true
-                        })
-                });
-            }
-            Notice::AwaitingSheet(next) => {
-                let device = self.device.clone();
-                window.open_alert_dialog(cx, move |a, _w, _cx| {
-                    let (ok, cancel) = (device.clone(), device.clone());
-                    a.title("请换纸")
-                        .description(format!("第 {} 页已就绪。放好新纸、确认原点后点「继续」。", next + 1))
-                        .confirm()
-                        .ok_text("继续")
                         .cancel_text("停止任务")
                         .on_ok(move |_, _w, cx| {
                             ok.update(cx, |d, cx| d.next_sheet(cx));
@@ -1130,7 +1183,7 @@ impl ChixieRsApp {
                         .text_color(danger)
                         .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
                         .child(format!("缺字 {missing}：{chars}"))
-                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_missing_dialog(w, cx))),
+                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_nav(crate::nav_pane::NavTab::Missing, w, cx))),
                 )
             })
             .when(punct_issues > 0, |el| {
@@ -1165,11 +1218,9 @@ impl ChixieRsApp {
                         cx.notify();
                     })),
             )
+            .when_some(self.sheet_change.filter(|_| job.is_none()), |el, (_, next)| el.child(cell("sb-sheet").text_color(primary).child(format!("请换纸 · 下一页：第 {} 页", next + 1))))
             .when_some(job, |el, j| {
-                let s = match j.awaiting {
-                    Some(n) => format!("等待换纸（第 {} 页）", n + 1),
-                    None => format!("书写 第 {}/{} 页 {:.0}%{}", j.page + 1, j.pages, j.percent(), if j.paused { "（暂停）" } else { "" }),
-                };
+                let s = format!("书写 第 {} 页 {:.0}%{}", j.page + 1, j.percent(), if j.paused { "（暂停）" } else { "" });
                 el.child(
                     cell("sb-job")
                         .text_color(primary)
@@ -1230,9 +1281,34 @@ impl ChixieRsApp {
                         cx.notify();
                     }))),
             )
+            .when(self.sheet_change.is_some() && !self.device.read(cx).busy(), |el| el.child(self.sheet_card(cx)))
             .when(self.resume.open, |el| el.child(self.resume_card(cx)))
             .when(self.tune_open, |el| el.child(self.tune_card(cx)))
             .child(div().flex_1().min_h_0().child(self.device.clone()))
+            .into_any_element()
+    }
+
+    /// 换纸 card: shown after a page is written, until the next 书写. Information only: jogging,
+    /// 设为原点 and every other control stay usable.
+    fn sheet_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let (muted, border) = (theme.muted_foreground, theme.border);
+        let Some((done, next)) = self.sheet_change else { return div().into_any_element() };
+        v_flex()
+            .gap_1()
+            .p_3()
+            .border_b_1()
+            .border_color(border)
+            .child(
+                h_flex()
+                    .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("请换纸"))
+                    .child(Button::new("sheet-close").ghost().xsmall().label("关闭").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.sheet_change = None;
+                        cx.notify();
+                    }))),
+            )
+            .child(div().text_sm().child(format!("第 {} 页已写完。下一页：第 {} 页（已选中）", done + 1, next + 1)))
+            .child(div().text_xs().text_color(muted).child("放好新纸；需要时点动微调并点「设为原点」。准备好后在「设备 › 书写」点「书写」。"))
             .into_any_element()
     }
 
@@ -1311,6 +1387,7 @@ impl Render for ChixieRsApp {
                         .min_h_0()
                         .border_t_1()
                         .border_color(border.opacity(0.6))
+                        .when(self.nav_open, |el| el.child(self.nav.clone()))
                         .child(
                             v_flex()
                                 .flex_1()
@@ -1330,7 +1407,7 @@ impl Render for ChixieRsApp {
             .text_color(fg)
             .on_action(cx.listener(|t, _: &doc_view::Save, w, cx| t.save_doc(false, w, cx)))
             .map(|el| self.menu_actions(el, cx))
-            .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_find(false, w, cx)))
+            .on_action(cx.listener(|t, _: &crate::find_bar::OpenFind, w, cx| t.open_nav(crate::nav_pane::NavTab::Search, w, cx)))
             .on_action(cx.listener(|t, _: &crate::find_bar::OpenReplace, w, cx| t.open_find(true, w, cx)))
             .child(title_bar)
             .child(body);

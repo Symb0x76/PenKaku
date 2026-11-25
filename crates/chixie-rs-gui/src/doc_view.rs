@@ -40,6 +40,10 @@ pub const ZOOM_MAX: f32 = 6.0;
 pub const KEY_CONTEXT: &str = "ChixieRsEditor";
 
 mod format;
+mod mini_bar;
+
+/// One 字符微调 step (page menu).
+type TuneFn = fn(&mut layout::Tuning);
 pub use format::*;
 
 actions!(
@@ -197,6 +201,8 @@ pub struct DocView {
     origin_drag: Option<(f32, f32)>,
     /// 格式刷 armed: the formats to give the next mouse selection, and whether it stays armed.
     painter: Option<(chixie_rs_doc::model::Attrs, bool)>,
+    /// The floating mini toolbar over the selection is shown (see `mini_bar`).
+    mini_open: bool,
     /// What the current layout was computed from, to skip needless relayouts.
     /// What the layout was made from: font set generation, page and style settings, template.
     layout_key: Option<(u64, PageSettings, StyleFile, Option<Template>)>,
@@ -238,6 +244,7 @@ impl DocView {
             reveal_caret: false,
             origin_drag: None,
             painter: None,
+            mini_open: false,
             layout_key: None,
             dirty_draft: false,
             _tasks: vec![blink],
@@ -596,6 +603,14 @@ impl DocView {
         self.doc.import_chars(chars, mode);
         self.edited(cx);
     }
+    /// 消除中英空格 in the selection (or everywhere); returns how many gaps went.
+    pub fn remove_cjk_latin_spaces(&mut self, cx: &mut Context<Self>) -> usize {
+        let n = self.doc.remove_cjk_latin_spaces();
+        if n > 0 {
+            self.edited(cx);
+        }
+        n
+    }
     /// Replace several ranges (替换 / 全部替换, one undo step).
     pub fn replace_ranges(&mut self, edits: Vec<(Range<usize>, String)>, cx: &mut Context<Self>) {
         self.doc.replace_many(edits);
@@ -727,6 +742,36 @@ impl DocView {
         }
         self.after_move(cx);
     }
+    /// The char whose box is under `p` (not a newline), if any.
+    fn char_at_point(&self, p: Point<Pixels>) -> Option<usize> {
+        let g = self.geom.get()?;
+        let (k, x, y) = g.unproject(p, self.layout.pages.len().max(1));
+        let chars = self.doc.chars();
+        self.layout.boxes.iter().enumerate().position(|(i, b)| {
+            let Some(l) = self.layout.lines.get(b.line) else { return false };
+            b.page == k && x >= b.x0 && x < b.x1 && y <= l.top && y >= l.bottom && chars.get(i).is_some_and(|&c| c != '\n')
+        })
+    }
+
+    /// Right click (before the page menu opens): outside the selection, a char under the pointer
+    /// becomes the selection (so 字符微调 / 从此处 act on it), elsewhere the caret moves there.
+    fn right_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+        let sel = self.doc.selection();
+        let inside = |i: usize| !sel.is_empty() && sel.contains(&i);
+        if let Some(i) = self.char_at_point(e.position) {
+            if !inside(i) {
+                self.doc.select_range(i..i + 1);
+                self.after_move(cx);
+            }
+        } else if let Some(i) = self.index_at_point(e.position)
+            && !inside(i)
+        {
+            self.doc.move_to(i, false);
+            self.after_move(cx);
+        }
+    }
+
     fn mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if self.origin_drag.is_some()
             && let Some(g) = self.geom.get()
@@ -741,6 +786,8 @@ impl DocView {
         {
             self.doc.move_to(i, true);
             self.after_move(cx);
+        } else if !self.selecting && e.pressed_button.is_none() {
+            self.track_hover(e.position, cx);
         }
     }
     fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -882,6 +929,8 @@ impl Render for DocView {
         let reveal = std::mem::take(&mut self.reveal_caret);
         let scroll = self.scroll.clone();
         let this_reveal = entity.clone();
+        let menu_entity = entity.clone();
+        let mini = self.mini_bar(cx);
 
         div()
             .id("doc-desk")
@@ -931,6 +980,7 @@ impl Render for DocView {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             // A file dropped on the page is imported (导入).
@@ -940,6 +990,7 @@ impl Render for DocView {
                 }
             }))
             .on_scroll(cx.listener(Self::scroll_zoom))
+            .children(mini)
             .cursor(CursorStyle::IBeam)
             .child(
                 canvas(
@@ -1081,7 +1132,23 @@ impl Render for DocView {
                         .item(PopupMenuItem::new("自定义原点位置：拖动蓝色圆圈").disabled(true))
                 } else {
                     use crate::app::menu as am;
+                    use crate::app::tune::{STEP_MM, STEP_PCT};
+                    use gpui_kit::component::menu::PopupMenuItem;
                     let table = table_mode(cx);
+                    let has_sel = !menu_entity.read(cx).doc.selection().is_empty();
+                    const TUNES: [(&str, TuneFn); 10] = [
+                        ("上移 0.2 mm", |t| t.dy_mm -= STEP_MM),
+                        ("下移 0.2 mm", |t| t.dy_mm += STEP_MM),
+                        ("左移 0.2 mm", |t| t.dx_mm -= STEP_MM),
+                        ("右移 0.2 mm", |t| t.dx_mm += STEP_MM),
+                        ("放大 5%", |t| t.scale *= 1.0 + STEP_PCT),
+                        ("缩小 5%", |t| t.scale *= 1.0 - STEP_PCT),
+                        ("变胖 5%", |t| t.width *= 1.0 + STEP_PCT),
+                        ("变瘦 5%", |t| t.width *= 1.0 - STEP_PCT),
+                        ("换一种变形", |t| t.reroll = t.reroll.wrapping_add(1)),
+                        ("恢复默认", |t| *t = layout::Tuning::default()),
+                    ];
+                    let tune_entity = menu_entity.clone();
                     let m = m
                         .menu("剪切", Box::new(Cut))
                         .menu("复制", Box::new(Copy))
@@ -1090,6 +1157,16 @@ impl Render for DocView {
                         .menu("全选", Box::new(SelectAll))
                         .menu("查找…", Box::new(crate::find_bar::OpenFind))
                         .separator()
+                        .submenu("字符微调", window, cx, move |m, _w, _cx| {
+                            let m = TUNES.iter().enumerate().fold(m, |m, (k, &(label, f))| {
+                                let e = tune_entity.clone();
+                                let it = PopupMenuItem::new(label).disabled(!has_sel).on_click(move |_, _w, cx| e.update(cx, |d, cx| d.tune(f, false, cx)));
+                                if k == 4 || k == 8 { m.separator().item(it) } else { m.item(it) }
+                            });
+                            m.separator().menu("微调面板…", Box::new(am::OpenTune))
+                        })
+                        .separator()
+                        .menu("从此处开始书写", Box::new(am::WriteFromHere))
                         .submenu("书写此页", window, cx, |m, _w, _cx| m.menu("直接书写", Box::new(am::WritePage)).menu("上传SD卡书写", Box::new(am::WritePageSd)))
                         .menu("工作区巡边", Box::new(am::PatrolPage))
                         .menu("绘制框架线", Box::new(am::DrawFrame))

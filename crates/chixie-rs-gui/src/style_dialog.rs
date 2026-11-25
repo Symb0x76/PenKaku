@@ -138,6 +138,22 @@ impl StyleDialog {
         Self { tab: 0, inputs, singles, script_inputs, en_spacing, _subs: subs }
     }
 
+    /// Show tab `tab` (0 中文, 1 英文, 2 数字) with 大小 / 基线 re-read from the settings (the
+    /// ribbon's 中英文 group changes them too).
+    pub fn show_tab(&mut self, tab: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.tab = tab.min(2);
+        let style = cx.global::<AppState>().settings.style.clone();
+        for (k, pair) in self.singles.iter().enumerate() {
+            let s = script(&style, k);
+            for (e, v) in pair.iter().zip([s.scale_pct, s.baseline_mm]) {
+                if e.read(cx).value().trim().parse::<f32>().ok() != Some(v) {
+                    e.update(cx, |st, cx| st.set_value(fmt_num(v), window, cx));
+                }
+            }
+        }
+        cx.notify();
+    }
+
     /// Write the edited field back into the settings.
     fn apply(&mut self, field: Field, cx: &mut Context<Self>) {
         let num = |e: &Entity<InputState>, cx: &App| e.read(cx).value().trim().parse::<f32>().ok().filter(|v| v.is_finite());

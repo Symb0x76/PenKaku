@@ -242,11 +242,6 @@ fn dist_to_path(p: (f32, f32), path: &[(f32, f32)]) -> f32 {
     }
 }
 
-/// `0.0` → "0", `-20.0` → "-20", `12.5` → "12.5" (keeps the historical `X0Y0` literal).
-fn fmt_mm(v: f32) -> String {
-    let s = format!("{:.3}", v + 0.0); // + 0.0 turns -0.0 into 0.0
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
-}
 
 pub type BoxLink = Box<dyn Link + Send>;
 pub type Opener = Box<dyn FnMut(&Target) -> Result<(BoxLink, String)> + Send>;
@@ -535,7 +530,7 @@ impl Actor {
                 }
             }
         }
-        // Park: pen up, then to the 写完位置, so the next sheet can go in.
+        // Park: pen up, then back to the origin, so the next sheet can go in.
         let last = pages.saturating_sub(1);
         if let Err(e) = self.park() {
             return self.fail(e, Some(last), None);
@@ -713,13 +708,10 @@ impl Actor {
         }
     }
 
-    /// Pen up, then rapid to the profile's 写完位置 (no move for `Stay`).
+    /// Pen up, then rapid back to the work origin (the zero set before the job).
     fn park(&mut self) -> Result<()> {
         self.cmd(&self.pen_line(Pen::Up))?;
-        match self.profile.end_position.target(&self.profile.axis_map) {
-            Some((x, y)) => self.cmd(&format!("G90G0 X{}Y{}", fmt_mm(x), fmt_mm(y))),
-            None => Ok(()),
-        }
+        self.cmd(chixie_rs_core::profile::PARK)
     }
 
     /// Stop = feed hold (already sent by `stream`) → wait for the hold to settle → soft reset
@@ -1166,27 +1158,17 @@ mod tests {
     }
 
     #[test]
-    fn end_position_controls_park() {
-        use chixie_rs_core::profile::{AxisMap, DeviceProfile, EndPosition};
-        let cases = [
-            (EndPosition::OriginLeft { mm: 20.0 }, AxisMap::default(), Some("G90G0 X-20Y0")),
-            (EndPosition::OriginLeft { mm: 20.0 }, AxisMap { swap_xy: true, invert_x: false, invert_y: true }, Some("G90G0 X0Y20")),
-            (EndPosition::Custom { x: 12.5, y: 3.0 }, AxisMap::default(), Some("G90G0 X12.5Y3")),
-            (EndPosition::Stay, AxisMap::default(), None),
-        ];
-        for (end, axis_map, want) in cases {
+    fn finished_page_parks_at_the_origin() {
+        use chixie_rs_core::profile::{AxisMap, DeviceProfile};
+        for axis_map in [AxisMap::default(), AxisMap { swap_xy: true, invert_x: false, invert_y: true }] {
             let (h, ev, fake) = start(Fake::default());
             wait_for(&ev, |e| matches!(e, Event::Connected { .. }));
-            h.send(Command::SetProfile(DeviceProfile { end_position: end, axis_map, ..Default::default() }));
+            h.send(Command::SetProfile(DeviceProfile { axis_map, ..Default::default() }));
             h.send(Command::Run(Job { pages: vec![page(2)], ..Default::default() }));
             wait_for(&ev, |e| matches!(e, Event::JobEnded { outcome: JobOutcome::Done, .. }));
             h.send(Command::Shutdown);
             let f = fake.lock().unwrap();
-            let last = f.lines.last().unwrap().as_str();
-            match want {
-                Some(w) => assert_eq!(last, w, "{end:?}"),
-                None => assert_eq!(last, "G1G90 Z0 F8000", "{end:?}"),
-            }
+            assert_eq!(f.lines.last().unwrap().as_str(), "G90G0 X0Y0", "{axis_map:?}");
         }
     }
 
