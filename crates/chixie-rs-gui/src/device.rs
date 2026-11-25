@@ -14,6 +14,7 @@ use chixie_rs_device::transport::{self, PortInfo};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -23,7 +24,7 @@ use crate::device_params::DeviceParams;
 use crate::state::AppState;
 
 const LOG_KEEP: usize = 300;
-const LOG_SHOW: usize = 14;
+const LOG_SHOW: usize = 10;
 const STEPS: [f32; 3] = [0.1, 1.0, 10.0];
 const JOG_FEED: f32 = 1500.0;
 
@@ -82,6 +83,10 @@ pub struct DevicePanel {
     history_draft: String,
     /// 0 = 连接与控制, 1 = 参数设置.
     pub tab: usize,
+    /// 串口控制台 expanded (folded by default: it is a troubleshooting tool).
+    console_open: bool,
+    /// 自定义命令 expanded.
+    custom_open: bool,
     pub params: Entity<DeviceParams>,
     /// In an alarm episode (toast already shown), and the last `ALARM:n` text seen.
     alarm: bool,
@@ -132,6 +137,8 @@ impl DevicePanel {
             history_pos: None,
             history_draft: String::new(),
             tab: 0,
+            console_open: false,
+            custom_open: true,
             params,
             alarm: false,
             last_alarm: None,
@@ -273,7 +280,7 @@ impl DevicePanel {
 
     /// 落笔校准: 开始测试 writes a row of short lines, each a little deeper than the last; the user
     /// clicks the best one and its depth becomes the 落笔高度.
-    fn open_pen_calibration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_pen_calibration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use chixie_rs_core::profile::{DeviceType, num};
         let p = cx.global::<AppState>().settings.device.profile.clone();
         if !matches!(p.device_type, DeviceType::StepperPenUp | DeviceType::ServoPenUp) {
@@ -495,36 +502,45 @@ impl DevicePanel {
             let mark = if p.known_device { " ★" } else { "" };
             choices.push((Some(p.name.clone()), format!("{}{mark}", p.name)));
         }
-        let selected = choices.iter().position(|(n, _)| *n == self.port).unwrap_or(0);
-        let names: Vec<Option<String>> = choices.iter().map(|(n, _)| n.clone()).collect();
+        let current = choices.iter().find(|(n, _)| *n == self.port).map_or_else(|| "自动".to_string(), |(_, l)| l.clone());
+        let panel = cx.entity();
+        // One compact row: port ▾, refresh, connect / disconnect (a segmented bar overflowed
+        // with several ports).
+        let port_pick = Button::new("port-pick")
+            .small()
+            .outline()
+            .flex_1()
+            .justify_between()
+            .accessibility_label(format!("串口：{current}"))
+            .child(div().flex_1().min_w_0().truncate().child(current))
+            .dropdown_caret(true)
+            .disabled(connected)
+            .dropdown_menu(move |m, _w, _cx| {
+                choices.iter().fold(m, |m, (name, label)| {
+                    let (panel, name) = (panel.clone(), name.clone());
+                    m.item(PopupMenuItem::new(label.clone()).on_click(move |_, _w, cx| {
+                        panel.update(cx, |t, cx| {
+                            t.port = name.clone();
+                            cx.notify();
+                        })
+                    }))
+                })
+            });
         v_flex()
-            .gap_2()
+            .gap_1()
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("连接"))
             .child(
                 h_flex()
-                    .gap_2()
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("连接"))
-                    .child(div().flex_1())
-                    .child(Button::new("ports-refresh").xsmall().ghost().icon(IconName::Redo).tooltip("刷新端口").on_click(cx.listener(
-                        |t, _: &ClickEvent, _w, cx| t.refresh_ports(cx),
-                    ))),
-            )
-            .child(
-                TabBar::new("ports")
-                    .small()
-                    .segmented()
-                    .selected_index(selected)
-                    .children(choices.iter().map(|(_, l)| Tab::new().label(l.clone())))
-                    .on_click(cx.listener(move |t, ix: &usize, _w, cx| {
-                        t.port = names[*ix].clone();
-                        cx.notify();
-                    })),
+                    .gap_1()
+                    .child(port_pick)
+                    .child(Button::new("ports-refresh").small().ghost().icon(IconName::Redo).tooltip("刷新端口").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.refresh_ports(cx))))
+                    .child(if connected {
+                        Button::new("disconnect").small().label("断开").disabled(self.busy()).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.disconnect(cx)))
+                    } else {
+                        Button::new("connect").small().primary().label("连接").loading(self.connecting).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.connect(cx)))
+                    }),
             )
             .child(div().text_xs().text_color(muted).child("★ = 识别为赤写主板；「自动」在 USB 重新插拔后也能找到"))
-            .child(if connected {
-                Button::new("disconnect").small().label("断开").disabled(self.busy()).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.disconnect(cx)))
-            } else {
-                Button::new("connect").small().primary().label("连接").loading(self.connecting).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.connect(cx)))
-            })
             .into_any_element()
     }
 
@@ -646,28 +662,37 @@ impl DevicePanel {
             let (arrow, color) = if *d == Dir::Tx { ("› ", muted) } else { ("‹ ", fg) };
             div().text_color(color).child(format!("{arrow}{l}"))
         });
+        let open = self.console_open;
+        let last = self.log.back().map(|(_, l)| l.clone()).unwrap_or_else(|| "（暂无通信）".into());
         v_flex()
             .gap_2()
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("控制台"))
-            .child(
-                v_flex()
-                    .h(px(LOG_SHOW as f32 * 16.0 + 12.0))
-                    .p_1p5()
-                    .overflow_hidden()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(border)
-                    .bg(bg)
-                    .font_family("Consolas")
-                    .text_xs()
-                    .children(lines),
-            )
-            .child(
-                // Capture phase, so ↑/↓ reach here before the input's own cursor-up/down handling.
-                div()
-                    .capture_key_down(cx.listener(|t, ev: &KeyDownEvent, window, cx| t.console_key(ev, window, cx)))
-                    .child(Input::new(&self.console).small().disabled(!self.console_enabled())),
-            )
+            .child(disclosure("console-toggle", "串口控制台", open, cx.listener(|t, _: &ClickEvent, _w, cx| {
+                t.console_open ^= true;
+                cx.notify();
+            })))
+            // Folded: just the newest line, so the pane keeps its height for the jog pad.
+            .when(!open, |el| el.child(div().text_xs().text_color(muted).font_family("Consolas").truncate().child(last)))
+            .when(open, |el| {
+                el.child(
+                    v_flex()
+                        .h(px(LOG_SHOW as f32 * 16.0 + 12.0))
+                        .p_1p5()
+                        .overflow_hidden()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(border)
+                        .bg(bg)
+                        .font_family("Consolas")
+                        .text_xs()
+                        .children(lines),
+                )
+                .child(
+                    // Capture phase, so ↑/↓ reach here before the input's own cursor-up/down handling.
+                    div()
+                        .capture_key_down(cx.listener(|t, ev: &KeyDownEvent, window, cx| t.console_key(ev, window, cx)))
+                        .child(Input::new(&self.console).small().disabled(!self.console_enabled())),
+                )
+            })
             .into_any_element()
     }
 
@@ -692,15 +717,27 @@ impl DevicePanel {
                 }))
                 .into_any_element()
         };
+        let open = self.custom_open;
         v_flex()
             .gap_2()
             .child(
                 h_flex()
                     .justify_between()
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("自定义命令"))
-                    .child(Button::new("custom-edit").small().label("⚙").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_command_editor(w, cx)))),
+                    .child(disclosure("custom-toggle", "自定义命令", open, cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.custom_open ^= true;
+                        cx.notify();
+                    })))
+                    .child(
+                        Button::new("custom-edit")
+                            .small()
+                            .ghost()
+                            .label("⚙")
+                            .accessibility_label("编辑自定义命令")
+                            .tooltip("编辑自定义命令")
+                            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_command_editor(w, cx))),
+                    ),
             )
-            .child(grid)
+            .when(open, |el| el.child(grid))
             .into_any_element()
     }
 
@@ -846,6 +883,18 @@ fn remember_console_line(line: &str, cx: &mut App) {
     st.save_settings();
 }
 
+/// A section title that folds its body: ▸/▾ + label.
+fn disclosure(id: &'static str, label: &'static str, open: bool, on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Button {
+    Button::new(id)
+        .xsmall()
+        .ghost()
+        .justify_start()
+        .icon(if open { IconName::ChevronDown } else { IconName::ChevronRight })
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(label))
+        .accessibility_label(label)
+        .on_click(on_click)
+}
+
 pub fn state_zh(s: &str) -> &'static str {
     match s.split(':').next().unwrap_or(s) {
         "Idle" => "空闲",
@@ -889,16 +938,22 @@ impl Render for DevicePanel {
             )
             .when(self.tab == 1, |el| el.child(self.params.clone()))
             .when(self.tab == 0, |el| {
-                el.child(self.connection_section(cx))
-                    .child(sep())
-                    .child(h_flex().gap_3().child(div().text_sm().child(format!("状态：{state}"))).child(div().text_sm().font_family("Consolas").child(pos_text)))
-                    .child(self.control_section(cx))
-                    .child(sep())
-                    .child(self.job_section(cx))
-                    .child(sep())
-                    .child(self.console_section(cx))
-                    .child(sep())
-                    .child(self.custom_section(cx))
+                // By frequency: live status, the jog pad, the running job (only while one runs),
+                // then the connection row and the folded tools.
+                el.child(
+                    h_flex()
+                        .gap_3()
+                        .child(div().text_sm().child(format!("状态：{state}")))
+                        .child(div().text_sm().font_family("Consolas").child(pos_text)),
+                )
+                .child(self.control_section(cx))
+                .when(self.job.is_some(), |el| el.child(sep()).child(self.job_section(cx)))
+                .child(sep())
+                .child(self.connection_section(cx))
+                .child(sep())
+                .child(self.custom_section(cx))
+                .child(sep())
+                .child(self.console_section(cx))
             })
     }
 }

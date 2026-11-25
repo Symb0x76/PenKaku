@@ -6,6 +6,7 @@ use chixie_rs_core::session::Command;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -232,9 +233,23 @@ impl ChixieRsApp {
             .child(self.bs_font_options(cx))
             .child(self.bs_template_options(cx))
             .child(div().pt_2().text_base().font_weight(FontWeight::SEMIBOLD).child("从炽写迁移"))
+            .child(div().text_xs().text_color(muted).child("一次性把炽写（ChiXie3）的手写效果、设备参数和模板搬过来。"))
             .child(
                 h_flex()
                     .gap_2()
+                    .flex_wrap()
+                    .child({
+                        let params = self.device.read(cx).params.clone();
+                        Button::new("opt-device")
+                            .icon(Icon::new(IconName::Usb))
+                            .label("导入设备参数")
+                            .dropdown_caret(true)
+                            .dropdown_menu(move |m, _w, _cx| {
+                                let (a, b) = (params.clone(), params.clone());
+                                m.item(PopupMenuItem::new("炽写配置 (config.ini)").on_click(move |_, w, cx| a.update(cx, |v, cx| v.import_ini(w, cx))))
+                                    .item(PopupMenuItem::new("设备参数文件 (*.cset)…").on_click(move |_, w, cx| b.update(cx, |v, cx| v.import_cset(w, cx))))
+                            })
+                    })
                     .child(Button::new("opt-style").icon(Icon::new(IconName::Import)).label("导入手写效果（config.ini）…").on_click(cx.listener(
                         |t, _: &ClickEvent, w, cx| t.import_style(w, cx),
                     )))

@@ -94,7 +94,8 @@ impl ChixieRsApp {
     }
 
     pub(crate) fn open_resume(&mut self, cx: &mut Context<Self>) {
-        (self.resume.open, self.show_pane) = (true, true);
+        self.resume.open = true;
+        self.show_device_pane();
         cx.notify();
     }
 

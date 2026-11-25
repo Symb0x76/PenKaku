@@ -135,23 +135,43 @@ impl StyleDialog {
                 watch(hi, Field::Script(k, r), window, cx);
             }
         }
+        // The ribbon (手写 tab, 英文/数字 比例, 推荐参数 …) edits the same settings: follow them.
+        subs.push(cx.observe_global_in::<AppState>(window, |this, window, cx| this.refresh(window, cx)));
         Self { tab: 0, inputs, singles, script_inputs, en_spacing, _subs: subs }
     }
 
-    /// Show tab `tab` (0 中文, 1 英文, 2 数字) with 大小 / 基线 re-read from the settings (the
-    /// ribbon's 中英文 group changes them too).
+    /// Show tab `tab` (0 中文, 1 英文, 2 数字), every field re-read from the settings.
     pub fn show_tab(&mut self, tab: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.tab = tab.min(2);
+        self.refresh(window, cx);
+        cx.notify();
+    }
+
+    /// Put the settings' values into every field that shows something else. The field being
+    /// typed in is left alone, so a half-typed number is never overwritten.
+    fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let style = cx.global::<AppState>().settings.style.clone();
-        for (k, pair) in self.singles.iter().enumerate() {
+        let mut fields: Vec<(Entity<InputState>, f32)> = Vec::new();
+        for (i, (lo, hi)) in self.inputs.iter().enumerate() {
+            let span = (ROWS[i].3)(&style);
+            fields.extend([(lo.clone(), span.min), (hi.clone(), span.max)]);
+        }
+        let en = style.handwriting.char_spacing_en;
+        fields.extend([(self.en_spacing.0.clone(), en.min), (self.en_spacing.1.clone(), en.max)]);
+        for k in 0..2 {
             let s = script(&style, k);
-            for (e, v) in pair.iter().zip([s.scale_pct, s.baseline_mm]) {
-                if e.read(cx).value().trim().parse::<f32>().ok() != Some(v) {
-                    e.update(cx, |st, cx| st.set_value(fmt_num(v), window, cx));
-                }
+            fields.extend([(self.singles[k][0].clone(), s.scale_pct), (self.singles[k][1].clone(), s.baseline_mm)]);
+            for (r, (lo, hi)) in self.script_inputs[k].iter().enumerate() {
+                let span = (SCRIPT_ROWS[r].2)(&style, k);
+                fields.extend([(lo.clone(), span.min), (hi.clone(), span.max)]);
             }
         }
-        cx.notify();
+        for (e, v) in fields {
+            let focused = e.read(cx).focus_handle(cx).is_focused(window);
+            if !focused && e.read(cx).value().trim().parse::<f32>().ok() != Some(v) {
+                e.update(cx, |st, cx| st.set_value(fmt_num(v), window, cx));
+            }
+        }
     }
 
     /// Write the edited field back into the settings.
@@ -307,13 +327,13 @@ impl StyleDialog {
             .child(Self::single_row("基线偏移", "mm", &self.singles[k][1], "正数上移", muted))
             .child(Self::range_row("英文字距", "mm", &self.en_spacing, muted))
             .child(section("上下浮动"))
-            .child(Checkbox::new(("same-float", k)).small().label("同中文").checked(same_float).on_click(toggle(|s, k, v| {
+            .child(Checkbox::new(("same-float", k)).small().label("上下浮动同中文").checked(same_float).on_click(toggle(|s, k, v| {
                 let main = s.handwriting.vertical_offset;
                 script_mut(s, k).vertical_offset = (!v).then_some(main);
             })))
             .when(!same_float, |el| el.child(Self::range_row(SCRIPT_ROWS[0].0, SCRIPT_ROWS[0].1, &rows[0], muted)))
             .child(section("字符变形"))
-            .child(Checkbox::new(("same-deform", k)).small().label("同中文").checked(same_deform).on_click(toggle(|s, k, v| {
+            .child(Checkbox::new(("same-deform", k)).small().label("字符变形同中文").checked(same_deform).on_click(toggle(|s, k, v| {
                 let main = s.deformation.clone();
                 script_mut(s, k).deformation = (!v).then_some(main);
             })));
@@ -415,6 +435,6 @@ impl Render for StyleDialog {
                     })),
             )
             .child(body)
-            .child(div().pt_2().text_xs().text_color(muted).child("修改即时生效；总开关在「手写」选项卡。英文、数字未单独设置的项沿用中文。范围数值需重新打开本窗口才会刷新。"))
+            .child(div().pt_2().text_xs().text_color(muted).child("修改即时生效；总开关和常用强度在「手写」选项卡。英文、数字未单独设置的项沿用中文。"))
     }
 }

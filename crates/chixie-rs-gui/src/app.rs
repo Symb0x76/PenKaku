@@ -1,5 +1,5 @@
 //! Main window, laid out like Microsoft Word: login start screen, then a tab strip with a quick
-//! access toolbar and a filled 文件 tab (opens the Backstage), the ribbon (开始 / 布局 / 手写 /
+//! access toolbar and a filled 文件 tab (opens the Backstage), the ribbon (开始 / 页面 / 手写 /
 //! 设备 / 视图), the page editor with the device task pane, and a status bar.
 //! Session and device events are pumped here and fanned out to views + toasts.
 
@@ -28,6 +28,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, Selectable as _, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -46,11 +47,18 @@ use crate::state::{ActiveFont, AppState, User};
 use crate::style_dialog::StyleDialog;
 use crate::templates_view::{TemplateEvent, TemplatesView};
 
-pub const TABS: [&str; 5] = ["开始", "布局", "手写", "设备", "视图"];
+pub const TABS: [&str; 5] = ["开始", "页面", "手写", "设备", "视图"];
 pub const TAB_DEVICE: usize = 3;
 const DRAFT_EVERY: Duration = Duration::from_secs(2);
 /// Plotter travel on the verified board ($130/$131 = 300 mm).
 const TRAVEL_MM: f32 = 300.0;
+
+/// The task pane's two mutually exclusive views (segmented switch in its header).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneMode {
+    Device,
+    Tune,
+}
 
 /// 工作区巡边 / 绘制框架线 on the caret's page.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -95,8 +103,10 @@ pub struct ChixieRsApp {
     writing: Option<usize>,
     /// 换纸 card: the page just written and the next one (selected, waiting for 书写).
     pub(crate) sheet_change: Option<(usize, usize)>,
-    /// The 字符微调 card is shown in the task pane.
-    tune_open: bool,
+    /// Which view the right-hand task pane shows.
+    pub(crate) pane_mode: PaneMode,
+    /// 字符微调: the 全局字体修复 section is expanded.
+    pub(crate) tune_fix_open: bool,
     /// 查找 / 替换 bar above the page.
     find_bar: Entity<crate::find_bar::FindBar>,
     find_open: bool,
@@ -302,7 +312,8 @@ impl ChixieRsApp {
             resume: Default::default(),
             writing: None,
             sheet_change: None,
-            tune_open: false,
+            pane_mode: PaneMode::Device,
+            tune_fix_open: false,
             find_bar,
             find_open: false,
             nav,
@@ -760,7 +771,15 @@ impl ChixieRsApp {
     pub(crate) fn open_style_tab(&mut self, tab: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.style_dialog.update(cx, |d, cx| d.show_tab(tab, window, cx));
         let content = self.style_dialog.clone();
-        window.open_dialog(cx, move |dialog, _w, _cx| dialog.title("手写效果范围").w(px(460.)).child(content.clone()));
+        // No dimming overlay: the page stays readable behind, so each change can be judged live.
+        window.open_dialog(cx, move |dialog, _w, _cx| {
+            dialog
+                .title("手写效果范围")
+                .w(px(460.))
+                .overlay(false)
+                .child(content.clone())
+                .footer(h_flex().justify_end().child(Button::new("style-close").small().label("关闭").on_click(|_: &ClickEvent, w, cx| w.close_dialog(cx))))
+        });
     }
 
     fn reshuffle(&mut self, cx: &mut Context<Self>) {
@@ -824,7 +843,7 @@ impl ChixieRsApp {
                 (job::ruling(&page.guides, &profile), Some("是否开始绘制页面框架线？".to_string()))
             }
         };
-        self.show_pane = true;
+        self.show_device_pane();
         self.resume.job_started(None);
         let job = Job { pages: vec![gcode], first_page: here, ..Default::default() };
         let Some(title) = title else {
@@ -901,7 +920,7 @@ impl ChixieRsApp {
             first + 1,
         );
         let title = format!("是否立即书写第 {} 页？", first + 1);
-        self.show_pane = true;
+        self.show_device_pane();
         let app = cx.entity();
         window.open_alert_dialog(cx, move |a, _w, _cx| {
             let app = app.clone();
@@ -1101,6 +1120,7 @@ impl ChixieRsApp {
             .child(div().absolute().inset_0().flex().items_center().justify_center().text_sm().child(self.doc_title()))
             .child(qat)
             .child(div().flex_1())
+            .when(!in_backstage, |el| el.child(self.device_capsule(&c, cx)))
             .child(account);
         if cfg!(target_os = "windows") {
             // Our own buttons; the OS handles drag, snap and the buttons through hit-test areas.
@@ -1127,6 +1147,49 @@ impl ChixieRsApp {
         }
     }
 
+    /// Title bar device pill (● 模拟设备 · 空闲 / ○ 未连接设备): opens the 设备控制 pane.
+    fn device_capsule(&self, c: &ribbon::Chrome, cx: &mut Context<Self>) -> AnyElement {
+        let dev = self.device.read(cx);
+        let state = dev.status.as_ref().map(|s| crate::device::state_zh(&s.state));
+        let alarm = state == Some("报警");
+        let (dot, text) = match (&dev.connected, dev.job) {
+            (None, _) => (c.title_fg.opacity(0.5), "未连接设备".to_string()),
+            (Some(_), _) if alarm => (gpui_kit::hsla(38. / 360., 0.95, 0.55, 1.), "设备报警 · 需解锁".to_string()),
+            (Some(p), Some(j)) => (gpui_kit::hsla(200. / 360., 0.9, 0.7, 1.), format!("{p} · 书写 {:.0}%", j.percent())),
+            (Some(p), None) => (gpui_kit::hsla(140. / 360., 0.65, 0.55, 1.), format!("{p} · {}", state.unwrap_or("已连接"))),
+        };
+        let hover = c.title_hover;
+        div()
+            .id("title-device")
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .h(px(24.))
+            .mr_2()
+            .px_2p5()
+            .gap_1p5()
+            .flex()
+            .items_center()
+            .rounded_full()
+            .border_1()
+            .border_color(c.title_fg.opacity(0.35))
+            .text_xs()
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("打开设备控制面板").build(w, cx))
+            .child(div().size(px(7.)).rounded_full().bg(dot))
+            .child(text)
+            .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                t.show_device_pane();
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// Open the task pane on its 设备控制 view.
+    pub(crate) fn show_device_pane(&mut self) {
+        (self.show_pane, self.pane_mode) = (true, PaneMode::Device);
+    }
+
     /// 文件 + tab titles + collapse chevron, on the light strip above the ribbon card.
     #[inline(never)]
     fn tab_strip(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1135,7 +1198,7 @@ impl ChixieRsApp {
             .px_2()
             .gap_0p5()
             .items_end()
-            .child(ribbon::tab_item(TABS.len(), "文件", false, cx).on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_backstage(Stage::New, w, cx))))
+            .child(ribbon::file_tab(cx).mr_1().on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_backstage(Stage::New, w, cx))))
             .children(TABS.iter().enumerate().map(|(i, label)| {
                 ribbon::tab_item(i, label, i == self.tab, cx).on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
                     t.tab = i;
@@ -1171,14 +1234,32 @@ impl ChixieRsApp {
         let punct_issues = layout.punct_issues.len();
         let zoom_pct = (d.zoom() / doc_view::ZOOM_100 * 100.0).round();
         let caret_page = d.caret_page() + 1;
-        let dev = self.device.read(cx);
-        let (dev_summary, dev_connected, job) = (dev.summary(), dev.connected.is_some(), dev.job);
+        let job = self.device.read(cx).job;
         let theme = cx.theme();
         let (muted, hover, primary, danger) = (theme.muted_foreground, theme.secondary_hover, theme.primary, theme.danger);
         let strip = ribbon::chrome(cx).strip_bg;
         // Word's status bar items are flat cells that highlight on hover.
         let cell = move |id: &'static str| {
             h_flex().id(id).h_full().px_2().gap_1().items_center().hover(move |s| s.bg(hover))
+        };
+        // Clickable cells are real buttons, so UI Automation sees them under their text.
+        let cell_btn = |id: &'static str, text: String, fg: Hsla, warn: bool| {
+            Button::new(id)
+                .ghost()
+                .xsmall()
+                .h_full()
+                .rounded_none()
+                .px_2()
+                .accessibility_label(text.clone())
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .text_xs()
+                        .text_color(fg)
+                        .when(warn, |el| el.child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.))))
+                        .child(text),
+                )
         };
         h_flex()
             .w_full()
@@ -1193,11 +1274,8 @@ impl ChixieRsApp {
             .when(missing > 0, |el| {
                 let chars: String = layout.missing.iter().take(12).collect();
                 el.child(
-                    cell("sb-missing")
-                        .cursor_pointer()
-                        .text_color(danger)
-                        .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
-                        .child(format!("缺字 {missing}：{chars}"))
+                    cell_btn("sb-missing", format!("缺字 {missing}：{chars}"), danger, true)
+                        .tooltip("打开导航窗格的缺字列表")
                         .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_nav(crate::nav_pane::NavTab::Missing, w, cx))),
                 )
             })
@@ -1206,33 +1284,13 @@ impl ChixieRsApp {
                 // way to move it). Each click jumps to the next one.
                 let doc = self.doc.clone();
                 el.child(
-                    cell("sb-punct")
-                        .cursor_pointer()
-                        .text_color(danger)
-                        .child(gpui_kit::component::Icon::new(IconName::TriangleAlert).with_size(px(12.)))
-                        .child(format!("存在 {punct_issues} 处标点位置异常"))
+                    cell_btn("sb-punct", format!("存在 {punct_issues} 处标点位置异常"), danger, true)
+                        .tooltip("跳到下一处")
                         .on_click(ribbon_tabs::editor_action(doc, Box::new(doc_view::NextPunctIssue))),
                 )
             })
-            .child(
-                cell("sb-font")
-                    .cursor_pointer()
-                    .child(format!("字体：{font}"))
-                    .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_fonts(w, cx))),
-            )
+            .child(cell_btn("sb-font", format!("字体：{font}"), muted, false).tooltip("打开字体库").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_fonts(w, cx))))
             .child(cell("sb-template").child(format!("模板：{template}")))
-            .child(
-                cell("sb-device")
-                    .cursor_pointer()
-                    .child(div().size(px(7.)).rounded_full().bg(if dev_connected { gpui_kit::green() } else { muted.opacity(0.6) }))
-                    .child(dev_summary)
-                    .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
-                        t.tab = TAB_DEVICE;
-                        t.show_pane = true;
-                        t.ribbon_collapsed = false;
-                        cx.notify();
-                    })),
-            )
             .when_some(self.sheet_change.filter(|_| job.is_none()), |el, (_, next)| el.child(cell("sb-sheet").text_color(primary).child(format!("请换纸 · 下一页：第 {} 页", next + 1))))
             .when_some(job, |el, j| {
                 let s = format!("书写 第 {} 页 {:.0}%{}", j.page + 1, j.percent(), if j.paused { "（暂停）" } else { "" });
@@ -1257,22 +1315,16 @@ impl ChixieRsApp {
                     })))
             })
             .child(ribbon::icon_btn("sb-zout", IconName::Minus, "缩小").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.zoom_by(1.0 / 1.1, cx))))
-            .child(div().w(px(110.)).px_1().child(Slider::new(&self.zoom_slider)))
+            .child(div().w(px(110.)).px_1().child(Slider::new(&self.zoom_slider).accessibility_label("缩放")))
             .child(ribbon::icon_btn("sb-zin", IconName::Plus, "放大").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.zoom_by(1.1, cx))))
-            .child(
-                cell("sb-zoom")
-                    .w(px(52.))
-                    .justify_center()
-                    .cursor_pointer()
-                    .child(format!("{zoom_pct}%"))
-                    .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
-                        t.doc.update(cx, |d, cx| d.set_zoom(doc_view::ZOOM_100, cx));
-                    })),
-            )
+            .child(cell_btn("sb-zoom", format!("{zoom_pct}%"), muted, false).w(px(52.)).tooltip("缩放到 100%").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                t.doc.update(cx, |d, cx| d.set_zoom(doc_view::ZOOM_100, cx));
+            })))
             .into_any_element()
     }
 
-    /// Word-style task pane: titled header with a close button over the device panel.
+    /// Word-style task pane: a 设备控制 | 字符微调 switch (one view at a time, never stacked)
+    /// and a close button over the chosen view.
     #[inline(never)]
     fn task_pane(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
@@ -1289,17 +1341,34 @@ impl ChixieRsApp {
                 h_flex()
                     .h(px(40.))
                     .px_3()
+                    .gap_2()
                     .flex_shrink_0()
-                    .child(div().flex_1().text_base().font_weight(FontWeight::SEMIBOLD).child("设备"))
-                    .child(ribbon::icon_btn("pane-close", IconName::Close, "关闭").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                    .child(
+                        div().flex_1().child(
+                            TabBar::new("pane-mode")
+                                .small()
+                                .segmented()
+                                .selected_index(if self.pane_mode == PaneMode::Tune { 1 } else { 0 })
+                                .children([Tab::new().label("设备控制"), Tab::new().label("字符微调")])
+                                .on_click(cx.listener(|t, ix: &usize, _w, cx| {
+                                    t.pane_mode = if *ix == 1 { PaneMode::Tune } else { PaneMode::Device };
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(ribbon::icon_btn("pane-close", IconName::Close, "关闭面板").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
                         t.show_pane = false;
                         cx.notify();
                     }))),
             )
-            .when(self.sheet_change.is_some() && !self.device.read(cx).busy(), |el| el.child(self.sheet_card(cx)))
-            .when(self.resume.open, |el| el.child(self.resume_card(cx)))
-            .when(self.tune_open, |el| el.child(self.tune_card(cx)))
-            .child(div().flex_1().min_h_0().child(self.device.clone()))
+            .map(|el| match self.pane_mode {
+                PaneMode::Tune => el.child(div().id("tune-pane").flex_1().min_h_0().overflow_y_scroll().child(self.tune_card(cx))),
+                PaneMode::Device => el
+                    // Task cards only while they are live; the device controls keep the rest.
+                    .when(self.sheet_change.is_some() && !self.device.read(cx).busy(), |el| el.child(self.sheet_card(cx)))
+                    .when(self.resume.open, |el| el.child(self.resume_card(cx)))
+                    .child(div().flex_1().min_h_0().child(self.device.clone())),
+            })
             .into_any_element()
     }
 

@@ -184,7 +184,7 @@ impl DeviceParams {
     }
 
     /// 从炽写配置导入: ChiXie3's own `config.ini`.
-    fn import_ini(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn import_ini(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from).unwrap_or_default().join("ChiXie3/conf/config.ini");
         let res = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| chixie3_devices::import(&String::from_utf8_lossy(&b)).map_err(|e| e.to_string()));
         self.offer(res, &path, window, cx);
@@ -192,7 +192,7 @@ impl DeviceParams {
 
     /// 从 .cset 文件导入: pick a ChiXie3 device-parameter file. The picker cannot filter by
     /// extension, so a file that is not one fails to read with an error notice.
-    fn import_cset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn import_cset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.entity();
         let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("选择炽写设备参数文件（*.cset）".into()) });
         window

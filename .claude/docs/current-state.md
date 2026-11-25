@@ -424,3 +424,16 @@
   `chixie-rs-<OS>-portable` (Windows zip, macOS/Linux tar.gz) with the marker. README (en/zh).
 - Not verified: the release build and portable packaging in CI (needs a manual run); GUI start
   from a portable folder on this machine. Keyring passwords do not travel.
+
+## 2026-11-26: UI redesign per docs/ui-redesign-guide.md (uncommitted, on master)
+
+- Tabs: 文件 filled accent pill; 布局 renamed 页面; tab items + clickable status cells are gpui-component Buttons (UIA-visible).
+- Theme (ribbon::set_theme): ghost hover wash (`accent`) and toggle-on fill (`secondary_active`) deepened (blue tint); toasts BottomRight above status bar.
+- Title bar device pill (opens 设备控制); status-bar device cell removed.
+- Task pane: PaneMode {Device, Tune} segmented switch; tune card labels 54px nowrap, empty-state hint, 全局字体修复 folded.
+- 开始: 剪贴板 / 字体(笔色色条) / 段落(行距, 字符微调, 合并内容 only on grid) / 编辑(查找, 替换, 文本清理▾) / 书写与输出(主色书写, 选页, 导出 G-code, 设备面板) / 表格 tinted. 撤销/重做 only in QAT.
+- 页面: 模板 first, 页面尺寸 button removed, 行距与排版. 手写: 总开关与预设(+智能偏移, 风格预设▾), 手写强度 quick dropdowns, 多语种与混用 (moved from 开始), 笔迹样本; 从炽写导入 removed (now 文件›选项 also has 设备参数 import).
+- 设备: 连接与状态 (+解锁 $X on alarm), 书写作业, 对位与校准 (+落笔校准…), 输出与固件 (G-code/PDF/打印/$), 工作区. 视图: 显示模式, 显示, 外观与面板 (+导航窗格, 设备与微调面板 toggles).
+- Device pane order: status, jog, job (only while running), connection row (port ▾ dropdown), 自定义命令 (foldable), 串口控制台 (folded, last line preview).
+- StyleDialog: no overlay, 关闭 footer, live refresh via observe_global (skips focused input), 同中文 checkboxes renamed.
+- Not done: ListIndentIncrease icon was NOT blank (guide P0 stale); 风格预设 values are my picks (工整/轻微 3,3,0.5/随性 7,7,1.5); 字距/浮动 presets not added (ranges stay in ↘ dialog). Clicked tab shows a grey ghost bg (button focus/press state) — cosmetic.

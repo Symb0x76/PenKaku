@@ -43,6 +43,8 @@ pub struct FormatState {
     pub tilt_right: bool,
     pub tilt_left: bool,
     pub painter: bool,
+    /// Pen colour shared by the selection (`Some(None)` = default black, `None` = mixed).
+    pub colour: Option<Option<[u8; 3]>>,
 }
 
 impl DocView {
@@ -103,6 +105,7 @@ impl DocView {
             tilt_right: on(|a| a.tilt > 0),
             tilt_left: on(|a| a.tilt < 0),
             painter: self.painter.is_some(),
+            colour: d.common(|a| a.colour),
         }
     }
 

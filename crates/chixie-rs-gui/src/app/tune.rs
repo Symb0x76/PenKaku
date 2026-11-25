@@ -26,7 +26,7 @@ type Change = fn(&mut Tuning);
 
 impl ChixieRsApp {
     pub(crate) fn open_tune(&mut self, cx: &mut Context<Self>) {
-        (self.tune_open, self.show_pane) = (true, true);
+        (self.pane_mode, self.show_pane) = (super::PaneMode::Tune, true);
         cx.notify();
     }
 
@@ -62,7 +62,7 @@ impl ChixieRsApp {
     /// The 字符微调 card at the top of the task pane.
     pub(crate) fn tune_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let (muted, border, ink, danger) = (theme.muted_foreground, theme.border, theme.foreground, theme.danger);
+        let (muted, border, ink, danger, muted_bg) = (theme.muted_foreground, theme.border, theme.foreground, theme.danger, theme.muted);
         let view = self.doc.read(cx);
         let doc = view.doc();
         let sel = doc.selection();
@@ -79,7 +79,8 @@ impl ChixieRsApp {
         let arrow = |id: &'static str, icon: IconName, tip: &'static str, f: Change| {
             Button::new(id).small().ghost().icon(Icon::new(icon)).tooltip(tip).disabled(!has).on_click(cx.listener(move |t, _: &ClickEvent, w, cx| t.apply_tune(f, w, cx)))
         };
-        let row = |name: &'static str| h_flex().gap_2().items_center().child(div().w(px(40.)).flex_shrink_0().text_sm().child(name));
+        // 54 px fits a two-character label + colon at text_sm on one line.
+        let row = |name: &'static str| h_flex().gap_2().items_center().child(div().w(px(54.)).flex_shrink_0().whitespace_nowrap().text_sm().child(name));
 
         // 字体 and 字号 set the selected chars' own font and size, like the ribbon.
         let font_label = match &fs.font {
@@ -179,32 +180,39 @@ impl ChixieRsApp {
             Button::new(id).small().ghost().text_color(danger).label(label).tooltip(tip).disabled(!has).on_click(cx.listener(move |t, _: &ClickEvent, w, cx| t.fix_selected_font(add, w, cx)))
         };
 
-        v_flex()
-            .gap_2()
-            .p_3()
-            .border_b_1()
+        let fix_open = self.tune_fix_open;
+        // Whole-font clean-ups, folded away so they don't read as per-character actions.
+        let font_fixes = v_flex()
+            .gap_1()
+            .pt_2()
+            .border_t_1()
             .border_color(border)
             .child(
-                h_flex()
-                    .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("字符微调"))
-                    .child(Button::new("tune-close").ghost().xsmall().label("关闭").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
-                        t.tune_open = false;
+                Button::new("tune-fix-toggle")
+                    .xsmall()
+                    .ghost()
+                    .justify_start()
+                    .icon(Icon::new(if fix_open { IconName::ChevronDown } else { IconName::ChevronRight }).with_size(px(12.)))
+                    .label("全局字体修复（作用于整套字体）")
+                    .on_click(cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.tune_fix_open ^= true;
                         cx.notify();
-                    }))),
+                    })),
             )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
+            .when(fix_open, |el| {
+                el.child(div().text_xs().text_color(muted).child("以下操作修改选中字符所在的整套字体，不只是这个字。"))
                     .child(
                         v_flex()
-                            .flex_1()
-                            .gap_1()
-                            .child(h_flex().gap_1().text_sm().child("字符：").child(div().font_weight(FontWeight::SEMIBOLD).child(if has { label } else { "未选中".into() })))
-                            .when(!has, |el| el.child(div().text_xs().text_color(muted).child("请选中字符后使用"))),
+                            .items_start()
+                            .child(red("tune-dedupe", "字符重复轨迹优化", "对选中字符所在的字体进行整个的重复轨迹优化", FontFix { dedupe: true, ..Default::default() }))
+                            .child(red("tune-widths", "异常宽度字符处理", "对选中字符所在的字体处理宽度异常的字符", FontFix { widths: true, ..Default::default() })),
                     )
-                    .child(div().size(px(PREVIEW_PX)).flex_shrink_0().rounded_md().border_1().border_color(border).child(glyph_preview(strokes, ink))),
-            )
+            });
+
+        let controls = v_flex()
+            .gap_2()
+            // Nothing selected: the controls fade back behind the hint.
+            .when(!has, |el| el.opacity(0.55))
             .child(row("字体：").child(font_btn))
             .child(row("字号：").child(size_btn).child(bump("tune-bigger", "A+", "增大字号5%", 1.0 + STEP_PCT)).child(bump("tune-smaller", "A−", "缩小字号5%", 1.0 - STEP_PCT)))
             .child(row("轻重：").child(weight_btn))
@@ -225,13 +233,23 @@ impl ChixieRsApp {
                     ))
                     .child(div().flex_1())
                     .child(same),
-            )
-            .child(
-                v_flex()
+            );
+
+        v_flex()
+            .gap_2()
+            .p_3()
+            .child(if has {
+                h_flex()
+                    .gap_2()
                     .items_center()
-                    .child(red("tune-dedupe", "字符重复轨迹优化", "对选中字符所在的字体进行整个的重复轨迹优化", FontFix { dedupe: true, ..Default::default() }))
-                    .child(red("tune-widths", "异常宽度字符处理", "对选中字符所在的字体处理宽度异常的字符", FontFix { widths: true, ..Default::default() })),
-            )
+                    .child(h_flex().flex_1().gap_1().text_sm().child("字符：").child(div().font_weight(FontWeight::SEMIBOLD).child(label)))
+                    .child(div().size(px(PREVIEW_PX)).flex_shrink_0().rounded_md().border_1().border_color(border).child(glyph_preview(strokes, ink)))
+                    .into_any_element()
+            } else {
+                div().p_2().rounded_md().bg(muted_bg).text_sm().child("在文档中拖选 1 个或多个字符，即可微调位置、大小与轻重。").into_any_element()
+            })
+            .child(controls)
+            .child(font_fixes)
             .into_any_element()
     }
 }

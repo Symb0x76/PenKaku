@@ -35,6 +35,19 @@ pub fn set_theme(dark: bool, window: Option<&mut Window>, cx: &mut App) {
     // Checkboxes and other controls paint from `tokens.primary` (black in the stock theme).
     (t.tokens.primary, t.tokens.primary_hover, t.tokens.primary_active, t.tokens.primary_foreground) =
         (t.primary.into(), t.primary_hover.into(), t.primary_active.into(), gpui_kit::white().into());
+    // The stock ghost hover (`accent`) and selected (`secondary_active`) washes are ~4% grey,
+    // nearly invisible on the white ribbon card. Word shows a grey hover and a light-blue "on"
+    // fill for toggles, so deepen both (ghost buttons stay borderless at rest, as designed).
+    let (hover, on) = if dark {
+        (hsla(0., 0., 1., 0.10), hsla(h, 0.45, 0.34, 1.0))
+    } else {
+        (hsla(0., 0., 0., 0.07), hsla(h, 0.62, 0.88, 1.0))
+    };
+    (t.accent, t.secondary_active) = (hover, on);
+    (t.tokens.accent, t.tokens.secondary_active) = (hover.into(), on.into());
+    // Toasts sit above the status bar, so they never cover the ribbon's right-hand groups.
+    t.notification.placement = Anchor::BottomRight;
+    t.notification.margins.bottom = px(24. + 12.);
 }
 
 /// Word 365 "Colorful" chrome colours, derived from the light/dark mode and the accent.
@@ -157,7 +170,7 @@ pub fn big_menu(id: impl Into<ElementId>, label: impl Into<SharedString>, icon: 
 }
 
 fn big_inner(id: impl Into<ElementId>, label: SharedString, icon: IconName, caret: bool) -> Button {
-    Button::new(id).ghost().h(px(70.)).min_w(px(52.)).px_1p5().child(
+    Button::new(id).ghost().h(px(70.)).min_w(px(52.)).px_1p5().accessibility_label(label.clone()).child(
         v_flex()
             .items_center()
             .gap_1()
@@ -250,23 +263,39 @@ pub fn group(
 }
 
 /// A ribbon tab title; the selected one is semibold in the accent colour over a short bar.
-pub fn tab_item(id: usize, label: &'static str, selected: bool, cx: &App) -> Stateful<Div> {
+/// A real button (not a bare div), so UI Automation sees it under its label.
+pub fn tab_item(id: usize, label: &'static str, selected: bool, cx: &App) -> Button {
     let theme = cx.theme();
-    let (fg, accent, hover) = (theme.foreground, theme.primary, theme.secondary_hover);
-    div()
-        .id(("ribbon-tab", id))
+    let (fg, accent) = (theme.foreground, theme.primary);
+    Button::new(("ribbon-tab", id))
+        .ghost()
         .h(px(32.))
         .px_3()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_end()
         .rounded_t_md()
-        .cursor_pointer()
-        .text_sm()
-        .text_color(if selected { accent } else { fg })
-        .when(selected, |el| el.font_weight(FontWeight::SEMIBOLD))
-        .hover(|s| s.bg(hover))
-        .child(label)
-        .child(div().w_full().mt_1().mb_0p5().h(px(3.)).rounded_full().when(selected, |el| el.bg(accent)))
+        .rounded_b_none()
+        .accessibility_label(label)
+        .child(
+            v_flex()
+                .h_full()
+                .items_center()
+                .justify_end()
+                .text_sm()
+                .text_color(if selected { accent } else { fg })
+                .when(selected, |el| el.font_weight(FontWeight::SEMIBOLD))
+                .child(label)
+                .child(div().w_full().mt_1().mb_0p5().h(px(3.)).rounded_full().when(selected, |el| el.bg(accent))),
+        )
+}
+
+/// 文件: Word's filled accent tab that opens the Backstage, set apart from the ribbon tabs.
+pub fn file_tab(cx: &App) -> Button {
+    let theme = cx.theme();
+    Button::new("ribbon-tab-file")
+        .primary()
+        .h(px(26.))
+        .mb(px(4.))
+        .px_3()
+        .rounded_md()
+        .accessibility_label("文件")
+        .child(div().text_sm().text_color(theme.primary_foreground).child("文件"))
 }
