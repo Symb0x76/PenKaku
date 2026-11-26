@@ -3,6 +3,7 @@
 
 pub mod emit;
 pub mod pdf;
+pub mod picture_sheet;
 pub mod plan;
 
 pub use emit::{LADDER_GAP_MM, PageCode, depth_ladder, emit, emit_document, emit_mapped, emit_written, standalone};

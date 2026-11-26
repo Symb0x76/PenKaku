@@ -11,3 +11,4 @@ repository.workspace = true
 penkaku-core.workspace = true
 serde.workspace = true
 lopdf = { version = "0.47", default-features = false }
+image.workspace = true
