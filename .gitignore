@@ -11,6 +11,9 @@
 # AI Handoff
 /docs/HANDOFF.md
 
+# Claude docs
+.claude/docs
+
 #VS Code
 *.code-workspace
 

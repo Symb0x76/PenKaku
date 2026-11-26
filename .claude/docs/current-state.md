@@ -479,3 +479,8 @@ BOSS picked: inline tables plus a Mermaid flowchart subset; cells typed in the p
   - Merged Word cells (gridSpan/vMerge) read as ragged rows.
   - No layout badge for block_errors; the dialog validates instead.
 
+## 2026-11-26: CD Draft Release (.github/workflows/ci.yml)
+
+- Added `release` job (`needs: check`, `if: startsWith(github.ref, 'refs/tags/')`, `permissions: contents: write`) to `.github/workflows/ci.yml`.
+- Downloads `penkaku-*-portable` artifacts (`penkaku-portable-Windows.zip`, `penkaku-portable-macOS.tar.gz`, `penkaku-portable-Linux.tar.gz`), verifies all 3 files exist, and creates an empty-notes GitHub Draft Release via `gh release create --draft --verify-tag --notes ""` (or `gh release upload --clobber` on re-run).
+- Validated YAML structure via PyYAML; live tag-push execution on GitHub Actions pending.

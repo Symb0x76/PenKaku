@@ -5,6 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -15,151 +16,191 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [ windows-latest, macos-latest, ubuntu-latest ]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
 
-      - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@v2
 
-      # gpui needs X11/Wayland/Vulkan headers on Linux; serialport needs libudev; keyring needs
-      # D-Bus; Mesa's software Vulkan driver lets the GUI autotest run under xvfb.
-      - name: Linux system packages
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libudev-dev libdbus-1-dev libfontconfig-dev libfreetype-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
-            libvulkan-dev mesa-vulkan-drivers libzstd-dev xvfb
+    # gpui needs X11/Wayland/Vulkan headers on Linux; serialport needs libudev; keyring needs
+    # D-Bus; Mesa's software Vulkan driver lets the GUI autotest run under xvfb.
+    - name: Linux system packages
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          pkg-config libudev-dev libdbus-1-dev libfontconfig-dev libfreetype-dev \
+          libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
+          libvulkan-dev mesa-vulkan-drivers libzstd-dev xvfb
 
-      - name: Build
-        run: cargo build --workspace --all-targets
+    - name: Build
+      run: cargo build --workspace --all-targets
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+    - name: Clippy
+      run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Tests
-        run: cargo test --workspace
+    - name: Tests
+      run: cargo test --workspace
 
-      # 导出 PDF: a ruled sample page per OS, to open and check by eye.
-      - name: Sample PDF
-        shell: bash
-        run: ./target/debug/penkaku-cli pdf "你好你好" --font-json crates/penkaku-core/tests/fixtures/font_fixture.json --out sample-${{ runner.os }}.pdf
+    # 导出 PDF: a ruled sample page per OS, to open and check by eye.
+    - name: Sample PDF
+      shell: bash
+      run: ./target/debug/penkaku-cli pdf "你好你好" --font-json crates/penkaku-core/tests/fixtures/font_fixture.json --out sample-${{ runner.os }}.pdf
 
-      - name: Upload sample PDF
-        uses: actions/upload-artifact@v4
-        with:
-          name: sample-pdf-${{ runner.os }}
-          path: sample-${{ runner.os }}.pdf
-          if-no-files-found: error
+    - name: Upload sample PDF
+      uses: actions/upload-artifact@v4
+      with:
+        name: sample-pdf-${{ runner.os }}
+        path: sample-${{ runner.os }}.pdf
+        if-no-files-found: error
 
-      # Scripted GUI run against the fake backend and simulated Grbl (see crates/penkaku-gui/src/main.rs).
-      # Non-blocking until it has passed on each runner once (GPU/display availability differs).
-      - name: GUI autotest
-        continue-on-error: true
-        shell: bash
-        env:
-          PENKAKU_AUTOTEST: "1"
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then run="xvfb-run -a"; else run=""; fi
-          $run ./target/debug/penkaku${{ runner.os == 'Windows' && '.exe' || '' }} | tee autotest.log
-          grep -q 'AUTOTEST_DOCX round_trip=true' autotest.log
-          grep -q 'AUTOTEST_DEVICE connected=Some("模拟设备") pages_done=2/2 sheet_card=Some(((0, 1), 1)) jog_zero_while_waiting=true card_after_last=None recoveries=0 outcome=Some(Done)' autotest.log
-          grep -q 'AUTOTEST_RESUME from=Some(.*) next_page=Some(1) outcome=Some(Done)' autotest.log
-          grep -q 'AUTOTEST_TYPESET align=Right indent=true half_space=true right_at_margin=true punct_issues=0' autotest.log
-          grep -q 'AUTOTEST_BACKSTAGE closed=Ok(true)' autotest.log
-          grep -q 'AUTOTEST_FONTS watched=true english_routed=true export_import=true' autotest.log
-          grep -q 'AUTOTEST_EFFECTS tuned=true undo=true route=true' autotest.log
-          grep -q 'AUTOTEST_TUNE preview=true font_key=true bigger=true' autotest.log
-          grep -q 'AUTOTEST_OUTPUT pens=2 serpentine=true rotated=true' autotest.log
-          grep -q 'AUTOTEST_TABLE tab=true cells=4 overflow_fixed=true batch_pages=30 docx=true' autotest.log
-          grep -q 'AUTOTEST_INLINE_TABLE cells=9 frame=8 docx=true restored=true' autotest.log
-          grep -q 'AUTOTEST_DIAGRAM drawn=true errors=0 in_gcode=true docx=true' autotest.log
-          grep -qF 'AUTOTEST_DETECT pdf_cells=Some([10]) photo_cells=Some([14]) background=true' autotest.log
-          grep -q 'AUTOTEST_LIBRARY roundtrip=true background=true gallery=true' autotest.log
-          grep -q 'AUTOTEST_FORMAT underline=true paste=true replace_keeps_ids=true import_txt=true pdf=true restored=true' autotest.log
-          grep -q 'AUTOTEST_SCRIPT english_scaled=true' autotest.log
-          grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
-          grep -q 'AUTOTEST_PERF pages=' autotest.log
+    # Scripted GUI run against the fake backend and simulated Grbl (see crates/penkaku-gui/src/main.rs).
+    # Non-blocking until it has passed on each runner once (GPU/display availability differs).
+    - name: GUI autotest
+      continue-on-error: true
+      shell: bash
+      env:
+        PENKAKU_AUTOTEST: "1"
+      run: |
+        if [ "$RUNNER_OS" = "Linux" ]; then run="xvfb-run -a"; else run=""; fi
+        $run ./target/debug/penkaku${{ runner.os == 'Windows' && '.exe' || '' }} | tee autotest.log
+        grep -q 'AUTOTEST_DOCX round_trip=true' autotest.log
+        grep -q 'AUTOTEST_DEVICE connected=Some("模拟设备") pages_done=2/2 sheet_card=Some(((0, 1), 1)) jog_zero_while_waiting=true card_after_last=None recoveries=0 outcome=Some(Done)' autotest.log
+        grep -q 'AUTOTEST_RESUME from=Some(.*) next_page=Some(1) outcome=Some(Done)' autotest.log
+        grep -q 'AUTOTEST_TYPESET align=Right indent=true half_space=true right_at_margin=true punct_issues=0' autotest.log
+        grep -q 'AUTOTEST_BACKSTAGE closed=Ok(true)' autotest.log
+        grep -q 'AUTOTEST_FONTS watched=true english_routed=true export_import=true' autotest.log
+        grep -q 'AUTOTEST_EFFECTS tuned=true undo=true route=true' autotest.log
+        grep -q 'AUTOTEST_TUNE preview=true font_key=true bigger=true' autotest.log
+        grep -q 'AUTOTEST_OUTPUT pens=2 serpentine=true rotated=true' autotest.log
+        grep -q 'AUTOTEST_TABLE tab=true cells=4 overflow_fixed=true batch_pages=30 docx=true' autotest.log
+        grep -q 'AUTOTEST_INLINE_TABLE cells=9 frame=8 docx=true restored=true' autotest.log
+        grep -q 'AUTOTEST_DIAGRAM drawn=true errors=0 in_gcode=true docx=true' autotest.log
+        grep -qF 'AUTOTEST_DETECT pdf_cells=Some([10]) photo_cells=Some([14]) background=true' autotest.log
+        grep -q 'AUTOTEST_LIBRARY roundtrip=true background=true gallery=true' autotest.log
+        grep -q 'AUTOTEST_FORMAT underline=true paste=true replace_keeps_ids=true import_txt=true pdf=true restored=true' autotest.log
+        grep -q 'AUTOTEST_SCRIPT english_scaled=true' autotest.log
+        grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
+        grep -q 'AUTOTEST_PERF pages=' autotest.log
 
-      # Windows: the exes (icon embedded by build.rs). macOS: penkaku.app with its .icns.
-      # Linux: binaries, .desktop entry, hicolor icons and install.sh. macOS and Linux are tarred
-      # because artifact zips drop the executable bit.
-      - name: Package
-        shell: bash
-        run: |
-          t=target/debug; r=crates/penkaku-gui/resources
-          mkdir -p dist
-          case "$RUNNER_OS" in
-            Windows)
-              cp $t/penkaku.exe $t/penkaku-cli.exe dist/ ;;
-            macOS)
-              app=dist/penkaku.app/Contents
-              mkdir -p $app/MacOS $app/Resources
-              cp $t/penkaku $app/MacOS/
-              cp $r/macos/Info.plist $app/
-              cp $r/icon/penkaku.icns $app/Resources/
-              plutil -lint $app/Info.plist
-              codesign --force --deep --sign - dist/penkaku.app
-              cp $t/penkaku-cli dist/
-              tar -czf penkaku-macOS.tar.gz -C dist . ;;
-            Linux)
-              p=dist/penkaku
-              mkdir -p $p/icons
-              cp $t/penkaku $t/penkaku-cli $r/linux/penkaku.desktop $r/linux/install.sh $p/
-              cp $r/icon/png/*.png $p/icons/
-              chmod +x $p/install.sh
-              tar -czf penkaku-Linux.tar.gz -C dist penkaku ;;
-          esac
+    # Windows: the exes (icon embedded by build.rs). macOS: penkaku.app with its .icns.
+    # Linux: binaries, .desktop entry, hicolor icons and install.sh. macOS and Linux are tarred
+    # because artifact zips drop the executable bit.
+    - name: Package
+      shell: bash
+      run: |
+        t=target/debug; r=crates/penkaku-gui/resources
+        mkdir -p dist
+        case "$RUNNER_OS" in
+          Windows)
+            cp $t/penkaku.exe $t/penkaku-cli.exe dist/ ;;
+          macOS)
+            app=dist/penkaku.app/Contents
+            mkdir -p $app/MacOS $app/Resources
+            cp $t/penkaku $app/MacOS/
+            cp $r/macos/Info.plist $app/
+            cp $r/icon/penkaku.icns $app/Resources/
+            plutil -lint $app/Info.plist
+            codesign --force --deep --sign - dist/penkaku.app
+            cp $t/penkaku-cli dist/
+            tar -czf penkaku-macOS.tar.gz -C dist . ;;
+          Linux)
+            p=dist/penkaku
+            mkdir -p $p/icons
+            cp $t/penkaku $t/penkaku-cli $r/linux/penkaku.desktop $r/linux/install.sh $p/
+            cp $r/icon/png/*.png $p/icons/
+            chmod +x $p/install.sh
+            tar -czf penkaku-Linux.tar.gz -C dist penkaku ;;
+        esac
 
-      - name: Upload build
-        uses: actions/upload-artifact@v4
-        with:
-          name: penkaku-${{ runner.os }}-debug
-          path: ${{ runner.os == 'Windows' && 'dist/' || format('penkaku-{0}.tar.gz', runner.os) }}
-          if-no-files-found: error
+    - name: Upload build
+      uses: actions/upload-artifact@v4
+      with:
+        name: penkaku-${{ runner.os }}-debug
+        path: ${{ runner.os == 'Windows' && 'dist/' || format('penkaku-{0}.tar.gz', runner.os) }}
+        if-no-files-found: error
 
-      # Portable release build: optimised binaries plus a `portable` marker, so settings, fonts
-      # and templates go to a `data` folder beside the program (next to penkaku.app on macOS).
-      # Fat LTO is slow, so only on manual runs and tags.
-      - name: Build release
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-        run: cargo build --release -p penkaku-gui -p penkaku-cli
+    # Portable release build: optimised binaries plus a `portable` marker, so settings, fonts
+    # and templates go to a `data` folder beside the program (next to penkaku.app on macOS).
+    # Fat LTO is slow, so only on manual runs and tags.
+    - name: Build release
+      if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      run: cargo build --release -p penkaku-gui -p penkaku-cli
 
-      - name: Package portable
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          t=target/release; r=crates/penkaku-gui/resources; p=portable/penkaku
-          mkdir -p $p
-          touch $p/portable
-          case "$RUNNER_OS" in
-            Windows)
-              cp $t/penkaku.exe $t/penkaku-cli.exe $p/
-              (cd portable && 7z a -tzip ../penkaku-portable-Windows.zip penkaku) ;;
-            macOS)
-              app=$p/penkaku.app/Contents
-              mkdir -p $app/MacOS $app/Resources
-              cp $t/penkaku $app/MacOS/
-              cp $r/macos/Info.plist $app/
-              cp $r/icon/penkaku.icns $app/Resources/
-              codesign --force --deep --sign - $p/penkaku.app
-              cp $t/penkaku-cli $p/
-              tar -czf penkaku-portable-macOS.tar.gz -C portable penkaku ;;
-            Linux)
-              cp $t/penkaku $t/penkaku-cli $p/
-              tar -czf penkaku-portable-Linux.tar.gz -C portable penkaku ;;
-          esac
+    - name: Package portable
+      if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      shell: bash
+      run: |
+        t=target/release; r=crates/penkaku-gui/resources; p=portable/penkaku
+        mkdir -p $p
+        touch $p/portable
+        case "$RUNNER_OS" in
+          Windows)
+            cp $t/penkaku.exe $t/penkaku-cli.exe $p/
+            (cd portable && 7z a -tzip ../penkaku-portable-Windows.zip penkaku) ;;
+          macOS)
+            app=$p/penkaku.app/Contents
+            mkdir -p $app/MacOS $app/Resources
+            cp $t/penkaku $app/MacOS/
+            cp $r/macos/Info.plist $app/
+            cp $r/icon/penkaku.icns $app/Resources/
+            codesign --force --deep --sign - $p/penkaku.app
+            cp $t/penkaku-cli $p/
+            tar -czf penkaku-portable-macOS.tar.gz -C portable penkaku ;;
+          Linux)
+            cp $t/penkaku $t/penkaku-cli $p/
+            tar -czf penkaku-portable-Linux.tar.gz -C portable penkaku ;;
+        esac
 
-      - name: Upload portable
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
-        with:
-          name: penkaku-${{ runner.os }}-portable
-          path: ${{ runner.os == 'Windows' && 'penkaku-portable-Windows.zip' || format('penkaku-portable-{0}.tar.gz', runner.os) }}
-          if-no-files-found: error
+    - name: Upload portable
+      if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-artifact@v4
+      with:
+        name: penkaku-${{ runner.os }}-portable
+        path: ${{ runner.os == 'Windows' && 'penkaku-portable-Windows.zip' || format('penkaku-portable-{0}.tar.gz', runner.os) }}
+        if-no-files-found: error
+
+  # Create a GitHub Draft Release with empty notes when a git tag is pushed;
+  # release notes are filled in and published manually.
+  release:
+    name: Draft Release
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download portable artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: penkaku-*-portable
+        path: release-assets
+        merge-multiple: true
+
+    - name: Verify artifacts
+      shell: bash
+      run: |
+        ls -la release-assets
+        test -f release-assets/penkaku-portable-Windows.zip
+        test -f release-assets/penkaku-portable-macOS.tar.gz
+        test -f release-assets/penkaku-portable-Linux.tar.gz
+
+    - name: Create draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: |
+        if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+        else
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --draft \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes ""
+        fi
