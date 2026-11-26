@@ -22,7 +22,7 @@ use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use penkaku_core::layout::CELL_BREAK;
 
-use crate::model::{Align, Attrs, Char, Document, Para, Script};
+use crate::model::{Align, Attrs, Block, Char, Document, OBJECT, Para, Script, TABLE_END};
 
 /// Namespace of our custom XML part.
 pub const NS: &str = "urn:penkaku:doc:1";
@@ -258,11 +258,78 @@ fn paragraphs_xml(x: &mut String, doc: &Document, range: std::ops::Range<usize>,
     }
 }
 
+/// Opening and closing lines of a flowchart's placeholder paragraphs (Markdown style, so the
+/// source stays readable and editable in Word).
+const FENCE_OPEN: &str = "```mermaid";
+const FENCE_CLOSE: &str = "```";
+
 fn document_xml(doc: &Document) -> String {
+    let chars = doc.chars();
     let mut x = String::from(DOC_HEAD);
-    paragraphs_xml(&mut x, doc, 0..doc.len(), 0);
+    let mut start = 0;
+    let mut k = 0;
+    while k < chars.len() {
+        let Some(block) = doc.attrs(k).block.as_ref().filter(|_| chars[k] == OBJECT) else {
+            k += 1;
+            continue;
+        };
+        let end = match block {
+            Block::Table { .. } => match (k + 1..chars.len()).find(|&j| matches!(chars[j], TABLE_END | OBJECT)).filter(|&j| chars[j] == TABLE_END) {
+                Some(e) => e,
+                None => {
+                    k += 1;
+                    continue;
+                }
+            },
+            Block::Diagram { .. } => k,
+        };
+        // The paragraphs before it (the newline that ends them starts the object's paragraph).
+        if k > start {
+            let to = if chars[k - 1] == '\n' { k - 1 } else { k };
+            paragraphs_xml(&mut x, doc, start..to, doc.para_of(start));
+        }
+        match block {
+            Block::Table { cols } => table_xml(&mut x, doc, k, end, cols),
+            Block::Diagram { source } => {
+                for line in std::iter::once(FENCE_OPEN).chain(source.lines()).chain(std::iter::once(FENCE_CLOSE)) {
+                    x += &format!(r#"<w:p><w:r><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#, esc(line));
+                }
+            }
+        }
+        start = end + 1;
+        if chars.get(start) == Some(&'\n') {
+            start += 1;
+        }
+        k = start;
+    }
+    // Word needs a paragraph after a table, so the tail is written even when empty.
+    paragraphs_xml(&mut x, doc, start.min(chars.len())..chars.len(), doc.para_of(start.min(chars.len())));
     x += "</w:body></w:document>";
     x
+}
+
+/// An inline table (`OBJECT` at `anchor` … `TABLE_END` at `end`) as a Word table.
+fn table_xml(x: &mut String, doc: &Document, anchor: usize, end: usize, cols: &[f32]) {
+    let cells = penkaku_core::layout::table_cells(doc.chars(), anchor, end);
+    *x += r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>"#;
+    for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
+        *x += &format!(r#"<w:{side} w:val="single" w:sz="4" w:space="0" w:color="auto"/>"#);
+    }
+    *x += "</w:tblBorders></w:tblPr><w:tblGrid>";
+    for w in cols {
+        *x += &format!(r#"<w:gridCol w:w="{}"/>"#, (w * TWIPS_PER_MM).round() as i64);
+    }
+    *x += "</w:tblGrid>";
+    for row in cells.chunks(cols.len().max(1)) {
+        *x += "<w:tr>";
+        for r in row {
+            *x += "<w:tc>";
+            paragraphs_xml(x, doc, r.clone(), doc.para_of(r.start));
+            *x += "</w:tc>";
+        }
+        *x += "</w:tr>";
+    }
+    *x += "</w:tbl>";
 }
 
 /// `document.xml` of a table form: the text's cell segments fill the tables of `pages` (repeated
@@ -406,8 +473,11 @@ fn on_off(e: &BytesStart) -> Result<bool, Error> {
 /// Characters with their Word formatting, and the paragraph records.
 type Parsed = (Vec<(char, Attrs)>, Vec<Para>);
 
-/// Text, per-character formatting and paragraphs of `word/document.xml`.
-fn parse_document(xml: &str) -> Result<Parsed, Error> {
+/// Text, per-character formatting and paragraphs of `word/document.xml`. With `inline`, each
+/// top-level Word table becomes an inline table (`OBJECT` cells `TABLE_END`, in a paragraph of
+/// its own); without, every table's cells are one run of [`CELL_BREAK`]-separated segments (a
+/// table form).
+fn parse_document(xml: &str, inline: bool) -> Result<Parsed, Error> {
     let mut r = Reader::from_str(xml);
     let mut chars: Vec<(char, Attrs)> = Vec::new();
     let mut paras: Vec<Para> = Vec::new();
@@ -416,6 +486,8 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
     // Tables: inside a cell; its first paragraph is still to come; it continues a vertical merge
     // (its text is skipped); cells seen so far.
     let (mut in_tc, mut tc_first_p, mut tc_skip, mut tc_seen) = (false, false, false, 0usize);
+    // Inline tables: nesting depth, and the anchor of the open one.
+    let (mut tbl_depth, mut tbl_anchor) = (0usize, None::<usize>);
     loop {
         let ev = r.read_event()?;
         let (e, open) = match &ev {
@@ -425,6 +497,25 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
         };
         if let Some(e) = e {
             match e.name().as_ref() {
+                b"w:tbl" if open => {
+                    tbl_depth += 1;
+                    if inline && tbl_depth == 1 {
+                        if !paras.is_empty() {
+                            chars.push(('\n', Attrs::default()));
+                        }
+                        paras.push(Para::default());
+                        tbl_anchor = Some(chars.len());
+                        chars.push((OBJECT, Attrs { block: Some(Block::Table { cols: Vec::new() }), ..Attrs::default() }));
+                        tc_seen = 0;
+                    }
+                }
+                b"w:gridCol" if tbl_depth == 1 => {
+                    if let (Some(a), Some(w)) = (tbl_anchor, attr(&e, "w:w")?.and_then(|v| v.parse::<f32>().ok()))
+                        && let Some(Block::Table { cols }) = chars[a].1.block.as_mut()
+                    {
+                        cols.push(w / TWIPS_PER_MM);
+                    }
+                }
                 b"w:tc" if open => (in_tc, tc_first_p, tc_skip) = (true, true, false),
                 b"w:vMerge" if in_tc => tc_skip = attr(&e, "w:val")?.as_deref() != Some("restart"),
                 b"w:p" if in_tc && tc_skip => {}
@@ -503,6 +594,12 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
         }
         match ev {
             Event::End(e) => match e.name().as_ref() {
+                b"w:tbl" => {
+                    tbl_depth = tbl_depth.saturating_sub(1);
+                    if tbl_depth == 0 && tbl_anchor.take().is_some() {
+                        chars.push((TABLE_END, Attrs::default()));
+                    }
+                }
                 b"w:tc" => (in_tc, tc_skip) = (false, false),
                 b"w:pPr" => in_ppr = false,
                 b"w:rPr" => in_rpr = false,
@@ -528,7 +625,54 @@ fn parse_document(xml: &str) -> Result<Parsed, Error> {
     while chars.last().is_some_and(|(c, _)| *c == CELL_BREAK) {
         chars.pop();
     }
-    Ok((chars, paras))
+    Ok(if inline { fences_to_diagrams(chars, paras) } else { (chars, paras) })
+}
+
+/// Paragraphs ```` ```mermaid ```` … ```` ``` ```` (as we write a flowchart) become one
+/// flowchart `OBJECT` char in a paragraph of its own.
+fn fences_to_diagrams(chars: Vec<(char, Attrs)>, paras: Vec<Para>) -> Parsed {
+    if !chars.iter().map(|c| c.0).collect::<String>().contains(FENCE_OPEN) {
+        return (chars, paras);
+    }
+    // Split into paragraphs (text, record).
+    let mut ps: Vec<(Vec<(char, Attrs)>, Para)> = Vec::new();
+    let mut cur = Vec::new();
+    let mut k = 0;
+    for c in chars {
+        if c.0 == '\n' {
+            ps.push((std::mem::take(&mut cur), paras.get(k).copied().unwrap_or_default()));
+            k += 1;
+        } else {
+            cur.push(c);
+        }
+    }
+    ps.push((cur, paras.get(k).copied().unwrap_or_default()));
+    let text = |p: &[(char, Attrs)]| p.iter().map(|c| c.0).collect::<String>();
+    let mut out: Vec<(Vec<(char, Attrs)>, Para)> = Vec::new();
+    let mut i = 0;
+    while i < ps.len() {
+        if text(&ps[i].0).trim() == FENCE_OPEN
+            && let Some(len) = ps[i + 1..].iter().position(|p| text(&p.0).trim() == FENCE_CLOSE)
+        {
+            let source = ps[i + 1..i + 1 + len].iter().map(|p| text(&p.0)).collect::<Vec<_>>().join("\n");
+            out.push((vec![(OBJECT, Attrs { block: Some(Block::Diagram { source }), ..Attrs::default() })], ps[i].1));
+            i += len + 2;
+            continue;
+        }
+        out.push(ps[i].clone());
+        i += 1;
+    }
+    let n = out.len();
+    let mut chars = Vec::new();
+    let mut paras = Vec::with_capacity(n);
+    for (i, (p, rec)) in out.into_iter().enumerate() {
+        chars.extend(p);
+        paras.push(rec);
+        if i + 1 < n {
+            chars.push(('\n', Attrs::default()));
+        }
+    }
+    (chars, paras)
 }
 
 /// Our extras, from whichever `customXml/item*.xml` carries [`NS`] (Word may renumber them).
@@ -618,8 +762,12 @@ pub fn read(bytes: &[u8]) -> Result<Loaded, Error> {
         Ok(mut f) => f.read_to_string(&mut xml)?,
         Err(_) => return Err(Error::NotDocx),
     };
-    let (parsed, paras) = parse_document(&xml)?;
-    if let Some(ex) = find_extras(&mut zip)
+    let extras = find_extras(&mut zip);
+    // Our table forms keep their cells as one run of segments; everything else reads Word
+    // tables as inline tables.
+    let form = extras.as_ref().is_some_and(|ex| ex.text.contains(CELL_BREAK) && !ex.text.contains(TABLE_END));
+    let (parsed, paras) = parse_document(&xml, !form)?;
+    if let Some(ex) = extras
         && let Some(doc) = merge(parsed.clone(), paras.clone(), &ex)
     {
         return Ok(Loaded { doc, seed: Some(ex.seed) });
@@ -690,7 +838,7 @@ mod tests {
         assert!(xml.contains("<w:tab/>"));
         assert!(xml.contains("&amp; &lt;符号&gt;"));
         // Without the extras, Word's view alone gives the same text and close formatting.
-        let (chars, paras) = parse_document(&xml).unwrap();
+        let (chars, paras) = parse_document(&xml, true).unwrap();
         assert_eq!(chars.iter().map(|c| c.0).collect::<String>(), sample().text());
         assert_eq!(chars[0].1.colour, Some([200, 0, 0]));
         assert_eq!(chars[0].1.size_pt, Some(14.5));
@@ -774,9 +922,73 @@ mod tests {
         assert!(l.doc.same_content(&d), "{:?}", l.doc.text());
         // Word's view alone: cells become cell breaks, the merge continuation is skipped and the
         // empty cells at the end are dropped.
-        let (chars, paras) = parse_document(&xml).unwrap();
+        let (chars, paras) = parse_document(&xml, false).unwrap();
         assert_eq!(chars.iter().map(|c| c.0).collect::<String>(), format!("姓名{b}张三\n李四{b}12{b}A{b}B"));
         assert_eq!(paras.len(), 2);
+        // Read as inline tables (a foreign file), then flattened for a table form: the same.
+        let (chars, paras) = parse_document(&xml, true).unwrap();
+        let chars = chars.into_iter().enumerate().map(|(i, (ch, attrs))| Char { ch, id: i as u64, attrs }).collect();
+        let flat = Document::from_loaded(chars, paras).unwrap().flatten_tables().unwrap();
+        assert_eq!(flat.text(), format!("姓名{b}张三\n李四{b}12{b}A{b}B"));
+        assert_eq!(flat.paras().len(), 2);
+    }
+
+    /// `a` ¶ table [x | y] [z | ·] ¶ flowchart ¶ `b`.
+    fn with_objects() -> Document {
+        let mut e = crate::EditDoc::from_text("a\nb");
+        e.move_to(1, false);
+        e.insert_table(2, 2, 60.0);
+        for t in ["x", "y", "z"] {
+            e.insert(t);
+            e.next_inline_cell();
+        }
+        let end = e.table_at(e.caret()).unwrap().end;
+        e.move_to(end + 1, false);
+        e.insert_diagram("graph TD\nA[开始] --> B{好?}");
+        e.document().clone()
+    }
+
+    #[test]
+    fn inline_tables_and_flowcharts_round_trip_and_show_in_word() {
+        let d = with_objects();
+        assert_eq!(d.text().chars().filter(|&c| c == OBJECT).count(), 2);
+        let xml = document_xml(&d);
+        assert_eq!(xml.matches("<w:tbl>").count(), 1);
+        assert_eq!(xml.matches("<w:tc>").count(), 4);
+        assert!(xml.contains(r#"<w:gridCol w:w="1701"/>"#));
+        assert!(xml.contains("```mermaid") && xml.contains("A[开始] --&gt; B{好?}"));
+        assert!(!xml.contains(OBJECT) && !xml.contains(TABLE_END) && !xml.contains(CELL_BREAK));
+        let l = read(&write(&d, 4).unwrap()).unwrap();
+        assert!(l.doc.same_content(&d), "{:?}", l.doc.text());
+        // Word's view alone gives the same objects back.
+        let (chars, paras) = parse_document(&xml, true).unwrap();
+        let chars: Vec<Char> = chars.into_iter().enumerate().map(|(i, (ch, attrs))| Char { ch, id: i as u64, attrs }).collect();
+        let w = Document::from_loaded(chars, paras).unwrap();
+        assert_eq!(w.text(), d.text());
+        let blocks = |d: &Document| (0..d.len()).filter_map(|i| d.attrs(i).block.clone()).collect::<Vec<_>>();
+        assert_eq!(blocks(&w).len(), 2);
+        match &blocks(&w)[0] {
+            Block::Table { cols } => assert!(cols.iter().all(|c| (c - 30.0).abs() < 0.05)),
+            b => panic!("{b:?}"),
+        }
+        assert_eq!(blocks(&w)[1], Block::Diagram { source: "graph TD\nA[开始] --> B{好?}".into() });
+    }
+
+    #[test]
+    fn foreign_word_tables_open_as_inline_tables() {
+        let mut z = ZipWriter::new(Cursor::new(Vec::new()));
+        z.start_file("word/document.xml", SimpleFileOptions::default()).unwrap();
+        z.write_all(
+            br#"<w:document xmlns:w="x"><w:body><w:p><w:r><w:t>T</w:t></w:r></w:p><w:tbl><w:tblGrid><w:gridCol w:w="1440"/><w:gridCol w:w="2880"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc><w:tc><w:p/></w:tc></w:tr></w:tbl><w:p><w:r><w:t>E</w:t></w:r></w:p></w:body></w:document>"#,
+        )
+        .unwrap();
+        let l = read(&z.finish().unwrap().into_inner()).unwrap();
+        assert_eq!(l.doc.text(), format!("T\n{OBJECT}1\n2{CELL_BREAK}{TABLE_END}\nE"));
+        assert!(l.doc.is_consistent());
+        match &l.doc.attrs(2).block {
+            Some(Block::Table { cols }) => assert_eq!(cols.iter().map(|c| c.round()).collect::<Vec<_>>(), vec![25.0, 51.0]),
+            b => panic!("{b:?}"),
+        }
     }
 
     #[test]

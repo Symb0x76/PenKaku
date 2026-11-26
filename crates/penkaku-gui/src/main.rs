@@ -22,6 +22,7 @@ mod firmware;
 mod find_bar;
 mod nav_pane;
 mod import_ui;
+mod insert_ui;
 mod cloud_preview;
 mod font_preview;
 mod font_lib;
@@ -834,6 +835,74 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<PenKakuApp>, cx: &mut App) 
                 view.update(cx, |v, cx| v.replace_doc(saved_doc, cx));
             });
             println!("AUTOTEST_TABLE tab={tab} cells={cells} overflow_fixed={fixed} batch_pages={pages} docx={docx}");
+        }
+        // Inline table on a free page: insert 2×3, type, Tab past the last cell (a new row), the
+        // pen-drawn frame, a DOCX round trip, and undo back to the text before. Then a flowchart:
+        // drawn, in the G-code, through DOCX. Document and settings are put back.
+        {
+            let (saved_doc, saved_settings) = cx.update(|cx| (app.read(cx).doc.read(cx).doc().clone(), cx.global::<AppState>().settings.clone()));
+            let view = cx.update(|cx| app.read(cx).doc.clone());
+            cx.update(|cx| {
+                app.update(cx, |a, cx| a.apply_template(None, cx));
+                view.update(cx, |v, cx| {
+                    v.replace_doc(EditDoc::from_text("前文"), cx);
+                    v.edit_doc(|d| {
+                        d.move_to(d.len(), false);
+                        d.insert_table(2, 3, 90.0);
+                        true
+                    }, cx);
+                    v.type_text("表", cx);
+                });
+            });
+            cx.background_executor().timer(pause(300)).await;
+            dispatch(cx, (0..6).map(|_| Box::new(doc_view::ToggleIndent) as Box<dyn Action>).collect());
+            cx.background_executor().timer(pause(300)).await;
+            let (cells, frame) = cx.update(|cx| {
+                let v = view.read(cx);
+                let t = v.inline_table();
+                let anchor = t.as_ref().map_or(usize::MAX, |t| t.anchor);
+                let frame = v.layout_doc().pages.iter().flat_map(|p| p.stroke_chars.iter()).filter(|&&c| c == anchor).count();
+                (t.map_or(0, |t| t.cells.len()), frame)
+            });
+            let p = std::env::temp_dir().join("chixie-autotest-inline-table.docx");
+            let docx = cx.update(|cx| {
+                let d = view.read(cx).doc().clone();
+                file_ops::save(&p, &d, 7, &[]).and_then(|()| file_ops::open(&p)).is_ok_and(|l| l.doc.document().same_content(d.document()))
+            });
+            dispatch(cx, (0..3).map(|_| Box::new(doc_view::Undo) as Box<dyn Action>).collect());
+            cx.background_executor().timer(pause(300)).await;
+            let restored = cx.update(|cx| view.read(cx).doc().text() == "前文");
+            println!("AUTOTEST_INLINE_TABLE cells={cells} frame={frame} docx={docx} restored={restored}");
+
+            cx.update(|cx| {
+                view.update(cx, |v, cx| {
+                    v.replace_doc(EditDoc::from_text(""), cx);
+                    v.edit_doc(|d| {
+                        d.insert_diagram(crate::insert_ui::SAMPLE_FLOWCHART);
+                        true
+                    }, cx);
+                })
+            });
+            cx.background_executor().timer(pause(300)).await;
+            let (drawn, errors, in_gcode) = cx.update(|cx| {
+                let st = cx.global::<AppState>();
+                let l = view.read(cx).layout_doc();
+                let drawn = l.pages.iter().flat_map(|p| p.stroke_chars.iter()).filter(|&&c| c == 0).count();
+                let gcode: String = l.pages.iter().map(|p| penkaku_output::emit(p, &st.settings.device.profile)).collect();
+                (drawn, l.block_errors.len(), gcode.matches("G1").count() >= drawn)
+            });
+            let docx = cx.update(|cx| {
+                let d = view.read(cx).doc().clone();
+                file_ops::save(&p, &d, 7, &[]).and_then(|()| file_ops::open(&p)).is_ok_and(|l| l.doc.document().same_content(d.document()))
+            });
+            let _ = std::fs::remove_file(&p);
+            cx.update(|cx| {
+                cx.global_mut::<AppState>().settings = saved_settings;
+                view.update(cx, |v, cx| v.replace_doc(saved_doc, cx));
+            });
+            // The sample has 4 nodes and 4 links: 4 outlines + 4 links + 4 arrowheads, plus label
+            // glyphs when the font has them (the demo font has almost none).
+            println!("AUTOTEST_DIAGRAM drawn={} errors={errors} in_gcode={in_gcode} docx={docx}", drawn >= 12);
         }
         // 导入 PDF/图片: a generated PDF form (exact, in mm) and a tilted photo of another form
         // become pages of a new table template; the photo also leaves a background image.

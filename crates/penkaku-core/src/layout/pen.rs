@@ -372,7 +372,7 @@ impl Pen<'_> {
         let li = self.doc.lines.len();
         let n = self.doc.boxes.len();
         let on = |k: usize, f: Pick| {
-            self.styles.get(k).copied().flatten().is_some_and(|s| f(&s)) && self.doc.boxes[k].line == li && !matches!(self.chars[k], '\n' | CELL_BREAK)
+            self.styles.get(k).copied().flatten().is_some_and(|s| f(&s)) && self.doc.boxes[k].line == li && !matches!(self.chars[k], '\n' | CELL_BREAK | super::OBJECT | super::TABLE_END)
         };
         let oy = self.p.origin.1;
         let mut add = Vec::new();

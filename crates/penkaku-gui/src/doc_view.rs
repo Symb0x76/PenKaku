@@ -348,7 +348,8 @@ impl DocView {
         let styles = self.doc.styles(st.settings.page.font_size * PT_PER_SIZE);
         let by_id = self.doc.char_fonts().into_iter().filter_map(|(id, n)| st.run_fonts.get(n).cloned().flatten().map(|f| (id, f))).collect();
         let fonts = RunFonts { base: &*st.font_set, by_id };
-        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning, styles: &styles, deform_cache: Some(&self.deform_cache) };
+        let blocks = self.doc.blocks();
+        let flow = layout::Flow { chars: self.doc.chars(), ids: self.doc.ids(), paras: self.doc.document().paras(), joins: &joins, tuning: &tuning, styles: &styles, deform_cache: Some(&self.deform_cache), blocks: &blocks };
         layout::layout_flow(&flow, &fonts, params)
     }
 
@@ -573,7 +574,9 @@ impl DocView {
         self.edited(cx);
     }
     fn toggle_indent_action(&mut self, _: &ToggleIndent, _: &mut Window, cx: &mut Context<Self>) {
-        if table_mode(cx) {
+        if self.doc.next_inline_cell() {
+            self.edited(cx);
+        } else if table_mode(cx) {
             self.doc.next_cell();
             self.edited(cx);
         } else {
@@ -581,10 +584,32 @@ impl DocView {
         }
     }
     fn prev_cell(&mut self, _: &PrevCell, _: &mut Window, cx: &mut Context<Self>) {
-        if table_mode(cx) {
+        if self.doc.prev_inline_cell() {
+            self.after_move(cx);
+        } else if table_mode(cx) {
             self.doc.prev_cell();
             self.after_move(cx);
         }
+    }
+
+    // ---- inline tables and flowcharts (see `insert_ui`) ----
+
+    /// The inline table holding the caret.
+    pub fn inline_table(&self) -> Option<penkaku_doc::edit::TableSpan> {
+        self.doc.table_at(self.doc.caret())
+    }
+    /// The flowchart at the caret: its anchor index and Mermaid source.
+    pub fn diagram_at_caret(&self) -> Option<(usize, String)> {
+        self.doc.diagram_at(self.doc.caret())
+    }
+    /// Run an edit on the document (insert a table, add a row, …) and relayout when it did
+    /// anything.
+    pub fn edit_doc(&mut self, f: impl FnOnce(&mut EditDoc) -> bool, cx: &mut Context<Self>) -> bool {
+        let done = f(&mut self.doc);
+        if done {
+            self.edited(cx);
+        }
+        done
     }
 
     // ---- table forms (see `table_ui`) ----
@@ -768,6 +793,15 @@ impl DocView {
                 cx.notify();
                 return;
             }
+        }
+        // Double-click on a flowchart edits its source.
+        if e.click_count >= 2
+            && let Some(k) = self.char_at_point(e.position)
+            && let Some(edit) = self.doc.diagram_at(k).filter(|d| d.0 == k)
+        {
+            self.doc.move_to(k + 1, false);
+            crate::insert_ui::open_diagram_dialog(cx.entity(), Some(edit), window, cx);
+            return;
         }
         let Some(i) = self.index_at_point(e.position) else { return };
         if e.click_count >= 2 {

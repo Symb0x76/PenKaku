@@ -283,6 +283,8 @@ pub const SALT_DEFORM: u64 = 0x4445_464F_0000_0004;
 pub const SALT_CURSIVE: u64 = 0x4355_5253_0000_0009;
 /// 随机轻重.
 const SALT_PRESS: u64 = 0x5052_4553_0000_000A;
+/// Inline table borders and flowchart outlines (keyed by the anchor char's id).
+pub const SALT_FRAME: u64 = 0x4652_414D_0000_000B;
 
 /// Jitter values for each character, keyed by the character's stable id.
 pub struct Jitter<'a> {

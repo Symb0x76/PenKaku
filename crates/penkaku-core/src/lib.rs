@@ -7,6 +7,7 @@ pub mod chixie3_devices;
 pub mod config;
 pub mod credentials;
 pub mod deformation;
+pub mod diagram;
 pub mod font;
 pub mod font_store;
 pub mod handwriting;

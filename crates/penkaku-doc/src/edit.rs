@@ -14,6 +14,9 @@ use penkaku_core::layout::CELL_BREAK;
 
 use crate::model::{Tuning, Align, Attrs, CharStyle, Command, Document, Para};
 
+mod objects;
+pub use objects::{TABLE_WIDTH, TableSpan};
+
 /// One undo (or redo) step: commands to apply in reverse order, and the selection to restore.
 #[derive(Debug, Clone)]
 struct Step {
@@ -321,12 +324,20 @@ impl EditDoc {
 
     pub fn backspace(&mut self, word: bool) -> bool {
         let from = if word { self.word_left(self.caret) } else { self.caret.saturating_sub(1) };
-        self.delete_or(from..self.caret)
+        self.delete_unguarded(from..self.caret)
     }
 
     pub fn delete(&mut self, word: bool) -> bool {
         let to = if word { self.word_right(self.caret) } else { (self.caret + 1).min(self.len()) };
-        self.delete_or(self.caret..to)
+        self.delete_unguarded(self.caret..to)
+    }
+
+    /// Backspace / Delete without a selection stop at an inline table's cell edges and markers.
+    fn delete_unguarded(&mut self, range: Range<usize>) -> bool {
+        if !self.has_selection() && range.clone().any(|k| self.guards_table(k)) {
+            return false;
+        }
+        self.delete_or(range)
     }
 
     /// Change the formatting of the selection (one undo step). No-op without a selection.
