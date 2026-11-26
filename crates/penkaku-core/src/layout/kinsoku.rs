@@ -27,6 +27,18 @@ pub(super) fn break_before(chars: &[char], line_start: usize, i: usize) -> usize
     (line_start + 1..=i).rev().take(MAX_PULL + 1).find(|&b| ok(b)).unwrap_or(i)
 }
 
+/// Where a line breaking before char `i` should break so an ASCII letter / digit run is not cut
+/// (`24|H` → `|24H`): the start of the run `i` sits in, if that keeps something on the line.
+/// `i` when `i` does not split a run, or the run started the line.
+pub(super) fn word_start(chars: &[char], line_start: usize, i: usize) -> usize {
+    let word = |k: usize| chars.get(k).is_some_and(char::is_ascii_alphanumeric);
+    if i == 0 || !word(i) || !word(i - 1) {
+        return i;
+    }
+    let start = (line_start..i).rev().take_while(|&k| word(k)).last().unwrap_or(i);
+    if start > line_start { start } else { i }
+}
+
 /// Lines that start with a closing mark after a wrap, or end with an opening mark before one.
 pub(super) fn issues(chars: &[char], lines: &[super::LineInfo]) -> Vec<usize> {
     let wrapped_into = |start: usize| start > 0 && start < chars.len() && chars[start - 1] != '\n';
@@ -50,6 +62,16 @@ mod tests {
         assert!(is_closing('，') && is_closing('。') && is_closing('”') && is_closing('·'));
         assert!(is_opening('“') && is_opening('《') && !is_opening('·'));
         assert!(!is_closing('你') && !is_opening('你'));
+    }
+
+    #[test]
+    fn words_move_down_whole() {
+        let c: Vec<char> = "24H;24H:22H".chars().collect();
+        assert_eq!(word_start(&c, 0, 6), 4); // 24|H → |24H
+        assert_eq!(word_start(&c, 0, 4), 4); // after `;`: not inside a run
+        assert_eq!(word_start(&c, 4, 6), 6); // the run starts the line: cut it
+        let c: Vec<char> = "中文abc".chars().collect();
+        assert_eq!(word_start(&c, 0, 4), 2);
     }
 
     #[test]

@@ -61,6 +61,18 @@ fn wrap_boundary_caret_belongs_to_next_line() {
 }
 
 #[test]
+fn letter_runs_wrap_whole() {
+    // Width 10: "A.AAA" would cut the run after its first A (3+2+3 = 8, the next A crosses).
+    let p = PageParams { page: Some(PageBox { width: 10.0, height: 100.0 }), ..Default::default() };
+    let doc = layout("A.AAA", &dot_font(), &p);
+    assert_eq!((doc.lines[0].start, doc.lines[0].end), (0, 2));
+    assert_eq!(doc.lines[1].start, 2);
+    // A run longer than a line is still cut.
+    let doc = layout("AAAAAAA", &dot_font(), &p);
+    assert_eq!((doc.lines[0].start, doc.lines[0].end), (0, 3));
+}
+
+#[test]
 fn empty_text_has_one_line_and_origin_caret() {
     let doc = layout("", &dot_font(), &PageParams { origin: (3.0, 7.0), ..Default::default() });
     assert_eq!(doc.lines.len(), 1);

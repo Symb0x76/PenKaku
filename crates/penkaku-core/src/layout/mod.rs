@@ -925,7 +925,10 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
         let sf = if st.is_plain() { s } else { s * st.factor() };
         // Wrap before a glyph that would cross the right edge (never on an empty line).
         if p.page.is_some() && pen.cx > 0.0 && pen.cx + glyph.advance * sf > pen.line_w {
-            let b = if p.kinsoku { kinsoku::break_before(chars, pen.line_start, i) } else { i };
+            // A run of ASCII letters and digits (`24H`, `hello`) moves down whole, unless it
+            // fills the line on its own; then 避头尾 may pull a little more.
+            let b = kinsoku::word_start(chars, pen.line_start, i);
+            let b = if p.kinsoku { kinsoku::break_before(chars, pen.line_start, b) } else { b };
             if b < i {
                 // Take chars b..i off this line and lay them again from the next one.
                 pen.truncate_to(b);
