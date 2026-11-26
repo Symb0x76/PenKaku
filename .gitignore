@@ -12,7 +12,7 @@
 /docs/HANDOFF.md
 
 # Claude docs
-.claude/docs
+.claude/docs/
 
 #VS Code
 *.code-workspace
