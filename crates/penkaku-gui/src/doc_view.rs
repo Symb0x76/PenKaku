@@ -371,7 +371,7 @@ impl DocView {
                 let id = store.id_of(&n);
                 let font = id.and_then(|id| store.load(id).inspect_err(|e| log::warn!("loading font {n}: {e}")).ok());
                 let fixes = id.map(|id| settings.fix_for(&FontKey::from_local_id(id))).unwrap_or(settings.fix);
-                let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }));
+                let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }.with_composed_arrows()));
                 (n, font)
             })
             .collect();
@@ -656,6 +656,10 @@ impl DocView {
         let chars = if table_mode(cx) { chars.into_iter().map(|(c, a)| (if c == '\t' { layout::CELL_BREAK } else { c }, a)).collect() } else { chars };
         self.doc.import_chars(chars, mode);
         self.edited(cx);
+    }
+    /// The arrows 箭头写成一笔 would write in the selection (or everywhere).
+    pub fn arrows_to_join(&self) -> Vec<char> {
+        self.doc.arrows_to_join()
     }
     /// Run a 文本清理 on the selection (or everywhere); returns how many changes it made.
     pub fn clean(&mut self, f: impl FnOnce(&mut EditDoc) -> usize, cx: &mut Context<Self>) -> usize {

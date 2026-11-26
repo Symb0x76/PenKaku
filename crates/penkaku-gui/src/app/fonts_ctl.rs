@@ -81,23 +81,25 @@ impl PenKakuApp {
                     let id = k.local_id();
                     let font = store.load(id).inspect_err(|e| log::warn!("loading font {k}: {e}")).ok()?;
                     let fixes = f.fix_for(&k);
-                    let font = if fixes.any() { fix::apply(&font, &fixes) } else { font };
-                    Some((k, Arc::new(font), store.name_of(id).unwrap_or_default()))
+                    let mut font = if fixes.any() { fix::apply(&font, &fixes) } else { font };
+                    let arrows = font.compose_arrows();
+                    Some((k, Arc::new(font), store.name_of(id).unwrap_or_default(), arrows))
                 })
-                .collect::<Vec<(FontKey, Arc<Font>, String)>>()
+                .collect::<Vec<(FontKey, Arc<Font>, String, Vec<char>)>>()
         });
         cx.spawn_in(window, async move |this, cx| {
             let loaded = task.await;
             let _ = this.update_in(cx, |app, window, cx| {
                 let st = cx.global_mut::<AppState>();
                 let f = st.settings.fonts.clone();
-                let pairs: Vec<(FontKey, Arc<Font>)> = loaded.iter().map(|(k, font, _)| (k.clone(), font.clone())).collect();
+                let pairs: Vec<(FontKey, Arc<Font>)> = loaded.iter().map(|(k, font, ..)| (k.clone(), font.clone())).collect();
+                st.composed_arrows = loaded.iter().map(|(k, _, _, arrows)| (k.clone(), arrows.clone())).collect();
                 st.font_set = Arc::new(FontSet::build(&pairs, &f.roles, &f.mix, f.mix_salt));
                 st.font_set_gen += 1;
                 // 字体优化 may have changed: load the characters' own fonts again.
                 st.run_fonts.clear();
                 let main = f.roles.main.as_ref().and_then(|m| loaded.iter().find(|(k, ..)| k == m)).or(loaded.first());
-                st.active_font = main.map(|(k, font, name)| ActiveFont { id: k.local_id(), name: name.clone(), font: font.clone() });
+                st.active_font = main.map(|(k, font, name, _)| ActiveFont { id: k.local_id(), name: name.clone(), font: font.clone() });
                 if let Some(a) = &st.active_font
                     && !st.previews.contains_key(&a.id)
                     && let Some(p) = FontPreview::new(&a.font, &a.name)

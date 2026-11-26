@@ -131,6 +131,7 @@ fn main() {
             active_font: None,
             font_set: Default::default(),
             font_set_gen: 0,
+            composed_arrows: Default::default(),
             run_fonts: Default::default(),
             templates,
             template_lib,

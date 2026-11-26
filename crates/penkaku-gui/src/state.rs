@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use penkaku_core::config::Settings;
 use penkaku_core::font::Font;
+use penkaku_core::font::library::FontKey;
 use penkaku_core::font::fontset::FontSet;
 use penkaku_core::session::SessionHandle;
 use penkaku_template::{Template, TemplateStore};
@@ -39,6 +40,9 @@ pub struct AppState {
     pub font_set: Arc<FontSet>,
     /// Bumped whenever `font_set` changes, so views know to lay out again.
     pub font_set_gen: u64,
+    /// Arrows each font in `font_set` lacks and draws from its own `-` / `=` / `<` / `>`
+    /// (`Font::compose_arrows`), so 箭头写成一笔 can ask before writing one.
+    pub composed_arrows: HashMap<FontKey, Vec<char>>,
     /// Fonts named by characters' own 字体 (`None`: no such local font), loaded on first use.
     pub run_fonts: HashMap<String, Option<Arc<Font>>>,
     pub templates: TemplateStore,
@@ -79,5 +83,21 @@ impl AppState {
     pub fn reload_templates(&mut self) {
         let scanned: Vec<Template> = self.template_lib.scan().into_iter().map(|e| e.template).collect();
         self.templates = TemplateStore { templates: scanned };
+    }
+}
+
+impl AppState {
+    /// Of `arrows`, those the writing fonts would only draw from their `-` and `>` (composed)
+    /// and those no font can draw at all (missing).
+    pub fn arrow_coverage(&self, arrows: &[char]) -> (Vec<char>, Vec<char>) {
+        let (mut composed, mut missing) = (Vec::new(), Vec::new());
+        for &c in arrows {
+            match self.font_set.key_of(c, 0) {
+                None => missing.push(c),
+                Some(k) if self.composed_arrows.get(k).is_some_and(|v| v.contains(&c)) => composed.push(c),
+                Some(_) => {}
+            }
+        }
+        (composed, missing)
     }
 }

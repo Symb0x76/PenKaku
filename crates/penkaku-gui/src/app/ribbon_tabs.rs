@@ -46,6 +46,54 @@ pub fn editor_action(doc: Entity<DocView>, a: Box<dyn Action>) -> impl Fn(&Click
     }
 }
 
+/// 一键按手写整理 (`all`) or 箭头写成一笔. When the text would get an arrow the writing fonts
+/// lack (drawn from their `-` and `>`, or not at all), ask first: 转换 writes the arrow, 保持原样
+/// keeps `->` as typed and still does the rest of 一键整理.
+fn clean_with_arrows(doc: Entity<DocView>, all: bool, window: &mut Window, cx: &mut App) {
+    use gpui_kit::component::notification::Notification;
+    let run = move |doc: &Entity<DocView>, convert: bool, w: &mut Window, cx: &mut App| {
+        let n = doc.update(cx, |d, cx| d.clean(|e| if all { e.clean_for_handwriting(convert) } else if convert { e.join_arrows() } else { 0 }, cx));
+        let msg = match (n, all) {
+            (0, true) => "已经符合手写习惯，没有改动".to_string(),
+            (0, false) => "没有需要替换的箭头".to_string(),
+            (n, true) => format!("已整理 {n} 处"),
+            (n, false) => format!("已替换 {n} 处"),
+        };
+        w.push_notification(Notification::info(msg), cx);
+    };
+    let arrows = doc.read(cx).arrows_to_join();
+    let (composed, missing) = cx.global::<AppState>().arrow_coverage(&arrows);
+    if composed.is_empty() && missing.is_empty() {
+        run(&doc, true, window, cx);
+        return;
+    }
+    let quote = |v: &[char]| v.iter().map(|c| format!("「{c}」")).collect::<String>();
+    let mut text = String::new();
+    if !composed.is_empty() {
+        text += &format!("当前字体里没有{}。转换后会用字体自己的「-」「>」拼成一笔写出，箭杆和箭头连写，看起来像手写，但不是字体原有的字形。", quote(&composed));
+    }
+    if !missing.is_empty() {
+        text += &format!("当前字体里没有{}，也拼不出来（缺少「-」「=」或「<」「>」），转换后会显示为缺字。", quote(&missing));
+    }
+    text += if all { "\n\n选「保持原样」：箭头保留为 -> 这样的两个字符，其他整理照常进行。" } else { "\n\n选「保持原样」：不做改动。" };
+    window.open_dialog(cx, move |d, _w, _cx| {
+        let (yes, no) = (doc.clone(), doc.clone());
+        d.title("箭头写成一笔？").w(px(440.)).child(div().text_sm().child(text.clone())).footer(
+            h_flex()
+                .justify_end()
+                .gap_2()
+                .child(Button::new("arrow-keep").small().label("保持原样").on_click(move |_: &ClickEvent, w, cx| {
+                    w.close_dialog(cx);
+                    run(&no, false, w, cx);
+                }))
+                .child(Button::new("arrow-convert").small().primary().label("转换").on_click(move |_: &ClickEvent, w, cx| {
+                    w.close_dialog(cx);
+                    run(&yes, true, w, cx);
+                })),
+        )
+    });
+}
+
 impl PenKakuApp {
     pub(super) fn ribbon_body(&self, cx: &mut Context<Self>) -> AnyElement {
         let body = match self.tab {
@@ -264,13 +312,13 @@ impl PenKakuApp {
                                 w.push_notification(gpui_kit::component::notification::Notification::info(msg(n)), cx);
                             })
                         };
-                        let changed = |n: usize| if n == 0 { "已经符合手写习惯，没有改动".to_string() } else { format!("已整理 {n} 处") };
                         let replaced = |n: usize| if n == 0 { "没有需要替换的符号".to_string() } else { format!("已替换 {n} 处") };
+                        let (d_all, d_arrow) = (doc.clone(), doc.clone());
                         m.item(PopupMenuItem::new("全选").on_click(editor_action(doc.clone(), Box::new(doc_view::SelectAll))))
                             .separator()
-                            .item(item("一键按手写整理（下面全部）", |d| d.clean_for_handwriting(), changed))
+                            .item(PopupMenuItem::new("一键按手写整理（下面全部）").on_click(move |_, w, cx| clean_with_arrows(d_all.clone(), true, w, cx)))
                             .separator()
-                            .item(item("箭头写成一笔（-> 改成 →）", |d| d.join_arrows(), replaced))
+                            .item(PopupMenuItem::new("箭头写成一笔（-> 改成 →）").on_click(move |_, w, cx| clean_with_arrows(d_arrow.clone(), false, w, cx)))
                             .item(item("标点改半角（，；：！？（） 改成 ,;:!?()）", |d| d.halve_punct(), replaced))
                             .item(item("消除符号两侧空格（-> = + < > 等）", |d| d.remove_operator_spaces(), done))
                             .item(item("消除中英空格（中文与英文、数字之间）", |d| d.remove_cjk_latin_spaces(), done))

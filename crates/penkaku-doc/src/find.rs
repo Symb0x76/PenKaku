@@ -242,21 +242,32 @@ impl EditDoc {
         n
     }
 
-    /// 一键手写化: every clean-up in turn (箭头, 标点半角, then the 符号 / 标点 / 中英 spaces) on
-    /// the selection or the whole text, as one undo step; returns how many changes were made.
-    pub fn clean_for_handwriting(&mut self) -> usize {
+    /// The arrows 箭头写成一笔 would write in the selection or the whole text (each once), so
+    /// the caller can check the font has them first.
+    pub fn arrows_to_join(&self) -> Vec<char> {
+        let mut v: Vec<char> = ascii_arrows(self.chars(), self.clean_range()).into_iter().map(|(_, c)| c).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// 一键按手写整理: every clean-up in turn (箭头 when `arrows`, 标点半角, then the 符号 /
+    /// 标点 / 中英 spaces) on the selection or the whole text, as one undo step; returns how many
+    /// changes were made. Without `arrows`, `->` keeps its two characters (spaces around it
+    /// still go).
+    pub fn clean_for_handwriting(&mut self, arrows: bool) -> usize {
         let mark = self.undo_mark();
         let mut within = self.clean_range();
         let mut n = 0;
         type Pass = fn(&[char], Range<usize>) -> Vec<(Range<usize>, String)>;
-        let passes: [Pass; 5] = [
-            |h, w| ascii_arrows(h, w).into_iter().map(|(r, c)| (r, c.to_string())).collect(),
+        let arrow_pass: Pass = |h, w| ascii_arrows(h, w).into_iter().map(|(r, c)| (r, c.to_string())).collect();
+        let passes: [Pass; 4] = [
             |h, w| fullwidth_punct(h, w).into_iter().map(|(r, c)| (r, c.to_string())).collect(),
             |h, w| operator_spaces(h, w).into_iter().map(|r| (r, String::new())).collect(),
             |h, w| punct_spaces(h, w).into_iter().map(|r| (r, String::new())).collect(),
             |h, w| cjk_latin_spaces(h, w).into_iter().map(|r| (r, String::new())).collect(),
         ];
-        for pass in passes {
+        for pass in arrows.then_some(arrow_pass).into_iter().chain(passes) {
             let edits = pass(self.chars(), within.clone());
             n += edits.len();
             within = self.apply_clean(within, edits);
@@ -363,7 +374,7 @@ mod tests {
     fn handwriting_cleanup_is_one_undo_step_and_respects_the_selection() {
         let src = "SP：21H -> 20H；A：1FH -> 21H。 用 Rust 写";
         let mut d = EditDoc::from_text(src);
-        assert!(d.clean_for_handwriting() > 0);
+        assert!(d.clean_for_handwriting(true) > 0);
         assert_eq!(d.text(), "SP:21H→20H;A:1FH→21H。用Rust写");
         assert!(d.undo());
         assert_eq!(d.text(), src);
@@ -371,7 +382,7 @@ mod tests {
         // Only the selection: the first line.
         let mut d = EditDoc::from_text("a -> b ， c\nd -> e");
         d.select_range(0..10);
-        d.clean_for_handwriting();
+        d.clean_for_handwriting(true);
         // `，` turns into `,`, which keeps English spacing before a Latin word.
         assert_eq!(d.text(), "a→b, c\nd -> e");
     }
@@ -379,8 +390,13 @@ mod tests {
     #[test]
     fn handwriting_cleanup_of_register_notes() {
         let mut d = EditDoc::from_text("SP:21H -> 20H；A:1FH -> 21H；\n30H:24H -> 20H；PSW：01H -> 24H。");
-        d.clean_for_handwriting();
+        assert_eq!(d.arrows_to_join(), vec!['→']);
+        d.clean_for_handwriting(true);
         assert_eq!(d.text(), "SP:21H→20H;A:1FH→21H;\n30H:24H→20H;PSW:01H→24H。");
+        // Keeping the arrows as typed: `->` stays, the spaces around it still go.
+        let mut d = EditDoc::from_text("SP:21H -> 20H；A：1FH");
+        d.clean_for_handwriting(false);
+        assert_eq!(d.text(), "SP:21H->20H;A:1FH");
     }
 
     #[test]
