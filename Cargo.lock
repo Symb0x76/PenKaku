@@ -5231,7 +5231,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "env_logger",
@@ -5243,7 +5243,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes 0.8.4",
  "async-channel",
@@ -5269,7 +5269,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-device"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-channel",
  "log",
@@ -5281,7 +5281,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-doc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "penkaku-core",
@@ -5295,7 +5295,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-channel",
  "embed-resource",
@@ -5315,7 +5315,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-import"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "image",
  "lopdf",
@@ -5323,7 +5323,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-output"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lopdf",
  "penkaku-core",
@@ -5332,7 +5332,7 @@ dependencies = [
 
 [[package]]
 name = "penkaku-template"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.23.1",
  "calamine",
