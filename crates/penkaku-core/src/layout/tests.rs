@@ -667,6 +667,26 @@ fn scripts_shrink_and_shift() {
 }
 
 #[test]
+fn unicode_scripts_the_font_lacks_draw_as_small_shifted_base_chars() {
+    // A font with "2" and "x" only: "x²" and "x₂" draw like "x" + 2 as 上标 / 下标, nothing missing.
+    let mut font = font_with('2', Glyph { advance: 5.0, strokes: vec![vec![(0.0, 0.0), (5.0, 7.0)]] });
+    font.glyphs.insert('x', Glyph { advance: 5.0, strokes: vec![vec![(0.0, 0.0), (5.0, 7.0)]] });
+    let p = PageParams::default();
+    let styled_as = |s: Script| styled("x2", &[None, Some(CharStyle { script: s, ..Default::default() })], &font, &p);
+    for (text, script) in [("x²", Script::Super), ("x₂", Script::Sub)] {
+        let d = layout(text, &font, &p);
+        assert!(d.missing.is_empty(), "{text}: {:?}", d.missing);
+        assert_eq!(d.pages[0].strokes, styled_as(script).pages[0].strokes, "{text}");
+        assert_eq!(d.boxes.len(), 2);
+    }
+    // A font that has "²" uses its own glyph.
+    font.glyphs.insert('²', Glyph { advance: 3.0, strokes: vec![vec![(1.0, 1.0)]] });
+    assert_eq!(layout("²", &font, &p).pages[0].strokes, vec![vec![(1.0, -1.0)]]);
+    assert_eq!(script_base('ⁿ'), Some(('n', Script::Super)));
+    assert_eq!(script_base('₉'), Some(('9', Script::Sub)));
+}
+
+#[test]
 fn run_font_override_picks_that_fonts_glyph() {
     use crate::font::fontset::RunFonts;
     let base = x_font();

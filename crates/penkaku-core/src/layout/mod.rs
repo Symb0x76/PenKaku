@@ -712,7 +712,71 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
 }
 
 /// One layout pass; `fits[seg]` overrides a table cell's size and rows.
+/// The base character and 上标 / 下标 of a Unicode superscript or subscript (`²` → `2` raised,
+/// `₂` → `2` lowered).
+pub fn script_base(c: char) -> Option<(char, Script)> {
+    let sup = |b: char| Some((b, Script::Super));
+    let sub = |b: char| Some((b, Script::Sub));
+    match c {
+        '\u{00B9}' => sup('1'),
+        '\u{00B2}' => sup('2'),
+        '\u{00B3}' => sup('3'),
+        '\u{2070}' => sup('0'),
+        '\u{2071}' => sup('i'),
+        '\u{2074}'..='\u{2079}' => sup(char::from_u32(c as u32 - 0x2074 + '4' as u32)?),
+        '\u{207A}' => sup('+'),
+        '\u{207B}' => sup('-'),
+        '\u{207C}' => sup('='),
+        '\u{207D}' => sup('('),
+        '\u{207E}' => sup(')'),
+        '\u{207F}' => sup('n'),
+        '\u{2080}'..='\u{2089}' => sub(char::from_u32(c as u32 - 0x2080 + '0' as u32)?),
+        '\u{208A}' => sub('+'),
+        '\u{208B}' => sub('-'),
+        '\u{208C}' => sub('='),
+        '\u{208D}' => sub('('),
+        '\u{208E}' => sub(')'),
+        '\u{2090}' => sub('a'),
+        '\u{2091}' => sub('e'),
+        '\u{2092}' => sub('o'),
+        '\u{2093}' => sub('x'),
+        '\u{2095}' => sub('h'),
+        '\u{2096}' => sub('k'),
+        '\u{2097}' => sub('l'),
+        '\u{2098}' => sub('m'),
+        '\u{2099}' => sub('n'),
+        '\u{209A}' => sub('p'),
+        '\u{209B}' => sub('s'),
+        '\u{209C}' => sub('t'),
+        _ => None,
+    }
+}
+
+/// A flow whose Unicode super/subscripts the fonts lack (`²`, `₂`, `ⁿ`, …) are drawn as their
+/// base character set 上标 / 下标 (smaller, raised or lowered), like Word's formatting, instead of
+/// a missing box; `None` when there are none. The text itself never changes.
+fn script_fallback(f: &Flow, font: &(impl Glyphs + ?Sized)) -> Option<(Vec<char>, Vec<Option<CharStyle>>)> {
+    let swap = |i: usize| -> Option<(char, Script)> {
+        let (c, id) = (f.chars[i], f.ids[i]);
+        let (base, script) = script_base(c)?;
+        (font.glyph(c, id).is_none() && font.glyph(base, id).is_some()).then_some((base, script))
+    };
+    let first = (0..f.chars.len()).find(|&i| swap(i).is_some())?;
+    let mut chars = f.chars.to_vec();
+    let mut styles: Vec<Option<CharStyle>> = (0..chars.len()).map(|i| f.styles.get(i).copied().flatten()).collect();
+    for i in first..chars.len() {
+        if let Some((base, script)) = swap(i) {
+            chars[i] = base;
+            styles[i] = Some(CharStyle { script, ..styles[i].unwrap_or_default() });
+        }
+    }
+    Some((chars, styles))
+}
+
 fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[Option<CellFit>]) -> Document {
+    if let Some((chars, styles)) = script_fallback(f, font) {
+        return layout_pass(&Flow { chars: &chars, styles: &styles, ..*f }, font, p, fits);
+    }
     let Flow { chars, ids, paras, joins, tuning, styles, deform_cache, blocks } = *f;
     if let Some(c) = deform_cache {
         c.begin(p);
