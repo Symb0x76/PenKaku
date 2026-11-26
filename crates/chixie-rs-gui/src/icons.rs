@@ -70,6 +70,12 @@ gpui_kit::assets::icon_assets!(
         Spline,
         TextWrap,
         Proportions,
+        Table,
+        Workflow,
+        BetweenHorizontalEnd,
+        BetweenVerticalEnd,
+        Grid2x2X,
+        SquarePen,
     ]
 );
 

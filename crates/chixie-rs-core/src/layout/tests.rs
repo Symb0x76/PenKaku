@@ -314,7 +314,7 @@ fn combined_chars_share_one_cell_squeezed() {
     let chars: Vec<char> = "你好世界".chars().collect();
     let ids = [0, 1, 2, 3];
     let joins = [true, true, false, false];
-    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins, tuning: &[], styles: &[], deform_cache: None }, &grid_font(), &grid_params(false));
+    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &joins, tuning: &[], styles: &[], deform_cache: None, blocks: &[] }, &grid_font(), &grid_params(false));
     let w = 10.0 / 3.0;
     let want = [0.0, w, 2.0 * w, 10.0];
     assert!(box_x0s(&doc).iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4), "{:?}", box_x0s(&doc));
@@ -451,7 +451,7 @@ fn tuning_moves_resizes_and_rerolls_one_char() {
     let chars: Vec<char> = "你好你".chars().collect();
     let ids = [1, 2, 3];
     let p = PageParams { deformation: Deformation { enabled: true, base: true, ..Default::default() }, ..Default::default() };
-    let lay = |t: Option<Tuning>| layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &[], tuning: &[None, t, None], styles: &[], deform_cache: None }, &font, &p);
+    let lay = |t: Option<Tuning>| layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &[], tuning: &[None, t, None], styles: &[], deform_cache: None, blocks: &[] }, &font, &p);
     let plain = lay(None);
     let ink = |d: &Document, c: usize| -> Vec<(f32, f32)> {
         d.pages[0].strokes.iter().zip(&d.pages[0].stroke_chars).filter(|(_, k)| **k == c).flat_map(|(s, _)| s.iter().copied()).collect()

@@ -15,6 +15,9 @@ use crate::font::fontset::Glyphs;
 use crate::font::Font;
 use crate::handwriting::{HandwritingStyle, Jitter, SALT_DEFORM, is_cjk, rng_for};
 
+mod block;
+#[cfg(test)]
+mod block_tests;
 pub mod kinsoku;
 mod pen;
 mod segment;
@@ -199,6 +202,38 @@ pub enum Ruling {
 /// Ends a table cell's text: the next character starts the next cell (Tab in the editor).
 pub const CELL_BREAK: char = '\u{1F}';
 
+/// Anchor of an object in the text flow (an inline table or a flowchart); the object itself is
+/// the char's [`Block`] (`Flow::blocks`).
+pub const OBJECT: char = '\u{FFFC}';
+/// Ends an inline table: `OBJECT` cell `CELL_BREAK` cell … `TABLE_END`.
+pub const TABLE_END: char = '\u{1E}';
+
+/// The cells of the inline table whose [`OBJECT`] is at `anchor` and [`TABLE_END`] at `end`:
+/// the [`CELL_BREAK`]-separated char ranges between them, row by row.
+pub fn table_cells(chars: &[char], anchor: usize, end: usize) -> Vec<std::ops::Range<usize>> {
+    let mut cells = Vec::new();
+    let mut a = anchor + 1;
+    for (k, &c) in chars.iter().enumerate().take(end).skip(anchor + 1) {
+        if c == CELL_BREAK {
+            cells.push(a..k);
+            a = k + 1;
+        }
+    }
+    cells.push(a..end);
+    cells
+}
+
+/// An object drawn by the pen inside the text flow, carried by an [`OBJECT`] char.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Block {
+    /// Inline table: column widths (mm). The cells are the [`CELL_BREAK`]-separated text up to
+    /// the next [`TABLE_END`], filled row by row; rows = cells / columns, rounded up.
+    Table { cols: Vec<f32> },
+    /// Flowchart from Mermaid source (see [`crate::diagram::mermaid`]).
+    Diagram { source: String },
+}
+
 /// Vertical placement of a cell's lines.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -297,6 +332,8 @@ pub struct Document {
     pub grid: bool,
     /// Table forms: every filled cell, in writing order.
     pub cells: Vec<CellInfo>,
+    /// Objects that could not be drawn: (anchor char index, message), e.g. a Mermaid syntax error.
+    pub block_errors: Vec<(usize, String)>,
 }
 
 impl Document {
@@ -538,6 +575,8 @@ pub struct Flow<'a> {
     pub styles: &'a [Option<CharStyle>],
     /// Deformed glyphs from earlier layouts (the editor keeps one per font set).
     pub deform_cache: Option<&'a DeformCache>,
+    /// The object of each [`OBJECT`] char; missing or `None` = not an object.
+    pub blocks: &'a [Option<&'a Block>],
 }
 
 /// Half-width in a grid: two in a row share one cell. Digits and the half space always;
@@ -611,7 +650,7 @@ pub fn layout_flow(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams) -> D
 
 /// One layout pass; `fits[seg]` overrides a table cell's size and rows.
 fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[Option<CellFit>]) -> Document {
-    let Flow { chars, ids, paras, joins, tuning, styles, deform_cache } = *f;
+    let Flow { chars, ids, paras, joins, tuning, styles, deform_cache, blocks } = *f;
     if let Some(c) = deform_cache {
         c.begin(p);
     }
@@ -716,6 +755,19 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
         // Strokes so far belong to the previous character (before any page break below).
         if i > 0 {
             pen.tag_strokes(i - 1);
+        }
+        // Inline tables and flowcharts (not on grids or table forms) are laid out whole.
+        if ch == OBJECT
+            && !table
+            && grid.is_none()
+            && let Some(b) = blocks.get(i).copied().flatten()
+            && let Some((after, newlines)) = block::lay(&mut pen, f, font, i, b)
+        {
+            next = after;
+            para_ix += newlines;
+            (fresh_line, fresh_paragraph) = (true, false);
+            prev = None;
+            continue;
         }
         if fresh_line && ch != '\n' {
             if jitter_on {
@@ -838,6 +890,11 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                     pen.cx += font.space().map(|gl| gl.advance * s).unwrap_or(p.space_width) * f;
                     pen.cx += p.char_spacing;
                 }
+                pen.push_box(x0);
+                continue;
+            }
+            // A stray object marker (half-deleted table, object on a grid) draws nothing.
+            OBJECT | TABLE_END => {
                 pen.push_box(x0);
                 continue;
             }

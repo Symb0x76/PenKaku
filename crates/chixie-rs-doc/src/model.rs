@@ -46,6 +46,10 @@ pub struct Attrs {
     /// 字符轻重: −2 更轻Ⅱ … +2 更重Ⅱ, pen pressure (custom XML part only).
     #[serde(skip_serializing_if = "is_zero")]
     pub weight: i8,
+    /// The object an [`OBJECT`] char stands for (inline table, flowchart); `None` on every
+    /// other char (custom XML part; a table is also written as a Word table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block: Option<Block>,
 }
 
 fn is_zero(v: &i8) -> bool {
@@ -71,18 +75,18 @@ impl Attrs {
     /// Only the character formats (字体, 字号, 倾斜, rules, script, 标题) cleared: 清除格式 keeps the
     /// pen (colour, 轻重), 合并内容 and 字符微调.
     pub fn cleared(&self) -> Attrs {
-        Attrs { colour: self.colour, weight: self.weight, combine_next: self.combine_next, tuning: self.tuning, ..Attrs::default() }
+        Attrs { colour: self.colour, weight: self.weight, combine_next: self.combine_next, tuning: self.tuning, block: self.block.clone(), ..Attrs::default() }
     }
 
     /// This char with `src`'s character formats (格式刷: font, size, colour, tilt, rules, script,
     /// 标题); its 合并内容 and 字符微调 stay.
     pub fn with_formats_of(&self, src: &Attrs) -> Attrs {
-        Attrs { combine_next: self.combine_next, tuning: self.tuning, ..src.clone() }
+        Attrs { combine_next: self.combine_next, tuning: self.tuning, block: self.block.clone(), ..src.clone() }
     }
 }
 
 /// Paragraph formatting lives in core so layout reads it directly.
-pub use chixie_rs_core::layout::{Align, CharStyle, Para, Script, Tuning};
+pub use chixie_rs_core::layout::{Align, Block, CharStyle, OBJECT, Para, Script, TABLE_END, Tuning};
 
 /// One character as stored: the glyph, its stable id (keys the handwriting randomness) and its
 /// formatting.
@@ -197,12 +201,14 @@ impl Document {
         out
     }
 
-    /// Fresh characters for `text` with formatting `attrs` (ids are reserved now).
+    /// Fresh characters for `text` with formatting `attrs` (ids are reserved now). Only an
+    /// [`OBJECT`] char keeps `attrs.block`: text typed after a table anchor is plain text.
     pub fn new_chars(&mut self, text: &str, attrs: &Attrs) -> Vec<Char> {
+        let plain = Attrs { block: None, ..attrs.clone() };
         text.chars()
             .map(|ch| {
                 self.next_id += 1;
-                Char { ch, id: self.next_id - 1, attrs: attrs.clone() }
+                Char { ch, id: self.next_id - 1, attrs: if ch == OBJECT { attrs.clone() } else { plain.clone() } }
             })
             .collect()
     }
@@ -266,6 +272,46 @@ impl Document {
                 Command::SetParas { first, paras: old }
             }
         }
+    }
+
+    /// For a table form: inline tables turned back into plain cell segments (a Word file's tables
+    /// read as one run of cells, consecutive tables joined by a cell break). `None` when there
+    /// are no inline tables.
+    pub fn flatten_tables(&self) -> Option<Self> {
+        let c = &self.chars;
+        let table = |k: usize| c[k] == OBJECT && matches!(self.attrs(k).block, Some(Block::Table { .. }));
+        if !(0..c.len()).any(table) {
+            return None;
+        }
+        let mut chars = Vec::with_capacity(c.len());
+        let mut paras = vec![self.paras[0]];
+        let mut para = 0;
+        let mut k = 0;
+        while k < c.len() {
+            match c[k] {
+                _ if table(k) => {}
+                TABLE_END if c.get(k + 1) == Some(&'\n') && k + 2 < c.len() && table(k + 2) => {
+                    // Next table: its cells continue after a cell break; the newline between goes.
+                    chars.push(Char { ch: chixie_rs_core::layout::CELL_BREAK, id: self.ids[k], attrs: Attrs::default() });
+                    para += 1;
+                    k += 3;
+                    continue;
+                }
+                TABLE_END => {}
+                '\n' => {
+                    para += 1;
+                    paras.push(self.paras[para]);
+                    chars.push(self.char(k));
+                }
+                _ => chars.push(self.char(k)),
+            }
+            k += 1;
+        }
+        // Empty cells at the end carry nothing (as a form reads them).
+        while chars.last().is_some_and(|c| c.ch == chixie_rs_core::layout::CELL_BREAK) {
+            chars.pop();
+        }
+        Self::from_loaded(chars, paras)
     }
 
     /// Structural equality ignoring the interning table and the id counter.
