@@ -292,7 +292,6 @@ fn open(port: Option<String>, ip: Option<String>, baud: u32) -> penkaku_core::Re
 
 fn main() -> penkaku_core::Result<()> {
     env_logger::init();
-    penkaku_core::config::migrate_legacy_dirs();
     match Cli::parse().cmd {
         Cmd::Ports => {
             for p in transport::list_ports()? {

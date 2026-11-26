@@ -17,8 +17,6 @@ use quick_xml::events::Event;
 use crate::template::{Template, TemplateKind};
 
 const META_ID: &str = "penkaku-template";
-/// Written before the rename to PenKaku; still read.
-const LEGACY_META_ID: &str = "chixie-template";
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
@@ -130,7 +128,7 @@ pub fn read(svg: &str, assets: &Path) -> Result<Template, String> {
     loop {
         match r.read_event().map_err(|e| e.to_string())? {
             Event::Start(e) if e.local_name().as_ref() == b"metadata" => {
-                in_meta = e.attributes().flatten().any(|a| a.key.as_ref() == b"id" && [META_ID, LEGACY_META_ID].iter().any(|id| a.value.as_ref() == id.as_bytes()));
+                in_meta = e.attributes().flatten().any(|a| a.key.as_ref() == b"id" && a.value.as_ref() == META_ID.as_bytes());
             }
             Event::End(e) if e.local_name().as_ref() == b"metadata" => in_meta = false,
             Event::CData(c) if in_meta => meta += &String::from_utf8_lossy(&c),
@@ -210,14 +208,6 @@ mod tests {
             tt.add_page();
         }
         t
-    }
-
-    #[test]
-    fn templates_saved_before_the_rename_still_read() {
-        let a = dir("legacy");
-        let t = Template::ruled("信纸", (160.0, 220.0), (1.5, 1.0, 1.5, 1.0), 22);
-        let svg = write(&t, &a).replace(META_ID, LEGACY_META_ID).replace("data-penkaku-template", "data-chixie-template");
-        assert_eq!(read(&svg, &a).unwrap(), t);
     }
 
     #[test]

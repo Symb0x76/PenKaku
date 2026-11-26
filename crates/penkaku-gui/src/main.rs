@@ -50,7 +50,7 @@ use gpui_kit::*;
 use crate::app::PenKakuApp;
 use crate::state::AppState;
 
-/// `PENKAKU_<key>` (or the pre-rename `CHIXIE_RS_<key>`) is set.
+/// `PENKAKU_<key>` is set.
 fn flag(key: &str) -> bool {
     penkaku_core::env_var(key).is_some()
 }
@@ -69,7 +69,6 @@ fn main() {
     let settings_path = if fake {
         std::env::temp_dir().join("penkaku-demo").join("settings.toml")
     } else {
-        penkaku_core::config::migrate_legacy_dirs();
         Settings::default_path().unwrap_or_else(|_| PathBuf::from("settings.toml"))
     };
     let mut settings = Settings::load(&settings_path).unwrap_or_else(|e| {

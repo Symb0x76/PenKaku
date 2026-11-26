@@ -540,7 +540,7 @@ impl DevicePanel {
                         Button::new("connect").small().primary().label("连接").loading(self.connecting).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.connect(cx)))
                     }),
             )
-            .child(div().text_xs().text_color(muted).child("★ = 识别为赤写主板；「自动」在 USB 重新插拔后也能找到"))
+            .child(div().text_xs().text_color(muted).child("★ = 识别为炽写主板；「自动」在 USB 重新插拔后也能找到"))
             .into_any_element()
     }
 

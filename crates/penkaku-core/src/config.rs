@@ -339,33 +339,6 @@ pub fn portable_dir(exe: &Path) -> Option<PathBuf> {
     [Some(dir), bundle].into_iter().flatten().find(|d| d.join(PORTABLE_MARKER).is_file()).map(|d| d.join("data"))
 }
 
-/// Move folders made before the rename to PenKaku to their new places: the settings folder and
-/// `Documents/chixie-rs` (fonts and templates). Each is moved only if its new place does not
-/// exist yet, so this is a no-op after the first run. Not for a portable copy. Failures are
-/// logged and leave the old folder where it is.
-pub fn migrate_legacy_dirs() {
-    if std::env::current_exe().ok().and_then(|exe| portable_dir(&exe)).is_some() {
-        return;
-    }
-    let config = |name| directories::ProjectDirs::from("", "", name).map(|d| d.config_dir().to_path_buf());
-    let docs = crate::font::library::default_dir().parent().map(Path::to_path_buf);
-    let pairs = [
-        (config("penkaku"), config(crate::LEGACY_NAME)),
-        (docs.clone(), docs.as_deref().and_then(|d| Some(d.parent()?.join(crate::LEGACY_NAME)))),
-    ];
-    for (new, old) in pairs {
-        let (Some(new), Some(old)) = (new, old) else { continue };
-        if new.exists() || !old.is_dir() {
-            continue;
-        }
-        let moved = new.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::rename(&old, &new));
-        match moved {
-            Ok(()) => log::info!("moved {} to {}", old.display(), new.display()),
-            Err(e) => log::warn!("could not move {} to {}: {e}", old.display(), new.display()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

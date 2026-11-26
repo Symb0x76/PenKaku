@@ -45,11 +45,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The project's name before it became PenKaku: still read for folders, saved passwords and
-/// environment variables made by older versions.
-pub const LEGACY_NAME: &str = "chixie-rs";
-
-/// Environment variable `PENKAKU_<key>`, falling back to the pre-rename `CHIXIE_RS_<key>`.
+/// Environment variable `PENKAKU_<key>`.
 pub fn env_var(key: &str) -> Option<String> {
-    std::env::var(format!("PENKAKU_{key}")).or_else(|_| std::env::var(format!("CHIXIE_RS_{key}"))).ok()
+    std::env::var(format!("PENKAKU_{key}")).ok()
 }

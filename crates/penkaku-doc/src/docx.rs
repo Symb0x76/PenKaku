@@ -26,8 +26,6 @@ use crate::model::{Align, Attrs, Block, Char, Document, OBJECT, Para, Script, TA
 
 /// Namespace of our custom XML part.
 pub const NS: &str = "urn:penkaku:doc:1";
-/// [`NS`] before the rename to PenKaku; still read.
-pub const LEGACY_NS: &str = "urn:chixie-rs:doc:1";
 const MM_PER_PT: f32 = 25.4 / 72.0;
 const TWIPS_PER_MM: f32 = 1440.0 / 25.4;
 
@@ -680,7 +678,7 @@ fn find_extras(zip: &mut ZipArchive<Cursor<&[u8]>>) -> Option<Extras> {
     let names: Vec<String> = zip.file_names().filter_map(|n| n.ok()).filter(|n| n.starts_with("customXml/item") && !n.contains("Props")).map(|n| n.into_owned()).collect();
     for n in names {
         let mut s = String::new();
-        if zip.by_name(&n).ok()?.read_to_string(&mut s).is_err() || !(s.contains(NS) || s.contains(LEGACY_NS)) {
+        if zip.by_name(&n).ok()?.read_to_string(&mut s).is_err() || !s.contains(NS) {
             continue;
         }
         let mut r = Reader::from_str(&s);
@@ -783,13 +781,13 @@ mod tests {
     use crate::model::Command;
 
     fn sample() -> Document {
-        let mut d = Document::from_text("你好，chixie-rs！\n第二段\t制表 & <符号>\n");
+        let mut d = Document::from_text("你好，PenKaku！\n第二段\t制表 & <符号>\n");
         let red = Attrs { colour: Some([200, 0, 0]), size_pt: Some(14.5), font: Some("楷体".into()), v_offset: Some(-0.7), tilt: 1, underline: true, strike: true, script: Script::Super, title: true, ..Attrs::default() };
         d.apply(Command::SetAttrs { at: 0, attrs: vec![red; 2] });
         // 左倾斜 and 下标 on "，".
         let left = Attrs { tilt: -1, script: Script::Sub, ..Attrs::default() };
         d.apply(Command::SetAttrs { at: 2, attrs: vec![left] });
-        // 合并内容 on "ch" (custom part only).
+        // 合并内容 on "Pe" (custom part only).
         let joined = Attrs { combine_next: true, ..Attrs::default() };
         d.apply(Command::SetAttrs { at: 3, attrs: vec![joined] });
         d.apply(Command::SetParas { first: 1, paras: vec![Para { align: Align::Center, first_indent: Some(16.25) }] });
@@ -806,24 +804,6 @@ mod tests {
         assert_eq!(bytes, write(&d, 42).unwrap(), "same input, same bytes");
         let l = read(&bytes).unwrap();
         assert!(l.doc.same_content(&d), "{:?}", l.doc.text());
-        assert_eq!(l.seed, Some(42));
-    }
-
-    #[test]
-    fn files_saved_before_the_rename_keep_their_extras() {
-        let d = sample();
-        let mut old = ZipArchive::new(Cursor::new(write(&d, 42).unwrap())).unwrap();
-        let mut w = ZipWriter::new(Cursor::new(Vec::new()));
-        for i in 0..old.len() {
-            let mut f = old.by_index(i).unwrap();
-            let mut s = Vec::new();
-            f.read_to_end(&mut s).unwrap();
-            let s = String::from_utf8(s).unwrap().replace(NS, LEGACY_NS).replace("<penkaku ", "<chixie ").replace("</penkaku>", "</chixie>");
-            w.start_file(f.name().unwrap().to_string(), SimpleFileOptions::default()).unwrap();
-            w.write_all(s.as_bytes()).unwrap();
-        }
-        let l = read(w.finish().unwrap().get_ref()).unwrap();
-        assert!(l.doc.same_content(&d));
         assert_eq!(l.seed, Some(42));
     }
 
@@ -857,12 +837,12 @@ mod tests {
     fn edits_made_elsewhere_keep_the_untouched_ids() {
         let d = sample();
         let ex = Extras { version: 1, seed: 7, text: d.text(), ids: rle_ids(d.ids()), styles: vec![Attrs::default()], attrs: vec![(0, d.len() as u32)], paras: d.paras().to_vec() };
-        // Word user replaced "chixie" with "XY".
-        let new_text = d.text().replace("chixie", "XY");
+        // Word user replaced "PenKaku" with "XY".
+        let new_text = d.text().replace("PenKaku", "XY");
         let parsed: Vec<(char, Attrs)> = new_text.chars().map(|c| (c, Attrs::default())).collect();
         let m = merge(parsed, d.paras().to_vec(), &ex).unwrap();
         assert_eq!(m.text(), new_text);
-        let pre = d.text().chars().position(|c| c == 'c').unwrap();
+        let pre = d.text().chars().position(|c| c == 'P').unwrap();
         assert_eq!(&m.ids()[..pre], &d.ids()[..pre]);
         assert_eq!(m.ids()[m.len() - 1], d.ids()[d.len() - 1]);
         assert!(m.ids()[pre] > *d.ids().iter().max().unwrap(), "changed span gets fresh ids");

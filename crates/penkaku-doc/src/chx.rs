@@ -28,11 +28,11 @@ mod tests {
     fn v1_fixtures_open_identically() {
         // Written by penkaku 0.1 (`file_ops::save_chx`): ids are not 0..n after an edit.
         let l = read(include_bytes!("../tests/fixtures/v1-edited.chx")).unwrap();
-        assert_eq!(l.doc.text(), "啊你好\n赤写");
+        assert_eq!(l.doc.text(), "啊你好\n炽写");
         assert_eq!(l.doc.ids(), &[5, 0, 1, 2, 3, 4]);
         assert_eq!(l.seed, Some(42));
         let l = read(include_bytes!("../tests/fixtures/v1-plain.chx")).unwrap();
-        assert_eq!(l.doc.text(), "你好，chixie-rs！\n春眠不觉晓，处处闻啼鸟。");
+        assert_eq!(l.doc.text(), "你好，PenKaku！\n春眠不觉晓，处处闻啼鸟。");
         assert_eq!(l.doc.ids(), &(0..l.doc.len() as u64).collect::<Vec<_>>()[..]);
         assert_eq!(l.seed, Some(20251107));
     }
