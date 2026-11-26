@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Only a version tag (v*) uploads anything: the sample PDFs, the debug packages and the
+  # optimised portable packages, which the release job attaches to a draft release.
+  TAGGED: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   check:
@@ -53,9 +56,10 @@ jobs:
       run: ./target/debug/penkaku-cli pdf "你好你好" --font-json crates/penkaku-core/tests/fixtures/font_fixture.json --out sample-${{ runner.os }}.pdf
 
     - name: Upload sample PDF
+      if: env.TAGGED == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: sample-pdf-${{ runner.os }}
+        name: release-sample-pdf-${{ runner.os }}
         path: sample-${{ runner.os }}.pdf
         if-no-files-found: error
 
@@ -88,52 +92,54 @@ jobs:
         grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
         grep -q 'AUTOTEST_PERF pages=' autotest.log
 
+    # Debug package (checked on every run, uploaded only for tags).
     # Windows: the exes (icon embedded by build.rs). macOS: penkaku.app with its .icns.
-    # Linux: binaries, .desktop entry, hicolor icons and install.sh. macOS and Linux are tarred
+    # Linux: binaries, .desktop entry, hicolor icons and install.sh. All are archived here
     # because artifact zips drop the executable bit.
-    - name: Package
+    - name: Package debug
       shell: bash
       run: |
-        t=target/debug; r=crates/penkaku-gui/resources
-        mkdir -p dist
+        t=target/debug; r=crates/penkaku-gui/resources; p=dist/penkaku
+        mkdir -p $p
         case "$RUNNER_OS" in
           Windows)
-            cp $t/penkaku.exe $t/penkaku-cli.exe dist/ ;;
+            cp $t/penkaku.exe $t/penkaku-cli.exe $p/
+            (cd dist && 7z a -tzip ../penkaku-debug-Windows.zip penkaku) ;;
           macOS)
-            app=dist/penkaku.app/Contents
+            app=$p/penkaku.app/Contents
             mkdir -p $app/MacOS $app/Resources
             cp $t/penkaku $app/MacOS/
             cp $r/macos/Info.plist $app/
             cp $r/icon/penkaku.icns $app/Resources/
             plutil -lint $app/Info.plist
-            codesign --force --deep --sign - dist/penkaku.app
-            cp $t/penkaku-cli dist/
-            tar -czf penkaku-macOS.tar.gz -C dist . ;;
+            codesign --force --deep --sign - $p/penkaku.app
+            cp $t/penkaku-cli $p/
+            tar -czf penkaku-debug-macOS.tar.gz -C dist penkaku ;;
           Linux)
-            p=dist/penkaku
             mkdir -p $p/icons
             cp $t/penkaku $t/penkaku-cli $r/linux/penkaku.desktop $r/linux/install.sh $p/
             cp $r/icon/png/*.png $p/icons/
             chmod +x $p/install.sh
-            tar -czf penkaku-Linux.tar.gz -C dist penkaku ;;
+            tar -czf penkaku-debug-Linux.tar.gz -C dist penkaku ;;
         esac
 
-    - name: Upload build
+    - name: Upload debug package
+      if: env.TAGGED == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: penkaku-${{ runner.os }}-debug
-        path: ${{ runner.os == 'Windows' && 'dist/' || format('penkaku-{0}.tar.gz', runner.os) }}
+        name: release-debug-${{ runner.os }}
+        path: ${{ runner.os == 'Windows' && 'penkaku-debug-Windows.zip' || format('penkaku-debug-{0}.tar.gz', runner.os) }}
         if-no-files-found: error
 
     # Portable release build: optimised binaries plus a `portable` marker, so settings, fonts
     # and templates go to a `data` folder beside the program (next to penkaku.app on macOS).
-    # Fat LTO is slow, so only on manual runs and tags.
+    # Fat LTO is slow, so only for version tags.
     - name: Build release
-      if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      if: env.TAGGED == 'true'
       run: cargo build --release -p penkaku-gui -p penkaku-cli
 
     - name: Package portable
-      if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      if: env.TAGGED == 'true'
       shell: bash
       run: |
         t=target/release; r=crates/penkaku-gui/resources; p=portable/penkaku
@@ -157,28 +163,32 @@ jobs:
             tar -czf penkaku-portable-Linux.tar.gz -C portable penkaku ;;
         esac
 
-    - name: Upload portable
-      if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    - name: Upload portable package
+      if: env.TAGGED == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: penkaku-${{ runner.os }}-portable
+        name: release-portable-${{ runner.os }}
         path: ${{ runner.os == 'Windows' && 'penkaku-portable-Windows.zip' || format('penkaku-portable-{0}.tar.gz', runner.os) }}
         if-no-files-found: error
 
-  # Create a GitHub Draft Release with empty notes when a git tag is pushed;
-  # release notes are filled in and published manually.
+  # For a version tag: a GitHub Draft Release with every uploaded file (portable, debug and
+  # sample PDF per OS). Notes are filled in and the release is published by hand.
   release:
     name: Draft Release
     needs: check
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # No checkout in this job, so gh needs the repository named.
+      GH_REPO: ${{ github.repository }}
     steps:
-    - name: Download portable artifacts
+    - name: Download artifacts
       uses: actions/download-artifact@v4
       with:
-        pattern: penkaku-*-portable
+        pattern: release-*
         path: release-assets
         merge-multiple: true
 
@@ -186,13 +196,13 @@ jobs:
       shell: bash
       run: |
         ls -la release-assets
-        test -f release-assets/penkaku-portable-Windows.zip
-        test -f release-assets/penkaku-portable-macOS.tar.gz
-        test -f release-assets/penkaku-portable-Linux.tar.gz
+        for f in penkaku-portable-Windows.zip penkaku-portable-macOS.tar.gz penkaku-portable-Linux.tar.gz \
+                 penkaku-debug-Windows.zip penkaku-debug-macOS.tar.gz penkaku-debug-Linux.tar.gz \
+                 sample-Windows.pdf sample-macOS.pdf sample-Linux.pdf; do
+          test -f "release-assets/$f" || { echo "missing $f"; exit 1; }
+        done
 
     - name: Create draft release
-      env:
-        GH_TOKEN: ${{ github.token }}
       shell: bash
       run: |
         if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

@@ -155,11 +155,21 @@ penkaku/
 
 ## Download
 
-Each CI run on GitHub Actions builds natively on `windows-latest`, `macos-latest`, and `ubuntu-latest` and uploads `penkaku-<OS>-debug` artifacts (`penkaku` GUI and `penkaku-cli`):
+Download from the [**Releases**](https://github.com/Symb0x76/PenKaku/releases) page. Each release is built natively by CI on Windows, macOS, and Linux and ships, per OS, the `penkaku` GUI and `penkaku-cli`:
 
-- **Windows:** `penkaku.exe` and `penkaku-cli.exe`; run directly (install the WCH CH340 driver if your board's COM port does not appear automatically).
-- **macOS:** `penkaku-macOS.tar.gz` containing `penkaku.app`. Unpack and move it to Applications. The app is not notarized, so the first start requires right-click › Open (or `xattr -dr com.apple.quarantine`).
-- **Linux:** `penkaku-Linux.tar.gz`. Unpack and run `./penkaku/install.sh` to install into `~/.local` with a desktop menu entry and icon (`PREFIX=/usr/local` system-wide). Ensure your user is in the `dialout` group for serial access.
+| File                                                 | What it is                                                                                     |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `penkaku-portable-<OS>.zip` / `.tar.gz` (**recommended**) | Optimised build in a portable `penkaku` folder: settings, drafts, fonts, and templates live in a `data` folder beside the program, so the folder can go on a USB stick |
+| `penkaku-debug-<OS>.zip` / `.tar.gz`                 | Unoptimised debug build with the normal per-user data locations (see [File Locations](#file-locations)); on Linux it includes `install.sh` |
+| `sample-<OS>.pdf`                                    | A ruled sample page exported on that OS, for checking PDF output                               |
+
+- **Windows:** unzip and run `penkaku.exe` (install the WCH CH340 driver if your board's COM port does not appear automatically).
+- **macOS:** unpack and open `penkaku/penkaku.app`. The app is not notarized, so the first start requires right-click › Open (or `xattr -dr com.apple.quarantine`). In the portable build, `data` sits next to `penkaku.app`.
+- **Linux:** unpack and run `./penkaku/penkaku`. For a desktop menu entry and icon, use the debug package's `./penkaku/install.sh` (installs into `~/.local`; `PREFIX=/usr/local` system-wide). Ensure your user is in the `dialout` group for serial access.
+
+The portable mode is switched by the empty `portable` file next to the program: delete it and that copy uses the normal locations. Saved login passwords stay in the OS credential store and do not travel with the folder.
+
+Ordinary CI runs only build and test; nothing is uploaded unless a version tag (`v*`) is pushed.
 
 The app icon is generated from [docs/OriginIcon.png](docs/OriginIcon.png) by [make_icons.py](crates/penkaku-gui/resources/icon/make_icons.py); generated assets are committed.
 

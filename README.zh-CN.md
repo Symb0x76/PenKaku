@@ -160,11 +160,21 @@ penkaku/
 
 ## 下载安装
 
-GitHub Actions 每次 CI 都会在 `windows-latest`、`macos-latest`、`ubuntu-latest` 原生构建并上传 `penkaku-<OS>-debug` 产物（含图形端 `penkaku` 与命令行 `penkaku-cli`）：
+请到 [**Releases**](https://github.com/Symb0x76/PenKaku/releases) 页面下载。每个版本都由 CI 在 Windows、macOS、Linux 上原生构建，每个系统都附带图形端 `penkaku` 与命令行 `penkaku-cli`：
 
-- **Windows：** 解压获取 `penkaku.exe` 和 `penkaku-cli.exe`，直接运行。若系统未自动识别 CH340 串口，请先安装 WCH 官方 CH340 驱动。
-- **macOS：** 解压 `penkaku-macOS.tar.gz`，将 `penkaku.app` 拖入“应用程序”。因未进行 Apple 公证，首次启动需右键点击应用选择 **打开**（或执行 `xattr -dr com.apple.quarantine`）。
-- **Linux：** 解压 `penkaku-Linux.tar.gz`，运行 `./penkaku/install.sh` 安装到 `~/.local` 并注册桌面菜单与图标（全局安装可使用 `PREFIX=/usr/local`）；使用串口请确保当前用户在 `dialout`（或发行版对应串口）用户组中。
+| 文件                                               | 说明                                                                                     |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `penkaku-portable-<OS>.zip` / `.tar.gz`（**推荐**） | 优化后的便携版：设置、草稿、字体、模板都存在程序旁边的 `data` 文件夹，整个文件夹可以拷到 U 盘带走 |
+| `penkaku-debug-<OS>.zip` / `.tar.gz`               | 未优化的调试版，数据存在常规的用户目录（见[文件位置说明](#文件位置说明)）；Linux 包内含 `install.sh` |
+| `sample-<OS>.pdf`                                  | 在该系统上导出的信纸示例页，用来检查 PDF 输出                                              |
+
+- **Windows：** 解压后运行 `penkaku.exe`。若系统未自动识别 CH340 串口，请先安装 WCH 官方 CH340 驱动。
+- **macOS：** 解压后打开 `penkaku/penkaku.app`。因未进行 Apple 公证，首次启动需右键点击应用选择 **打开**（或执行 `xattr -dr com.apple.quarantine`）。便携版的 `data` 放在 `penkaku.app` 旁边。
+- **Linux：** 解压后运行 `./penkaku/penkaku`。如需桌面菜单与图标，用调试版里的 `./penkaku/install.sh` 安装到 `~/.local`（全局安装可使用 `PREFIX=/usr/local`）；使用串口请确保当前用户在 `dialout`（或发行版对应串口）用户组中。
+
+便携模式由程序旁边那个空的 `portable` 文件开启：删掉它，这份程序就改用常规位置。记住的登录密码仍存在系统凭据库里，不会随文件夹带走。
+
+普通的 CI 只做构建和测试，不上传任何文件；只有推送版本 tag（`v*`）时才会上传。
 
 应用图标由 [make_icons.py](crates/penkaku-gui/resources/icon/make_icons.py) 从 [OriginIcon.png](docs/OriginIcon.png) 生成，生成产物已随仓库提交。
 
