@@ -104,6 +104,51 @@ fn inline_table_rows_move_to_the_next_page() {
     assert_eq!(doc.pages[1].stroke_chars.iter().filter(|&&c| c == 0).count(), 5);
 }
 
+/// Every stroke of every page lies within the page's height (mm down from the top).
+fn all_on_paper(doc: &Document, h: f32) -> bool {
+    doc.pages.iter().flat_map(|p| &p.strokes).all(|s| {
+        let (a, b) = y_span(s);
+        a >= -1e-3 && b <= h + 1e-3
+    })
+}
+
+/// "X" ¶ one cell of 40 X's (8 lines in a 30 mm column) ¶ "X" ¶ "X".
+fn long_cell() -> (String, Vec<(usize, Block)>) {
+    let long = "X".repeat(40);
+    (format!("X\n{OBJECT}{long}{TABLE_END}\nX\nX"), vec![(2, Block::Table { cols: vec![30.0] })])
+}
+
+#[test]
+fn ruled_table_row_taller_than_the_page_goes_on_overleaf() {
+    // 信纸 with 3 rows a page; the cell needs 8 (a long cell, as in an imported report). Its
+    // row fills the rest of page 0 (2 rows), all of page 1 and page 2, each part framed on its
+    // own page; nothing runs past a page's foot, and the text after it starts on page 3.
+    let p = PageParams {
+        page: Some(PageBox { width: 100.0, height: 30.0 }),
+        ruling: Ruling::Rows { rows: (3, 3), columns: 1, column_gap: 0.0, widths: vec![], band: None, upper: false, dashed: false, divider: false },
+        ..Default::default()
+    };
+    let (t, b) = long_cell();
+    let doc = with_blocks(&t, &b, &[], &p);
+    assert_eq!(doc.boxes.len(), t.chars().count(), "one box per char");
+    assert!(all_on_paper(&doc, 30.0));
+    let framed = |pg: usize| doc.pages[pg].stroke_chars.contains(&2);
+    assert!(framed(0) && framed(1) && framed(2));
+    let cell_lines: Vec<usize> = doc.lines.iter().filter(|l| l.start >= 3 && l.end <= 43).map(|l| l.page).collect();
+    assert_eq!(cell_lines, vec![0, 0, 1, 1, 1, 2, 2, 2]);
+    let last = t.chars().count() - 1;
+    assert!(doc.lines.last().is_some_and(|l| l.page == 3 && l.end >= last));
+}
+
+#[test]
+fn free_table_row_taller_than_the_page_goes_on_overleaf() {
+    let (t, b) = long_cell();
+    let doc = with_blocks(&t, &b, &[], &tall_page(30.0));
+    assert_eq!(doc.boxes.len(), t.chars().count(), "one box per char");
+    assert!(all_on_paper(&doc, 30.0));
+    assert!(doc.pages.len() >= 3);
+}
+
 #[test]
 fn inline_table_frame_wavers_with_handwriting_but_keeps_corners() {
     let (t, b) = small_table();

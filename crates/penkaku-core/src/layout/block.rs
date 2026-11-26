@@ -82,8 +82,11 @@ fn make_room(pen: &mut Pen, h: f32, slots: usize) -> f32 {
 /// object's last band, so the `'\n'` after it moves to the line below.
 fn leave(pen: &mut Pen, top: f32, bottom: f32, last_slot: usize) {
     match pen.p.ruling {
-        Ruling::Rows { .. } => {
-            pen.slot = last_slot;
+        Ruling::Rows { columns, .. } => {
+            // An object taller than the room left (a long table cell) runs past the page's last
+            // row; carry on from that row, so the next line starts a new page.
+            let page_slots = pen.rows.max(1) as usize * columns.max(1) as usize;
+            pen.slot = last_slot.min(page_slots - 1);
             pen.enter_slot();
         }
         _ => {
@@ -191,6 +194,78 @@ fn graft(pen: &mut Pen, sub: Document, first: usize, dx: f32, dy: f32, line_dy: 
     pen.doc.missing_at.extend(sub.missing_at.into_iter().map(|k| k + first));
 }
 
+/// Lines `range` of a cell's sub-document, placed like [`graft`] but with line `range.start` at
+/// the top (a row split across pages writes its cells in such chunks). When the range holds the
+/// cell's last line, returns the caret stop after its text: (line index, machine x).
+#[allow(clippy::too_many_arguments)]
+fn graft_lines(pen: &mut Pen, sub: &Document, first: usize, range: std::ops::Range<usize>, dx: f32, dy: f32, line_dy: f32) -> Option<(usize, f32)> {
+    let base_line = pen.doc.lines.len();
+    let page = pen.page_ix;
+    let n = sub.lines.len();
+    // Machine y of the chunk's first line in the sub-document, lifted to the chunk's top.
+    let lift = sub.lines.get(range.start).map_or(0.0, |l| l.top);
+    let in_range = |line: usize| range.contains(&line);
+    if let Some(sp) = sub.pages.first() {
+        for (s, &c) in sp.strokes.iter().zip(sp.stroke_chars.iter().chain(std::iter::repeat(&0))) {
+            if sub.boxes.get(c).is_some_and(|b| in_range(b.line)) {
+                pen.page.strokes.push(s.iter().map(|&(x, y)| (x + dx, y + dy - lift)).collect());
+                pen.page.stroke_chars.push(first + c);
+            }
+        }
+    }
+    for (k, b) in sub.boxes.iter().enumerate() {
+        if in_range(b.line) {
+            pen.doc.boxes.push(CharBox { page, line: base_line + b.line - range.start, x0: b.x0 + dx, x1: b.x1 + dx });
+            if sub.missing_at.contains(&k) {
+                pen.doc.missing_at.push(first + k);
+            }
+        }
+    }
+    for l in sub.lines.iter().take(range.end).skip(range.start) {
+        pen.doc.lines.push(LineInfo { page, top: l.top - lift + line_dy, bottom: l.bottom - lift + line_dy, start: l.start + first, end: l.end + first });
+    }
+    if range.start == 0 {
+        for &c in &sub.missing {
+            if !pen.doc.missing.contains(&c) {
+                pen.doc.missing.push(c);
+            }
+        }
+    }
+    let last = n.saturating_sub(1);
+    (in_range(last) || (n == 0 && range.start == 0)).then(|| (base_line + last.saturating_sub(range.start), sub.boxes.last().map_or(dx, |b| b.x1 + dx)))
+}
+
+/// How many more table lines fit on this page (ruled: in this column), and how many a fresh one
+/// holds; `None` on an unbounded page.
+fn room_rows(pen: &Pen, pitch: f32) -> Option<(usize, usize)> {
+    match pen.p.ruling {
+        Ruling::Rows { .. } => {
+            let n = pen.rows.max(1) as usize;
+            Some((n - pen.slot % n, n))
+        }
+        _ => {
+            let h = pen.p.page?.height;
+            let fits = |room: f32| ((room / pitch) + 1e-3).floor().max(0.0) as usize;
+            Some((fits(h - pen.line_top), fits(h).max(1)))
+        }
+    }
+}
+
+/// Go on at the top of the next ruled column, or of the next page.
+fn next_column_or_page(pen: &mut Pen) {
+    match pen.p.ruling {
+        Ruling::Rows { columns, .. } => {
+            let n = pen.rows.max(1) as usize;
+            pen.slot = (pen.slot / n + 1) * n;
+            if pen.slot >= n * columns.max(1) as usize {
+                pen.new_page();
+            }
+        }
+        _ => pen.new_page(),
+    }
+    pen.enter_slot();
+}
+
 /// A zero-width caret stop at machine x on line `line`.
 fn marker(pen: &mut Pen, x: f32, line: usize) {
     pen.doc.boxes.push(CharBox { page: pen.page_ix, line, x0: x, x1: x });
@@ -252,10 +327,10 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
     let cells = table_cells(f.chars, i, end);
     let id = f.ids[i];
     // Each cell alone, wrapped to its column.
-    let mut subs: Vec<Option<Document>> = cells
+    let subs: Vec<Document> = cells
         .iter()
         .enumerate()
-        .map(|(c, r)| Some(sub_layout(pen, f, font, &f.chars[r.clone()], &f.ids[r.clone()], Some(r.clone()), 1.0, widths[c % ncols] - 2.0 * pad, pitch)))
+        .map(|(c, r)| sub_layout(pen, f, font, &f.chars[r.clone()], &f.ids[r.clone()], Some(r.clone()), 1.0, widths[c % ncols] - 2.0 * pad, pitch))
         .collect();
 
     let voff = (pitch - em) / 2.0;
@@ -264,8 +339,7 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
     let (mut top, mut bottom, mut last_slot) = (0.0, 0.0, pen.slot);
     for r in 0..cells.len().div_ceil(ncols) {
         let row = r * ncols..((r + 1) * ncols).min(cells.len());
-        let lines = row.clone().map(|c| subs[c].as_ref().map_or(1, |d| d.lines.len().max(1))).max().unwrap_or(1);
-        let h = lines as f32 * pitch;
+        let lines = row.clone().map(|c| subs[c].lines.len().max(1)).max().unwrap_or(1);
         if r > 0 {
             // Below the previous row.
             match p.ruling {
@@ -279,39 +353,72 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
                 _ => pen.line_top = bottom,
             }
         }
-        top = make_room(pen, h, lines);
-        let x0 = ox + pen.line_x + xoff;
-        if part.as_ref().is_none_or(|pt| pt.page != pen.page_ix || pt.x0 != x0) {
-            if let Some(pt) = part.take() {
-                frame(pen, &pt, &xs, i, id, &mut frame_k);
+        // A row that fits on a page moves down whole when it does not fit here. A taller one
+        // (a long cell) is written from here in chunks of whole lines, one per page or column,
+        // each with its own piece of frame.
+        let split = room_rows(pen, pitch).is_some_and(|(_, full)| lines > full);
+        if !split {
+            top = make_room(pen, lines as f32 * pitch, lines);
+        }
+        let (mut a, mut fresh) = (0, false);
+        loop {
+            let b = if split {
+                let here = room_rows(pen, pitch).map_or(lines, |(left, _)| left);
+                // No room left here: go on overleaf. On a fresh page take at least one line, so
+                // a line taller than the page cannot stall the loop.
+                if here == 0 && !fresh {
+                    next_column_or_page(pen);
+                    fresh = true;
+                    continue;
+                }
+                (a + here.max(1)).min(lines)
+            } else {
+                lines
+            };
+            if split {
+                top = match p.ruling {
+                    Ruling::Rows { .. } => pen.row_top,
+                    _ => pen.line_top,
+                };
             }
-            part = Some(Part { page: pen.page_ix, x0, ys: vec![top] });
-        }
-        if r == 0 {
-            // The anchor: a caret stop at the table's top-left corner, on a line of its own.
-            marker(pen, x0, pen.doc.lines.len());
-            pen.doc.lines.push(LineInfo { page: pen.page_ix, top: oy - top, bottom: oy - top, start: i, end: i });
-        }
-        for c in row.clone() {
-            let cell = subs[c].take().unwrap_or_default();
-            let rr = cells[c].clone();
-            let dx = x0 + xs[c - row.start] + pad;
-            let last_line = pen.doc.lines.len() + cell.lines.len().saturating_sub(1);
-            let last_x = cell.boxes.last().map_or(dx, |b| b.x1 + dx);
-            graft(pen, cell, rr.start, dx, oy - (top + voff), oy - top, None);
-            // The cell break after the cell: a caret stop at its text's end.
-            if rr.end < end {
-                marker(pen, last_x, last_line);
+            let x0 = ox + pen.line_x + xoff;
+            if part.as_ref().is_none_or(|pt| pt.page != pen.page_ix || pt.x0 != x0) {
+                if let Some(pt) = part.take() {
+                    frame(pen, &pt, &xs, i, id, &mut frame_k);
+                }
+                part = Some(Part { page: pen.page_ix, x0, ys: vec![top] });
             }
+            if r == 0 && a == 0 {
+                // The anchor: a caret stop at the table's top-left corner, on a line of its own.
+                marker(pen, x0, pen.doc.lines.len());
+                pen.doc.lines.push(LineInfo { page: pen.page_ix, top: oy - top, bottom: oy - top, start: i, end: i });
+            }
+            for c in row.clone() {
+                let rr = cells[c].clone();
+                let dx = x0 + xs[c - row.start] + pad;
+                let stop = graft_lines(pen, &subs[c], rr.start, a..b, dx, oy - (top + voff), oy - top);
+                // The cell break after the cell: a caret stop at its text's end.
+                if let Some((line, x)) = stop
+                    && rr.end < end
+                {
+                    marker(pen, x, line);
+                }
+            }
+            bottom = top + (b - a) as f32 * pitch;
+            if let Some(pt) = part.as_mut() {
+                pt.ys.push(bottom);
+            }
+            last_slot = match p.ruling {
+                Ruling::Rows { .. } => pen.slot + (b - a) - 1,
+                _ => pen.slot,
+            };
+            a = b;
+            if a >= lines {
+                break;
+            }
+            next_column_or_page(pen);
+            fresh = true;
         }
-        bottom = top + h;
-        if let Some(pt) = part.as_mut() {
-            pt.ys.push(bottom);
-        }
-        last_slot = match p.ruling {
-            Ruling::Rows { .. } => pen.slot + lines - 1,
-            _ => pen.slot,
-        };
     }
     if let Some(pt) = part.take() {
         frame(pen, &pt, &xs, i, id, &mut frame_k);
