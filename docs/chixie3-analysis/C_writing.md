@@ -498,7 +498,7 @@ Not recoverable from constants: numeric defaults other than those in `config_san
 - Search/replace has no options (case, regex) and runs on the UI thread (TODO).
 - First-line indent availability is limited to caret/selection.
 
-## Appendix B: rules worth carrying into chixie-rs
+## Appendix B: rules worth carrying into PenKaku
 1. Randomness is applied at layout time per character (spacing zh/en, vertical offset, first-char offset, space width, indent width) and baked into the `TextItem`; G-code generation is deterministic from items (consistent with the captures).
 2. Rows are filled by predicted item width vs remaining row width; Return adds a `LineBreakItem`; Tab/indent button inserts an indent `SpaceItem`; there is no automatic 避头尾, only a post-hoc warning pass (leading/post punctuation sets are in slice A @944dfb9 and @944e001).
 3. Character font choice: per char type (zh/en/number/symbol) ordered list main font -> collected fonts, first font with the glyph wins; cell overrides: 指定字体优先 / 字体库配置优先 / 随机字体模式; mix mode picks by weights (random / hash / Unicode).

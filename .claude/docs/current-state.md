@@ -1,6 +1,11 @@
-# Current state — chixie-rs (2026-11-07)
+# Current state — PenKaku (2026-11-07)
 
 ## Status
+- 2026-11-26: renamed chixie-rs → PenKaku (crates `penkaku-*`, bins `penkaku`/`penkaku-cli`,
+  `PENKAKU_*` env, dirs/keyring `penkaku`, XML ns `urn:penkaku:*`). Legacy read paths kept:
+  `penkaku_core::env_var` (CHIXIE_RS_* fallback), `config::migrate_legacy_dirs`, credentials
+  fallback, old docx/font/template markers. ChiXie3 compat names (`chixie3_*`) unchanged.
+  Pending: rename repo root folder `D:\Projects\Rust\chixie-rs` and the GitHub repo.
 - Plan: `C:\Users\Symb0x76\.claude\plans\d-projects-rust-chixie-rs-docs-handoff-fluttering-iverson.md`.
 - M0 done: workspace, golden, gpui-kit spike.
 - M1 done: calibration (mm/unit = size/100) plus jitter, deformation and multi-line layout rules,
@@ -42,7 +47,7 @@
   right task pane `device.rs` (port choice 自动/COMx ★, jog pad 0.1/1/10 mm, 抬笔/落笔, 设为原点,
   回原点, 解锁, live state + position, console, job progress), start confirm with extents
   (300 mm travel warning), 换纸 dialog, disconnect toast with page/line.
-  FAKE mode uses `sim.rs` (simulated Grbl; `CHIXIE_RS_SIM_DELAY_MS`); AUTOTEST runs the
+  FAKE mode uses `sim.rs` (simulated Grbl; `PENKAKU_SIM_DELAY_MS`); AUTOTEST runs the
   2-page job incl. sheet change → Done.
 - VERIFY on hardware (BOSS): connect COM4 via 自动, jog/pen, full job, pause (head stops),
   stop (pen lifts), USB unplug mid-job → toast + reconnect via 自动.
@@ -112,25 +117,25 @@
   (`[ui-form]` tag). 任务编程/固件烧录/多设备群控 are placeholders (no handler, inert as admin).
   Key conflicts to capture: 之/弓 path-planning meaning, `M3S` servo vs captured `G1G90 Z`,
   `G4 P` dwell after pen-down, 高矮 default 98–102 vs protocol.md.
-- Reimplementation plan (2026-11-08): `docs/reimplementation-plan.md`. Product name **chixie-rs**
+- Reimplementation plan (2026-11-08): `docs/reimplementation-plan.md`. Product name **PenKaku**
   (published company-wide; it was "SAST Writer" for a few hours on 2026-11-08). BOSS decisions:
   - writing first (Phase 1 = M0–M10, ~27–37 eng-weeks), then plotting/laser (Phase 2), 百宝箱
     tools (Phase 3), users' own fonts (Phase 4: handwriting capture + zi2zi-JiT/DA-Font generation
     → centre-line vectoriser; NO system-font scan);
   - common formats only: documents DOCX (+ customXml part for seed/ids/template), fonts SVG fonts
     (single-line), templates SVG (+ XLSX for tables), settings/profiles TOML, bundles ZIP;
-  - English folder names: `Documents/chixie-rs/Fonts/`, `.../Templates/` (movable, extra folders,
+  - English folder names: `Documents/penkaku/Fonts/`, `.../Templates/` (movable, extra folders,
     watched);
   - cloud = fonts + template library + 参数同步, local-first, everything exportable/importable;
   - no AI, no commerce, no `.cdoc`/encrypted ChiXie3 formats; local table detector; internal tool
     (no signing/installers/self-update); Windows/macOS/Linux from day one.
 - **M0 done (2026-11-08), branch `m0-foundations`** (not merged; no git remote yet):
-  - Naming: crates `chixie-rs-{core,cli,gui}`, binaries `chixie-rs` / `chixie-rs-cli`, env
-    `CHIXIE_RS_{FAKE,AUTOTEST,SIM_DELAY_MS,ACCOUNT,PASSWORD}`, data dir and keychain service
-    `chixie-rs` (unchanged from before, no migration). Hardware/ChiXie3 names unchanged.
+  - Naming: crates `penkaku-{core,cli,gui}`, binaries `penkaku` / `penkaku-cli`, env
+    `PENKAKU_{FAKE,AUTOTEST,SIM_DELAY_MS,ACCOUNT,PASSWORD}`, data dir and keychain service
+    `penkaku` (renamed from `chixie-rs` on 2026-11-26; legacy dirs/passwords/env still read). Hardware/ChiXie3 names unchanged.
   - CI `.github/workflows/ci.yml`: Windows/macOS/Linux build, clippy -D warnings, tests, GUI
     autotest (non-blocking until seen green), debug artifacts. NOT run yet: needs a GitHub remote.
-  - Capture harness `tools/capture/` (`chixie-rs-cli fake-grbl`, `capture-diff`,
+  - Capture harness `tools/capture/` (`penkaku-cli fake-grbl`, `capture-diff`,
     `capture.ps1`): fresh un-elevated ChiXie3 per run; reproduces protocol.md structure exactly.
     Finding: pasted text varies 0.1–1.3 mm per stroke between identical runs (deform off).
   - Cloud API: `config/font_config` GET shape captured; ChiXie3 has no template-library backend;
@@ -138,7 +143,7 @@
   - `docs/hardware-checklist.md` (14 checks).
 - M0 merged to master (`a16c02c`), CI green on all three OSes.
 - **M1 code done (2026-11-14), merged to master (`cc759b6`) before the hardware run:**
-  - New crate `chixie-rs-device` (transport, grbl, device actor, esp3d, discovery, job).
+  - New crate `penkaku-device` (transport, grbl, device actor, esp3d, discovery, job).
     `DEFAULT_BAUD` lives in core `config`.
   - Stall fix: status replies used to reset the silence timer, so a lost `ok` hung forever. Now:
     no ack for 5 s + fresh `Idle` → resync (via `Bf:` or a `$G` marker), `Event::Resynced` toast.
@@ -151,7 +156,7 @@
     a drop during the sheet prompt re-asks for the sheet.
   - 巡边 (3 modes × written/template area) and 绘制框架线 (merged, boustrophedon, dashes).
   - Auto-connect (`DeviceSettings.auto_connect`, 2 s poll, retries only when the port set changes).
-  - Sim knobs `CHIXIE_RS_SIM_DROP_AT`, `CHIXIE_RS_SIM_DROP_OK`; autotest prints
+  - Sim knobs `PENKAKU_SIM_DROP_AT`, `PENKAKU_SIM_DROP_OK`; autotest prints
     `AUTOTEST_DEVICE … recoveries=` and `AUTOTEST_PATROL`.
 - Open: hardware checklist #1–#15 (BOSS), especially Telnet (#12, #15), the 20-page job (#14),
   and whether a real USB drop reboots the board (decides how often #11 needs a re-zero).
@@ -166,11 +171,11 @@
   - Fake Grbl now interleaves `?` replies with acks (it used to starve them).
   - GUI 断点续写 (`app/resume.rs`): card in the task pane, ChiXie3 validation texts, remembers the
     break character (by id) from stop/error/reconnect; autotest `AUTOTEST_RESUME`.
-  - New crate `chixie-rs-doc`: `Document` (chars + ids + interned `Attrs` + `Para`), `Command`
+  - New crate `penkaku-doc`: `Document` (chars + ids + interned `Attrs` + `Para`), `Command`
     (Splice/SetAttrs/SetParas, apply returns inverse), `EditDoc` moved from core (undo = inverse
     commands; same API + `set_attrs`/`set_align`); proptest undo/redo property.
   - DOCX (`docx.rs`, zip 9 + quick-xml 0.41): runs/paragraphs for Word, custom XML part
-    `urn:chixie-rs:doc:1` with seed/ids/exact attrs; prefix/suffix id recovery after outside edits;
+    `urn:penkaku:doc:1` with seed/ids/exact attrs; prefix/suffix id recovery after outside edits;
     `.chx` v1 + old `draft.chx` migrate; draft is `draft.docx`; golden: G-code identical after a
     round trip; `AUTOTEST_DOCX`.
   - Attribute UI (font/size/colour per run) is NOT in M2: model + file only; layout still uses the
@@ -183,7 +188,7 @@
     with `Flow { chars, ids, paras, joins }`, `layout_doc`, `layout_ids` wrappers), `pen.rs`
     (line/page bookkeeping, `align_line`, `truncate_to`, `draw_char`, `glyph_for`),
     `kinsoku.rs`, `segment.rs` (jieba-rs behind core feature `segment`; GUI enables it).
-  - `Align`/`Para` moved to core (`chixie_rs_doc` re-exports). Alignment per paragraph,
+  - `Align`/`Para` moved to core (`penkaku_doc` re-exports). Alignment per paragraph,
     explicit indent (`Para.first_indent`), Tab / 首行缩进 toggle (`HandwritingStyle::indent_width`).
   - 避头尾 (`PageParams.kinsoku`, settings `page.kinsoku` default on): main loop is `while` and
     steps back ≤ 3 chars; grid hangs ≤ 2 closing marks in the last cell. `Document.punct_issues`
@@ -202,7 +207,7 @@
     export/move/migrate, `watch` via notify 8.2), `fontset.rs` (`Glyphs` trait, `FontRoles`, `MixEntry`,
     `FontSet`), `fix.rs` (字体优化).
   - Settings `fonts: FontSettings { library_dir, extra_dirs, roles, mix, mix_salt, fix }`; fake/autotest mode
-    uses `<temp>/chixie-rs-demo/Fonts`, never Documents.
+    uses `<temp>/penkaku-demo/Fonts`, never Documents.
   - GUI: `font_lib.rs` (`LibraryStore`, cached scan, old FontStore API by i64), `app/fonts_ctl.rs`
     (reload_fonts → `AppState.font_set` + `font_set_gen`, roles, mix, watcher, import/export, folders,
     缺失字符 dialog), 字体库 card ⋯ menu + roles/mix bar, 选项 › 字体; autotest `AUTOTEST_FONTS`.
@@ -222,16 +227,16 @@
   - Autotest `AUTOTEST_EFFECTS`; styled golden re-blessed once.
 - Next: BOSS hardware #13a/#13b/#13c.
 - **M6 in progress (2026-11-17), branch `m6-output`:**
-  - New crate `chixie-rs-output`: `emit.rs` (moved from core `gcode.rs`; `PageCode.pens`, changer
+  - New crate `penkaku-output`: `emit.rs` (moved from core `gcode.rs`; `PageCode.pens`, changer
     macros, `standalone` SD program, 笔锋 `taper_points`) and `plan.rs` (`plan` / `write` / `plan_all`
     → `Written { page, pens }`; 弓字型, 180° about the frame centre, origin shift, `Sheet::snap_origin`).
-    Goldens + legacy oracle moved to `crates/chixie-rs-output/tests/`.
+    Goldens + legacy oracle moved to `crates/penkaku-output/tests/`.
   - Core `profile.rs` (was `gcode.rs` types): `PathPlan`, `Origin`, `PageRotation`, `PenChange`/`PenSlot`,
     `TipTaper`, `Rgb`/`colour_name`; `PageSettings.{origin, rotation, multicolour}`; `num` maps -0 to 0.
     `Page::first_stroke_from` picks the character first (works on reordered pages).
   - Device: `Job.pens`, `Event::AwaitingPen` (after `G4 P0`), continue with `NextSheet`; `stream_range`;
     `esp3d::Board::upload_and_run`, `no_proxy`.
-  - GUI: `ChixieRsApp::written_pages` + `app::job_of` feed every job/export/patrol; 参数设置 rows (路径规划,
+  - GUI: `PenKakuApp::written_pages` + `app::job_of` feed every job/export/patrol; 参数设置 rows (路径规划,
     书写原点, 页面旋转, 多色绘制/换笔模式, 笔锋); draggable origin ring in `doc_view.rs`; 笔色 menu; coloured ink;
     换笔提示 dialog; `app/sd.rs` 上传SD卡; autotest `AUTOTEST_OUTPUT`.
   - Captured 2026-11-17 (`captures/m6/`, docs/protocol.md "Output options"): 弓 = row 2 right to left on
@@ -241,7 +246,7 @@
 - **M6 merged 2026-11-17** (`f9680d0`).
 - **M7 split (BOSS 2026-11-18):** M7a tables, M7b table-frame detector, M7c local template library (no cloud).
 - **M7a in progress (2026-11-18), branch `m7a-tables`:**
-  - New crate `chixie-rs-template`: `template.rs`, `chixie3_templates.rs` (moved from core), `table.rs` (TableTemplate /
+  - New crate `penkaku-template`: `template.rs`, `chixie3_templates.rs` (moved from core), `table.rs` (TableTemplate /
     Table / Cell / Span / DataSource / SameType / CellRange, merge / split / pages), `fill.rs` (data-source values,
     refresh, batch_pages, import_sheets), `xlsx.rs` (calamine 0.38). Core keeps the template name only;
     `Settings::page_params_with(Ruling)`, `Template::apply_to(&mut PageSettings)`.
@@ -249,7 +254,7 @@
     `Document.cells`; layout_flow fits Shrink / AddRows with extra passes; overflow clipped, never written.
     `Ruling::Rows` gained `widths` and `upper`.
   - Doc: `EditDoc::{next_cell, prev_cell, replace_many}`; DOCX `write_tables` / `TableShape` (w:tbl, gridSpan, vMerge),
-    cell break outside tables written as a tab; `chixie_rs_doc::save` takes table shapes.
+    cell break outside tables written as a tab; `penkaku_doc::save` takes table shapes.
   - GUI: `templates_view/table.rs` (table editor), `table_ui.rs` (内容溢出, 批量溢出, 刷新数据, 批量导入), Tab / Shift+Tab,
     overflow badge, ribbon 表格功能, origin right-click menu, template save checks, per-column widths, upper band.
   - Autotest `AUTOTEST_TABLE` (grepped in CI). Not run locally (BOSS at the screen); CI runs it.
@@ -259,7 +264,7 @@
   - Open: 绘制表格 drag, 同型 sync, 异栏同型, data-source prompt on new pages.
 - **M7a merged 2026-11-18** (`bcbc50f`).
 - **M7b in progress (2026-11-18), branch `m7b-detector`:**
-  - New crate `chixie-rs-import`: `grid.rs` (segments → tables, weighted line positions, lines drawn along no span
+  - New crate `penkaku-import`: `grid.rs` (segments → tables, weighted line positions, lines drawn along no span
     dropped), `pdf.rs` (lopdf 0.47 content walk, scans), `raster.rs` (Sauvola, components, corner refine by line
     fits, homography unwarp, ink runs; table frame vs sheet edge), `synth.rs` (test forms: PDFs, rendered photos /
     scans), `detect()`, `left_padding()`. Tests: `tests/forms.rs` (10 forms) + git-ignored `tests/forms-real/`.
@@ -274,7 +279,7 @@
     (rust_xlsxwriter export; import reads sheet XML for widths / heights / merges); `Template.tags`, `.favourite`.
   - Core `Settings.templates` (`library_dir`, `extra_dirs`). GUI: `AppState.template_lib`, `save_templates` = sync,
     `app/templates_ctl.rs` (watch, folders, gallery `bs_gallery`, `gallery_list`), templates_view import / export /
-    tags; 选项 › 模板. Demo / autotest use `<temp>/chixie-rs-demo/Templates`. `AUTOTEST_LIBRARY`.
+    tags; 选项 › 模板. Demo / autotest use `<temp>/penkaku-demo/Templates`. `AUTOTEST_LIBRARY`.
   - Open: cloud library (M10), thumbnails, 同型 sync, 绘制表格 drag.
 - **M8 (2026-11-22), branch `m8-editor`** (plan `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`):
   - Core: `layout::CharStyle` / `Script` / `Flow.styles` (size ratio, 12° tilt, 0.6× scripts, 1.5× 标题, rule
@@ -307,7 +312,7 @@
 - **M9 (2026-11-22), branch `m9-perf`** (plan `C:\Users\Symb0x76\.claude\plans\lexical-honking-thacker.md`; BOSS
   re-scoped: wired + this board only, focus on speed and improvements over ChiXie3; N1 / wireless / 配网 dropped):
   - Perf, measured by `AUTOTEST_PERF` (16 styled pages, CI debug; macOS runner paints no frames) and
-    `crates/chixie-rs-core/tests/layout_timing.rs` (`--ignored`, 8000 chars):
+    `crates/penkaku-core/tests/layout_timing.rs` (`--ignored`, 8000 chars):
 
     | step | relayout | paint/frame |
     |---|---|---|
@@ -319,7 +324,7 @@
     Core timing: styled 8000 chars 262 → 7.6 ms debug, 15.7 → 1.6 ms release. Incremental reflow
     (plan step 3b) not needed after the cache; not done. `[profile.dev.package."*"] opt-level = 2`
     added (CI ships debug builds).
-  - `perf.rs`: `CHIXIE_RS_PERF=1` logs relayout / paint ms.
+  - `perf.rs`: `PENKAKU_PERF=1` logs relayout / paint ms.
   - 中英文分开设置: `HandwritingStyle::{english, number}: ScriptStyle` (scale %, baseline, float,
     deformation; `None` = 同中文). Size and baseline fold into `CharStyle.scale` / `Tuning.dy_mm`.
     手写效果 dialog has 中文 / 英文 / 数字 tabs. `AUTOTEST_SCRIPT`.
@@ -342,7 +347,7 @@
   倾斜, 下划线, 清除格式); sticky until the pointer moves over the page off the selection; flips
   below the line when no room above.
 - 开始 › 中英文 group: 英文 / 数字 role font ▾, size % ▾, 字形… (opens 手写效果 on that tab, whose
-  大小/基线 inputs now re-read settings on open); 消除中英空格 (`chixie_rs_doc::find::cjk_latin_spaces`,
+  大小/基线 inputs now re-read settings on open); 消除中英空格 (`penkaku_doc::find::cjk_latin_spaces`,
   selection or whole doc, one undo step).
 - `AUTOTEST_NAV` + `SHOT_NAV_MISSING` / `SHOT_NAV_SEARCH`. Workspace tests + clippy clean.
 - VERIFY (BOSS): hover feel of the mini bar, right-click selection behaviour, 从此处开始书写 on hardware.
@@ -421,7 +426,7 @@
   templates, drafts and caches follow since they all sit next to settings. Test
   `portable_marker_moves_data_next_to_the_program`.
 - CI: on workflow_dispatch and tags only (fat LTO is slow), `cargo build --release` and upload
-  `chixie-rs-<OS>-portable` (Windows zip, macOS/Linux tar.gz) with the marker. README (en/zh).
+  `penkaku-<OS>-portable` (Windows zip, macOS/Linux tar.gz) with the marker. README (en/zh).
 - Not verified: the release build and portable packaging in CI (needs a manual run); GUI start
   from a portable folder on this machine. Keyring passwords do not travel.
 

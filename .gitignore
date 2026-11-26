@@ -15,4 +15,4 @@
 *.code-workspace
 
 # Real tests
-/crates/chixie-rs-import/tests/forms-real
+/crates/penkaku-import/tests/forms-real

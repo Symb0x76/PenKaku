@@ -1,0 +1,10 @@
+[package]
+name = "penkaku-import"
+description = "PenKaku import: table frames detected locally from PDFs, scans and photos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+image = { workspace = true, features = ["jpeg"] }
+lopdf = { version = "0.47", default-features = false }

@@ -9,7 +9,7 @@ or a serial capture of the old app.
 
 - 115200 baud works. `$I` → `[VER:1.3a.20221201:]`, `[OPT:MPHB]`,
   `[MSG:Mode=BT:Name=BtWriter(90:38:0C:6C:9B:E6):Status=Not connected]` → Grbl_ESP32 1.3a, radio in BT mode.
-- `chixie-rs stream` of a 10 mm relative XY square: all lines acked, head traced it and
+- `PenKaku stream` of a 10 mm relative XY square: all lines acked, head traced it and
   returned to start (confirmed by operator).
 - `$I` does not report RX buffer size; keeping 128 (safe lower bound; Grbl_ESP32 is ≥128).
 - `$$` key values: `$100-102=80` steps/mm, `$110/111=12000` `$112=10000` mm/min max rate,
@@ -67,7 +67,7 @@ unlock with `$X` (reply contains `UNLOCKED`). Task = `initial_gcode` + per-page
 `body_gcode` + `end_gcode`; `change_pen_signal` between colours (multi-colour mode).
 Pause/resume/stop are Python-side (QWaitCondition), plus realtime `!` `~` `?` `0x18`.
 
-chixie-rs resume (M2): every page body comes with a map of the line where each stroke's `G0`
+PenKaku resume (M2): every page body comes with a map of the line where each stroke's `G0`
 starts, and each stroke knows its character. After a drop the actor takes the head's last work
 position (`WPos`, or `MPos` − `WCO`; Grbl_ESP32 reports `MPos` and sends `WCO` every few
 reports), or the position read after reconnecting when the board kept power, and restarts at the
@@ -198,7 +198,7 @@ fit `tools/capture/shape_fit.py`, local only). Per-glyph affine fit against cont
 Two deform-off pastes differ from each other as much as level 3 or 10 differs from the control
 (per glyph: scale 0.95–1.10, shear ±0.08, residual 0.05–0.2 mm), and level 10 is not larger
 than level 3. ChiXie3's per-paste randomness (above) hides the 字形变形 level, so G-code captures
-cannot calibrate it. chixie-rs keeps the level-7 fit (slant −0.12…−0.13, residual 0.035–0.106 mm)
+cannot calibrate it. PenKaku keeps the level-7 fit (slant −0.12…−0.13, residual 0.035–0.106 mm)
 and scales it linearly with the level (VERIFY with typed text if it ever matters).
 
 **Multi-line layout (captured 2026-11-07, 艾玛体 100, effects off)**
@@ -206,7 +206,7 @@ and scales it linearly with the level (VERIFY with typed text if it ever matters
 - ChiXie3's Telnet streaming stalls on long jobs: at ~44, ~752 and ~1682 lines, even with a 3 ms ack
   delay. After a stall, the only reliable reset is disconnect + restart. The first 2 lines (34 glyphs)
   were captured; every glyph fits the typed reference exactly (no per-glyph scale).
-  chixie-rs handles this case in `grbl::stream`: with lines outstanding, no ack for 5 s and a fresh
+  PenKaku handles this case in `grbl::stream`: with lines outstanding, no ack for 5 s and a fresh
   `Idle` status, the board has consumed everything, so the missing `ok`s were lost. An empty RX
   buffer in `Bf:` proves it (only when `$10` enables the field); otherwise a `$G` marker is sent
   and its `[GC:…]` + `ok` (Grbl answers RX strictly in order) proves it. The outstanding lines are
@@ -242,7 +242,7 @@ Fake-Grbl captures, 艾玛体 100, deformation off, text `一二` ⏎ `三十` (
 - The rotation centre is the grid frame's: 20 cells × 8 mm = 160 mm wide; 20 rows × 8 mm + 19 gaps ×
   2.9 mm = 215.1 mm tall (the measured 159.8 × 214.9 is within the per-layout jitter). The pen's start
   point stays the frame's top-left, so a turned page starts at the far corner.
-- chixie-rs: `output::plan` does the same (`serpentine` skips `Document.grid`; rotation
+- PenKaku: `output::plan` does the same (`serpentine` skips `Document.grid`; rotation
   `(w − x, −h − y)` about the writable frame). Not captured: `ParityPageDirectionMode=3` (the run
   stalled; 3 = all pages by the form order), 起点模式, 多色绘制 (ChiXie3's pause is in the app, not
   the G-code).
@@ -268,15 +268,15 @@ and streamed to the fake Grbl (394 lines).
   (a random 0–2 mm first-character offset, on in this config) and the glyph's own bearing.
 - Glyph widths vary up to 2.5 mm between layouts (ChiXie3's per-layout variation); cells are
   written in no fixed order (here 2, 3, 4, 1), each cell's characters in order.
-- chixie-rs: cell rows centre the em (`pen.rs`), padding 1 mm; regression test
+- PenKaku: cell rows centre the em (`pen.rs`), padding 1 mm; regression test
   `template::tests::table_cells_match_chixie3_capture` (tops within 0.6 mm, left edge within our
   padding .. padding + 2 mm).
 
 ## Character formats (not captured yet: VERIFY)
-chixie-rs draws 字符格式 with its own factors until a ChiXie3 capture of one line with each format
+PenKaku draws 字符格式 with its own factors until a ChiXie3 capture of one line with each format
 (倾斜, 下划线, 删除线, 上标, 下标, 标题, a size change) pins them (`layout/mod.rs` constants):
 
-| Format | chixie-rs | To pin from the capture |
+| Format | PenKaku | To pin from the capture |
 |---|---|---|
 | 倾斜 | shear 12° about the glyph foot, right or left | angle, pivot |
 | 下划线 | one stroke per run per line, 0.12 em below the foot | depth, one stroke or per char |
@@ -289,7 +289,7 @@ Rules waver a little with handwriting on (their own random stream, keyed by the 
 
 ## Page templates (`%USERPROFILE%\ChiXie3\conf\*.cx`, decoded 2026-11-07)
 Python pickles (protocol 4) of `{name: object}`; the objects come from `core.DataModel.*` and carry
-their state as a plain `__dict__`. They are read by `chixie_rs_core::chixie3_templates`, a small pickle
+their state as a plain `__dict__`. They are read by `penkaku_core::chixie3_templates`, a small pickle
 reader that never executes class references.
 - `note_template.cx` holds `NoteTemplate` objects, which become ruled templates:
   - `page_width`, `page_height` and `margin_top/bottom/left/right`, all in mm (whole mm stored as int);
@@ -348,7 +348,7 @@ reader that never executes class references.
   - `penUp` (int Z);
   - `penDown`, `writeSpeed`, `pauseTime` (strings);
   - `x_plus` / `x_reduce` / `y_plus` / `y_reduce` (`X+`, `X-`, `Y+`, `Y-`).
-- Mapping into chixie-rs (`chixie_rs_core::chixie3_devices`):
+- Mapping into PenKaku (`penkaku_core::chixie3_devices`):
   - Drop-down orders, captured from ChiXie3's 参数设置 on 2026-11-07:
     - `firmware`: 0 Grbl, 1 Marlin, 2 ESP32_Grbl, 3 ChiXie_ESP32_Grbl.
     - `deviceType`: 0 步进抬笔写字机, 1 舵机抬笔写字机, 2 电磁铁抬笔写字机, 3 激光雕刻机,

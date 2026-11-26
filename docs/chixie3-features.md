@@ -1,7 +1,7 @@
-# ChiXie3 (炽写) feature specification and chixie-rs implementation guide
+# ChiXie3 (炽写) feature specification and PenKaku implementation guide
 
 Status: 2026-11-07. Subject: ChiXie3 / 炽写 `alpha.3.0.310` (Windows build, Nuitka). Audience: the
-chixie-rs team. Companion documents: [protocol.md](protocol.md) (device protocol and captured
+PenKaku team. Companion documents: [protocol.md](protocol.md) (device protocol and captured
 G-code), [server-api.md](server-api.md) (backend), [HANDOFF.md](HANDOFF.md) (project state).
 
 ## 1. Overview
@@ -95,12 +95,12 @@ identifier order. Every conflict found is listed in §6.5.
 
 ## 2. Feature map
 
-Status is chixie-rs as of 2026-11-07. Priority: **P0** core writing loop (type → lay out on
+Status is PenKaku as of 2026-11-07. Priority: **P0** core writing loop (type → lay out on
 paper → write on the machine, reliably), **P1** daily-use features of real users, **P2** valuable
 but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: **S** ≤ 2 days,
 **M** ≤ 2 weeks, **L** more.
 
-| Area | Feature | Description | chixie-rs | Pri | Effort |
+| Area | Feature | Description | PenKaku | Pri | Effort |
 |---|---|---|---|---|---|
 | Editor | 页面编辑器 | WYSIWYG pages, caret, selection, mouse, keys | Done (`editor.rs`, `doc_view.rs`) | P0 | — |
 | Editor | 剪切/复制/粘贴 | internal items + plain text; Excel XML; WPS RTF super/sub | Done (M8: our copies keep formats; Excel / WPS tab text fills cells; WPS RTF not readable through gpui) | P1 | M |
@@ -189,7 +189,7 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 | Jobs | 自动换纸设备 | Marlin sheet feeder, loops | Missing | P3 | M |
 | Jobs | 工作区巡边/绘制框架线 | trace bounds; draw template lines | Missing | P1 | S |
 | Jobs | 上传SD卡书写 | upload page to TF and run | Done (M6; untested on a board) | P2 | S |
-| G-code | 书写 G-code | initial/body/end, signed coords | Done (`chixie-rs-output`) | P0 | — |
+| G-code | 书写 G-code | initial/body/end, signed coords | Done (`penkaku-output`) | P0 | — |
 | G-code | 路径规划 之/弓 | row order | Done (M6; matches capture) | P1 | S |
 | G-code | 起点模式 | 纸张/框线/自定义 origin | Done (M6) | P1 | S |
 | G-code | 写完位置 | 原点 / 原点左2cm / 任务结束点 | Partial (always X0 Y0) | P1 | S |
@@ -247,13 +247,13 @@ but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: 
 
 ## 3. Features by area
 
-Conventions: "chixie-rs today" names modules under `crates/chixie-rs-core/src` (core) and
-`crates/chixie-rs-gui/src` (GUI). New crates are named explicitly with the reason. The workspace
+Conventions: "PenKaku today" names modules under `crates/penkaku-core/src` (core) and
+`crates/penkaku-gui/src` (GUI). New crates are named explicitly with the reason. The workspace
 already depends on: `serde`, `serde_json`, `toml`, `reqwest` (blocking, rustls), `serialport`,
 `aes`/`cbc`/`hmac`/`sha2`/`base64` (manual Fernet), `async-channel`, `directories`, `keyring`,
 `image` (png), `gpui-kit` (gpui + gpui-component), `clap`, `thiserror`, `log`.
 
-Cross-cutting design rule for chixie-rs, referred to below as **the document model**: one
+Cross-cutting design rule for PenKaku, referred to below as **the document model**: one
 `Document` model in core (`editor.rs` + `layout.rs`), from which both the preview and the G-code
 are produced, so "what you see is what is drawn". Per-character randomness is keyed by stable
 character ids and a persisted seed (`handwriting::rng_for(seed, salt, id)`), so editing never
@@ -274,7 +274,7 @@ modes `SinglePagePreview` / `DoublePagePreview` (config `PreviewMode=1`) [high].
 (`InputTypeSetting` as `QRunnable`, `Variable.InTimeConsumingNesting` while busy). A "large text"
 mode hides items outside the viewport (`set_item_quantity_mode_of`, `update_visible_items`)
 because the per-item scene is slow (C §View).
-**chixie-rs today:** `editor.rs` (`EditDoc`: chars + stable ids, caret, selection, IME marked
+**PenKaku today:** `editor.rs` (`EditDoc`: chars + stable ids, caret, selection, IME marked
 range, UTF-16 bridge, undo/redo), `layout.rs` (`layout_ids` → `Document` with `CharBox`,
 `LineInfo`, caret hit-testing), `doc_view.rs` (gpui canvas: stacked pages, live handwriting,
 mouse, keyboard, clipboard, IME through `EntityInputHandler`, zoom, fit width).
@@ -296,7 +296,7 @@ rectangles of table cells, or grid cells; double-click places a caret in a table
 Many table/composition navigation paths are unfinished: "方向按钮切换单元格选中尚未开发",
 "作文格下方向按钮暂未开发", "表格功能选中下一个单元格尚未开发", etc. (C §方向键) [high].
 **How it works there:** `KeyPress*` classes on `UserInputBox`; `SelectItemFunction` for mouse.
-**chixie-rs today:** Done for flowing text in `doc_view.rs` (Left/Right/Up/Down, word moves,
+**PenKaku today:** Done for flowing text in `doc_view.rs` (Left/Right/Up/Down, word moves,
 line start/end, doc start/end, Shift variants, mouse drag, double-click word).
 **Recommended implementation:** add cell-aware navigation once tables exist: Tab / Shift+Tab
 move between cells, arrows cross cell borders when the caret is at an edge, Ctrl+click
@@ -315,9 +315,9 @@ that must match the selected rectangle ("您所复制的表格结构与炽写内
 Copy/cut of several cells is refused ("暂不支持复制多个选中单元格的数据") (C §复制) [high].
 **How it works there:** `CopyFunctionOfWrite`, `CutFunctionOfWrite`, `PasteFunctionOfWrite`,
 pyperclip + pickle of items.
-**chixie-rs today:** plain-text copy/cut/paste via gpui's clipboard in `doc_view.rs`.
+**PenKaku today:** plain-text copy/cut/paste via gpui's clipboard in `doc_view.rs`.
 **Recommended implementation:** keep plain text as the interchange format and add a private
-JSON flavour (`application/x-chixie-rs-items`: chars, ids-free attrs) so pasted characters keep
+JSON flavour (`application/x-penkaku-items`: chars, ids-free attrs) so pasted characters keep
 font/size/colour. gpui's `ClipboardItem` supports metadata strings; store the JSON there
 (VERIFY API in `docs/gpui-api.md`). Never pickle. For tables, accept TSV (what Excel/WPS put
 on the clipboard as text) rather than parsing XML Spreadsheet; it carries the same matrix.
@@ -329,22 +329,22 @@ RTF super/subscript is P3. Tests: round-trip copy→paste of a styled run; TSV �
 before/after the caret or the selection; deleting at a row start pulls the next rows up. With
 whole table cells selected: "是否清空所选单元格的内容？(可回车确认）" (Backspace) / "是否删除所选单元格的内容？(可回车确认）"
 (Delete), Enter confirms (C) [high].
-**chixie-rs today:** Done for text (`EditDoc::backspace/delete`, word variants).
+**PenKaku today:** Done for text (`EditDoc::backspace/delete`, word variants).
 **Recommended implementation:** add cell clearing with the same confirm (Enter = yes) when
-tables land; it is a destructive multi-cell edit but undoable in chixie-rs, so the confirm can
+tables land; it is a destructive multi-cell edit but undoable in PenKaku, so the confirm can
 be dropped if undo covers it (UX improvement).
 **Open questions / VERIFY:** none.
 
 #### Undo (撤销)
 **ChiXie3:** Ctrl+Z only shows "撤销功能尚未开发完毕" (C @9575b8d) [high].
-**chixie-rs today:** Done: `EditDoc::undo/redo`, Ctrl+Z / Ctrl+Shift+Z.
+**PenKaku today:** Done: `EditDoc::undo/redo`, Ctrl+Z / Ctrl+Shift+Z.
 **Recommended implementation:** extend the undo stack to attribute edits and template/cell
 edits (command pattern: each edit records its inverse). Clearly better than ChiXie3.
 
 #### Half-width space (半格空格)
 **ChiXie3:** Space with Ctrl or Shift inserts a half-width space (`HalfSpaceFunction`,
 "输入半个空格"); which modifier is not recoverable (C) [high].
-**chixie-rs today:** Done (M3): Shift+Space inserts U+2009; half a space wide (same random draw); in 作文格 it pairs like a digit.
+**PenKaku today:** Done (M3): Shift+Space inserts U+2009; half a space wide (same random draw); in 作文格 it pairs like a digit.
 **Recommended implementation:** bind Shift+Space (Ctrl+Space is the Windows IME toggle) to
 insert U+2009 THIN SPACE or a private `HalfSpace` char kind; layout gives it half the random
 space width. Test: width = ½ of the drawn space width with the same seed.
@@ -357,7 +357,7 @@ space width. Test: width = ½ of the drawn space width with the same seed.
 included); `find_next` selects and scrolls; replace deletes and re-types the new text. Messages
 "未搜索到结果", "请先进行查找定位，再点击替换", "未查询到结果，无法替换", "替换失败：". No case / regex /
 whole-word options; runs on the UI thread (C §查找和替换) [high].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** core `editor::find_all(&EditDoc, &str, opts) -> Vec<Range>`
 and `replace_range`; replaced characters get fresh ids (new handwriting), untouched ones keep
 theirs. GUI: a small non-modal bar at the top of the page view (Word style), Enter = next,
@@ -371,7 +371,7 @@ Chinese text). Tests: `find_all` on overlapping matches; replace-all keeps other
 - table/cell: 绘制表格, 单元格属性, 数据源 ▸ 刷新数据源数据 ▸ 刷新数据(本页) / 刷新数据(所有页);
 - always: 复制, 剪切, 粘贴, 全选 (enabled by state).
 The menu is suppressed while the AI input is active.
-**chixie-rs today:** missing (actions exist on the ribbon only).
+**PenKaku today:** missing (actions exist on the ribbon only).
 **Recommended implementation:** gpui-component `ContextMenu` on `doc_view` with the same
 groups; every entry dispatches an existing action so ribbon, menu and shortcuts share one code
 path. 断点续写 here should open the resume flow pre-filled with the clicked character (§3.7).
@@ -380,7 +380,7 @@ path. 断点续写 here should open the resume flow pre-filled with the clicked 
 **ChiXie3:** ribbon 插入 menu: 表格, 公式 ▸ (我的收藏, 数学公式, 化学公式, 物理公式), 图表, 图片,
 文本框, 形状, 内容块, 思维导图 [UI shot 24; C §插入菜单]. Static analysis finds no handlers for most
 entries in the writing editor (placeholders, added 2025-10-27) [med].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** only 表格 has substance (inserting a table region into a note
 page; depends on §3.2 tables). Do not port the placeholders. P3.
 
@@ -396,7 +396,7 @@ Toggle state shows checked only if all selected characters share the format
 (`DisplayWritingFormat`). Tilt is applied only when the user presses 倾斜 (C @953d5a8) [high].
 Underline / strike-through are pen strokes added to the output (inferred). Colour matters for
 multicolour drawing (§3.7).
-**chixie-rs today:** missing (document-wide font and size only).
+**PenKaku today:** missing (document-wide font and size only).
 **Recommended implementation:** `CharAttrs { font: Option<FontId>, size: Option<f32>,
 color: Rgb, italic: bool, underline: bool, strike: bool, script: Script, title: bool }` stored
 as runs in `EditDoc`. Layout effects: italic = shear of the glyph (angle in style, default
@@ -409,7 +409,7 @@ super/subscript (capture with the fake Grbl).
 
 #### Format painter (格式刷)
 **ChiXie3:** ribbon button 格式刷 in the clipboard group [UI]; no static detail.
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** after `CharAttrs` exist: click copies the caret's attrs, next
 selection receives them; double-click keeps it armed (Word behaviour). P3, S.
 
@@ -417,7 +417,7 @@ selection receives them; double-click keeps it armed (Word behaviour). P3, S.
 **ChiXie3:** font combo + size combo (default 100) in the ribbon; apply to the selection or
 selected cells (`SetFontAndSize`); the size box follows the selection; mixed fonts show
 "所选内容中字体不统一" (A, C) [high]. Size 100 = 1 mm per font unit (protocol.md [cap]).
-**chixie-rs today:** document-wide font (`Select` picker) and size (A+/A−).
+**PenKaku today:** document-wide font (`Select` picker) and size (A+/A−).
 **Recommended implementation:** per-run font/size via `CharAttrs`; the picker shows the common
 value or blank when mixed. Layout already scales by `mm_per_unit_for_font_size`.
 
@@ -426,7 +426,7 @@ value or blank when mixed. Layout already scales by `mm_per_unit_for_font_size`.
 centre button's caption is not a form string [ui-form]) per paragraph at the caret or per selected
 cell(s); vertical 顶端 / 垂直居中 / 底端 for table cells. Errors "请先放置光标或者选中字符再使用对齐功能",
 "请先选中单元格". Re-applied after every input (`refresh_alignment_after_input`) (C §对齐) [high].
-**chixie-rs today:** Done (M3): `Para.align` per paragraph; ribbon 段落 buttons; centre/right shift the line, justify stretches wrapped lines; grid moves by whole cells. Vertical alignment in cells: with tables (M7).
+**PenKaku today:** Done (M3): `Para.align` per paragraph; ribbon 段落 buttons; centre/right shift the line, justify stretches wrapped lines; grid moves by whole cells. Vertical alignment in cells: with tables (M7).
 **Recommended implementation:** paragraph attribute `Align` in `EditDoc` (paragraph = text
 between `\n`); `layout.rs` shifts each closed line by `(avail − used)` or `/2`; justify spreads
 the remaining width over inter-glyph gaps (not after the last line). The random line-start
@@ -437,7 +437,7 @@ offset (首字不对齐) applies only to left/justify. Tests: right-aligned line
 **ChiXie3:** toggles for template frame lines (`CellLineVisible`, `FormLineVisible`), row
 numbers, page numbers; a page-number detector while scrolling updates "第 N 页，共 M 页"; two
 status-bar view-mode buttons (single / double page) (C §View; UI) [high].
-**chixie-rs today:** 模板格线 toggle; page count in the status bar.
+**PenKaku today:** 模板格线 toggle; page count in the status bar.
 **Recommended implementation:** add row numbers (left gutter, preview only) and double-page
 view. Template lines are never plotted unless the user asks (§3.7 绘制框架线).
 
@@ -461,7 +461,7 @@ name 作文格1).
 `composition_template.cx`, table templates through `TemplateAccessUtil`, Fernet-encrypted with a
 hard-coded key. Old formats are converted on load (`convert_old_template_to_new`). Table template
 autosave is debounced by `SaveTableTemplateTimer` (C) [high].
-**chixie-rs today:** `chixie-rs-template` (M7a/M7c): templates in a library folder, one SVG
+**PenKaku today:** `penkaku-template` (M7a/M7c): templates in a library folder, one SVG
 each (`library.rs`, `svg.rs`; the old `templates.toml` migrates once and is kept as `.bak`);
 `templates_view.rs` (list, edit form, live preview, draft until 保存, 应用, 导入 / 导出 / 导出 Excel /
 导出全部, 标签, 收藏); ChiXie3's save checks with its messages (`Template::validate`).
@@ -477,7 +477,7 @@ Add 删除 with confirm. Tests: one per validation error.
 `UI_TemplateGeneralParameterGroupBox` [ui-form] (group 页面通用参数): 模板名称：(line edit), 纸张宽度：, 纸张高度：(double
 spin boxes), 快捷尺寸：(a tool button; the live UI showed A4 and B5 entries). The list pane's title is 模板列表
 (`UI_TemplateItemListGroupBox`).
-**chixie-rs today:** Done in `templates_view.rs` (paper size + margins).
+**PenKaku today:** Done in `templates_view.rs` (paper size + margins).
 **Recommended implementation:** add the A4/B5 quick buttons and a portrait/landscape swap.
 
 #### Note templates (文档模板 / 笔记 / 信纸)
@@ -489,7 +489,7 @@ buttons 固定行数 (with 默认行数：) and 随机行数 (with 最小行数�
 draws note rows (`#c0c0c0 #d0d0d0 #e0e0e0`). Live note line style setting: 设置 › 主题与样式 ›
 笔记线条 实线 ▾ [UI]. Captured: rules every writable height ÷ rows; glyph top ≈ row bottom − em −
 0.2 em (protocol.md [cap]).
-**chixie-rs today:** Done (`TemplateKind::Ruled`, `layout::Ruling`, capture-matched tests
+**PenKaku today:** Done (`TemplateKind::Ruled`, `layout::Ruling`, capture-matched tests
 `template::tests::ruled_rows_match_chixie3_capture`).
 **Recommended implementation:** keep. Add 笔记线条 style (solid / dashed / dotted) as a preview
 option only. VERIFY random-row semantics (one draw per page) with a capture.
@@ -504,7 +504,7 @@ share the same cell type), per-column width and spacing spin boxes; exact form `
 help hint "(异栏同型？)" (a "what is this" hint next to 异栏同型; its text is only that label); editing one width splits the
 remaining width evenly with spacing 0 after it; region = page minus margins (B §笔记分栏) [high].
 Import into a multi-column note asks "当前为多栏笔记，请问导入第一列还是第二列？" (C) [high].
-**chixie-rs today:** Done (M7a) except 异栏同型: `TemplateKind::Ruled.column_widths` (empty = 栏宽相等)
+**PenKaku today:** Done (M7a) except 异栏同型: `TemplateKind::Ruled.column_widths` (empty = 栏宽相等)
 with one gap and a divider; the editor shows a width per column when 栏宽相等 is off.
 **Recommended implementation:** generalise to `columns: Vec<Column { width, gap_after }>` with an
 "equal" helper; text fills column 1 top-to-bottom then column 2 (VERIFY order by capture).
@@ -517,7 +517,7 @@ double spin box), 虚线分割双行 (`enable_dashed_line_partition`; the form l
 `UI_NoteTemplateDualLineSettingDialog`]. Row position types `TopNoteRow`, `MiddleNoteRow`,
 `BottomNoteRow`, `IndependentRow`. Import asks "当前为双线模式笔记，请问导入至上侧行还是下侧行？"
 (B, C) [high].
-**chixie-rs today:** `dual_line: Option<f32>` band; text goes below it, or into it with
+**PenKaku today:** `dual_line: Option<f32>` band; text goes below it, or into it with
 `write_upper` (M7a, 文字写在上侧行). Default placement still VERIFY.
 **Recommended implementation:** add a per-row "target band" choice (upper / lower) as a template
 option and in import; capture one dual-line page to pin placement.
@@ -532,7 +532,7 @@ presumably counts are integer, lengths double).
 Captured: one character per cell, centred at font size; punctuation drawn low in its own cell;
 a space takes a cell; pasted line breaks dropped, typed Enter starts a new row
 (protocol.md [cap]).
-**chixie-rs today:** Done (`TemplateKind::Grid`, capture test `grid_cells_match_chixie3_capture`).
+**PenKaku today:** Done (`TemplateKind::Grid`, capture test `grid_cells_match_chixie3_capture`).
 **Recommended implementation:** keep. Do not copy the "pasted line breaks dropped" quirk:
 honour line breaks in paste (UX improvement; document it).
 
@@ -552,7 +552,7 @@ cell): 单元格宽：, 单元格高：, 接受导入：, 内部行数：. 表�
 接受导入：(switch), 内部行数, 提示标识：(hint label text), 左内边距, 上内边距, 下内边距, 右内边距, 排版内边距 (heading for the four margins; so they are "typesetting padding"),
 单元格字体属性 (heading) with 默认字体, 字体加载模式 (combo; 指定字体优先 is one entry, cf. §3.3), 字符宽度比, 默认字号. The main
 window also has ribbon entries 表格功能, 批量溢出 and 作文格功能 (contextual groups).
-**chixie-rs today:** Done (M7a): `chixie-rs-template` `table.rs` (tables as column / row grids, cells as a partition with rows, padding, size, alignment, overflow, data source, 接受导入, hint), `TemplateKind::Table`, the frame = the first page's tables; layout `Ruling::Table` fills cells in reading order, each row's text centred in the row (matches the 2026-11-18 2×2 capture, docs/protocol.md).
+**PenKaku today:** Done (M7a): `penkaku-template` `table.rs` (tables as column / row grids, cells as a partition with rows, padding, size, alignment, overflow, data source, 接受导入, hint), `TemplateKind::Table`, the frame = the first page's tables; layout `Ruling::Table` fills cells in reading order, each row's text centred in the row (matches the 2026-11-18 2×2 capture, docs/protocol.md).
 **Recommended implementation:** core module `table.rs`:
 ```rust
 pub struct TableTemplate { pages: Vec<TablePage>, same_type: Vec<SameTypeRecord> }
@@ -580,7 +580,7 @@ rectangle (Esc/right-click cancel, double-click/Enter confirm), the image goes t
 table recognition like file import (B §插入表格, §截图生成) [high]. A confirmation dialog 截图导入表格
 (`UI_ImportTemplateByScreenShotDialog` [ui-form]) with the button 生成并导入 presumably shows the captured image before it
 is sent (inferred; the form has only a title and that button).
-**chixie-rs today:** Partial (M7a): 插入表格 dialog (quick grid, rows / cols, 固定 / 自动列宽 with ChiXie3's width error, 为新表格记忆此尺寸). 绘制表格 by dragging and 截图生成 are not done.
+**PenKaku today:** Partial (M7a): 插入表格 dialog (quick grid, rows / cols, 固定 / 自动列宽 with ChiXie3's width error, 为新表格记忆此尺寸). 绘制表格 by dragging and 截图生成 are not done.
 **Recommended implementation:** hover grid as a gpui popover (8×10 squares); custom dialog with
 the same validation. Skip screen capture (P3): users can save a screenshot and import the image.
 
@@ -590,7 +590,7 @@ filter "PDF或图片(*.pdf *.jpg *.png)". Pages are rendered (PyMuPDF), base64-P
 backend (`file_parsing/image-to-table-template`, `-2`; A endpoints) which returns cell corner
 points; the image becomes the page background. Orientation auto-switch
 "检测到导入的模板与页面方向不同，已为您切换" (undoable). Errors "<n> 页表格解析异常，请手动创建该页面表格" (B) [high].
-**chixie-rs today:** Done (M7b), local instead of the cloud endpoint: crate `chixie-rs-import`.
+**PenKaku today:** Done (M7b), local instead of the cloud endpoint: crate `penkaku-import`.
 - Vector PDFs (`lopdf`): stroked lines, `re` borders and thin filled bars, through `q`/`Q`/`cm` and
   form XObjects; exact mm.
 - Images and scanned PDFs: Sauvola threshold, perspective fix (the table's frame, or the sheet's
@@ -599,7 +599,7 @@ points; the image becomes the page background. Orientation auto-switch
 - Table editor › 导入 PDF/图片… or a file dropped on the page; a result dialog with the grid over
   the image and 表格宽度 / position; ChiXie3's orientation and failed-page messages.
 - 10 synthetic forms (5 PDFs, 3 photos / screenshots, 2 scans) in `tests/forms.rs`; real forms go in
-  the git-ignored `tests/forms-real/`; `chixie-rs-cli detect-table`.
+  the git-ignored `tests/forms-real/`; `penkaku-cli detect-table`.
 **Recommended implementation:** two paths. (a) Cloud: call the same endpoint (capture the
 request/response shape with mitmproxy first). (b) Local fallback (better, offline): detect
 ruling lines with a morphological filter on the binarised image (horizontal/vertical runs ≥ 40%
@@ -612,7 +612,7 @@ prefer asking the user to export the page as PNG for now. Verify on 3 real forms
 **ChiXie3:** per page (group 范围配置 with sub-groups 左上角 and 右下角 [ui-form `UI_TableTemplateImportConfigOfExcel`]):
 左上列 (letters), 左上行 (digits), 右下列, 右下行; validation "行号输入框中只能输入数字",
 "列号输入框中只能输入字母", "如需保存请填写所有所有输入框数据", "暂存成功" (B) [high].
-**chixie-rs today:** Done (M7a): `TablePage.excel_range`, the four fields with ChiXie3's messages and 暂存成功.
+**PenKaku today:** Done (M7a): `TablePage.excel_range`, the four fields with ChiXie3's messages and 暂存成功.
 **Recommended implementation:** `excel_range: Option<CellRange>` on `TablePage`, parsed with an
 `A1` parser (`excel_column_to_number`). Used by xlsx import (§3.15).
 
@@ -624,7 +624,7 @@ one record only; "同型标记中，暂不支持前页单元格是后页单元�
 table document, cells of a record are re-keyed so they stay linked (B §同型标记; C §同型标记)
 [high]; exact user-visible effect [med] (inferred: equivalent cells across repeated pages
 receive the same content).
-**chixie-rs today:** Partial (M7a): records of ≥ 2 cells (one record per cell), kept in step when pages move or go; nothing is synced yet (VERIFY what ChiXie3 does with them).
+**PenKaku today:** Partial (M7a): records of ≥ 2 cells (one record per cell), kept in step when pages move or go; nothing is synced yet (VERIFY what ChiXie3 does with them).
 **Recommended implementation:** P3. Model as `SameTypeRecord { name, cells: Vec<CellId> }`; when
 the user types into one member, offer "同步到同型单元格". VERIFY intended behaviour with the vendor.
 
@@ -639,7 +639,7 @@ with 默认值：; 随机值模式 with two sub-modes 数值范围内随机 (取
 box, one choice per line); 指定单元格模式 with 绑定单元格（仅限于导入文件使用）, （Excel模式）, 行号：, 列号：; buttons save and close.
 Context menu 刷新数据(本页) / 刷新数据(所有页); offered when
 pages are added ("询问用户是否加载页面数据源数据源") (B §数据源配置; C §表格数据源) [high].
-**chixie-rs today:** Done (M7a): `DataSource` (无 / 默认值 / 随机值 range or choices / 指定单元格) with ChiXie3's dialog and messages; ribbon 表格功能 › 刷新数据(本页 / 所有页) fills them as one undo step, a new draw each time (换一组). Not done: the prompt when pages are added.
+**PenKaku today:** Done (M7a): `DataSource` (无 / 默认值 / 随机值 range or choices / 指定单元格) with ChiXie3's dialog and messages; ribbon 表格功能 › 刷新数据(本页 / 所有页) fills them as one undo step, a new draw each time (换一组). Not done: the prompt when pages are added.
 **Recommended implementation:** `enum DataSource { None, Fixed(String), RandomNumber { min, max,
 decimals }, RandomChoice(Vec<String>), FromImport { row, col } }`; generation uses the document
 seed + cell id + page index (deterministic, re-rollable with 换一组). Typical use: forms such as
@@ -649,7 +649,7 @@ temperature logs. Test: same seed → same values; different page → different 
 **ChiXie3:** merge selected cells; split is a full split ("目前版本是完全拆分解组单元格，不是取消合并上一次合并的单元格");
 drag split handles between cells; corner/edge resize handles; position lock; Delete deletes
 the selected table (B) [high].
-**chixie-rs today:** Done (M7a): merge needs a rectangle, split is complete (as ChiXie3), drag a table's lines to resize columns / rows, 位置锁定.
+**PenKaku today:** Done (M7a): merge needs a rectangle, split is complete (as ChiXie3), drag a table's lines to resize columns / rows, 位置锁定.
 **Recommended implementation:** cells as a rectangle partition of the table; merge = union of an
 axis-aligned rectangle of cells (reject non-rectangular selections); split = back to the
 underlying grid lines. Handles in the template editor canvas only.
@@ -658,14 +658,14 @@ underlying grid lines. Handles in the template editor canvas only.
 **ChiXie3:** from the page background image, crop each selected cell, find the leftmost ink
 pixel per row and set `margin_left`; errors "请先选中表格单元格再识别", "所在页面没有背景图，无法识别".
 占位符识别 is a stub (B) [high].
-**chixie-rs today:** Done (M7b): 内边距识别 / 重置内边距 in the table editor with ChiXie3's messages; the first ink column of each selected cell in the page background (`chixie_rs_import::left_padding`). 占位符识别: not done (no OCR).
+**PenKaku today:** Done (M7b): 内边距识别 / 重置内边距 in the table editor with ChiXie3's messages; the first ink column of each selected cell in the page background (`penkaku_import::left_padding`). 占位符识别: not done (no OCR).
 **Recommended implementation:** P3; implement with `image` (luma threshold, column histogram).
 
 #### Page thumbnail panel (页面缩略图面板)
 **ChiXie3:** buttons 预览原始背景, 上移选中页面, 下移选中页面, 删除选中页面, 增加空白页面, slider 透明度;
 messages "请先选中页面缩略图再使用此功能", "当前已经是第一页，无法上移", "请至少保留一个页面", confirms
 "确认要删除页面 <n> 吗？", "确认复制模板页面的第 <n> 页吗？（默认会复制为最后一页）" (B) [high].
-**chixie-rs today:** Done in part: the table editor's page list (M7a) with 增加 / 复制 / 上移 / 下移 / 删除; the page background (M7b, a PNG in `template_assets/`) with 预览原始背景 and 透明度. No thumbnail images.
+**PenKaku today:** Done in part: the table editor's page list (M7a) with 增加 / 复制 / 上移 / 下移 / 删除; the page background (M7b, a PNG in `template_assets/`) with 预览原始背景 and 透明度. No thumbnail images.
 **Recommended implementation:** part of the table template editor; a vertical list of page
 thumbnails rendered from the same layout code.
 
@@ -676,7 +676,7 @@ page key points; right-click: 移至纸张起点 (`StartPointOfPaper`), 移至�
 sample, encoding unknown); custom positions saved debounced, per page for table templates in
 frame/paper mode (C §书写原点) [high]. The N1 card text: "炽写页面中蓝色小圆圈即书写起点" (A) [high].
 Captured: origin = writable top-left for notes and the grid top-left for 作文格 (protocol.md [cap]).
-**chixie-rs today:** Done (M6): `PageSettings.origin` (纸张起点 / 框线起点 / 自定义), a blue ring on every
+**PenKaku today:** Done (M6): `PageSettings.origin` (纸张起点 / 框线起点 / 自定义), a blue ring on every
 page that can be dragged (snaps to both corners, else whole mm), and a 书写原点 menu in 参数设置; the
 output subtracts the origin point (`output::plan`). Right-click menu not done.
 **Recommended implementation:** `Origin { Paper, Frame, Custom((f32, f32)) }` in
@@ -693,8 +693,8 @@ pen tip here" hint once per job start. Test: Paper origin shifts every coordinat
 order 标签 → 排序 → 分类, 写字模板 last among the radio categories). File menu 从炽写模板库新建 (C) [high]. Static
 slice A calls the home template widget a placeholder shell [high] — the live UI shows it
 populated, so it is server-driven (conflict; live wins).
-**chixie-rs today:** Partial (M7c), local only (ChiXie3 has no template backend):
-- library folder `Documents/chixie-rs/Templates` (movable, 选项 › 模板) plus read-only extra folders,
+**PenKaku today:** Partial (M7c), local only (ChiXie3 has no template backend):
+- library folder `Documents/penkaku/Templates` (movable, 选项 › 模板) plus read-only extra folders,
   watched; one SVG per template: the paper drawn at real size (opens in any image viewer), the
   template as TOML in `<metadata id="chixie-template">` (TOML rather than `data-*` attributes:
   nested table data stays readable), page backgrounds embedded as PNG;
@@ -726,7 +726,7 @@ login token in the URL (A @94813b0) [high]; on close, newly collected fonts are 
 **How it works there:** `font/get_online_fonts` (1-based, 9/page, verified shape),
 `font/get_collected_fonts`, `font/get_recorded_fonts`; previews are public PNGs (server-api.md
 [cap]).
-**chixie-rs today:** `fonts.rs`: tabs 本地字体 / collected / online, 3×3 cards, paging by 9,
+**PenKaku today:** `fonts.rs`: tabs 本地字体 / collected / online, 3×3 cards, paging by 9,
 name search, cloud previews (`cloud_preview.rs`, ink-mask cache), 使用 / 删除.
 **Recommended implementation:** add (1) the six tag filters and three sort rules (request fields
 `filter_tags`, `sort_rule` are already known: `chinese, english, Japanese, handwritten,
@@ -739,7 +739,7 @@ WebEngine page.
 **ChiXie3:** star on the card (`font/collect_a_font`). Limits: "当前版本客户端软件最多只支持收藏30种字体";
 "普通账号无法收藏字体喔！（只能使用今日试用字体）"; a default font cannot be uncollected
 ("默认字体不能取消收藏，如需取消收藏，请先更换默认字体") (A) [high].
-**chixie-rs today:** Dropped by BOSS (2026-11-17), together with all further network capture; the collected list stays read-only.
+**PenKaku today:** Dropped by BOSS (2026-11-17), together with all further network capture; the collected list stays read-only.
 **Recommended implementation:** `Backend::collect_font(id, on: bool)` in `session.rs`; capture
 the request body first. Keep the 30 cap client-side only if the server enforces it (it is a
 "client version" limit; check the server's error).
@@ -750,7 +750,7 @@ the request body first. Keep the 30 cap client-side only if the server enforces 
 also 设为主线字体 etc.); only VIP ("普通账号或者未登录无法指定默认字体喔！"), must be collected first
 ("请先收藏该字体后再设置"). Stored as `[FontConfig] MainFont, MainSymbolFont, MainEnglishFont,
 MainNumberFont` and synced via `font/get_main_fonts_info` / `config/font_config` (A, C) [high].
-**chixie-rs today:** Done (M4): `FontRoles` in `settings.fonts.roles` (local only; `get_main_fonts_info` dropped); 字体库 card ⋯ › 设为…; unset roles use the main font.
+**PenKaku today:** Done (M4): `FontRoles` in `settings.fonts.roles` (local only; `get_main_fonts_info` dropped); 字体库 card ⋯ › 设为…; unset roles use the main font.
 **Recommended implementation:** `FontRoles { main, english, symbol, number }` in
 `PageSettings`, each `Option<FontId>` falling back to `main`. Set from the 字体库 card menu and
 from a 字体 group dialog in the ribbon. No VIP gating locally (offline-first; the server still
@@ -764,7 +764,7 @@ the glyph wins. Mix mode (`FontMixer`, 2025-09-02): `{font_id: weight}` from `Fo
 the collection's `mixing_ratio`; strategies weighted random, deterministic by char hash ("相同字符总是返回相同字体"),
 or by code point; a `seed` attribute exists. Table cells override with 指定字体优先 /
 字体库配置优先 / 随机字体模式 (C §字体调用模式) [high]; which mix strategy the UI exposes [low].
-**chixie-rs today:** Done (M4): `font::fontset::FontSet` — per-class chains (role → main → mixed → other loaded fonts), 字体混用 weights keyed by char id (`mix_salt` = 换一组); 3:1 over 1,000 chars within ±3 %.
+**PenKaku today:** Done (M4): `font::fontset::FontSet` — per-class chains (role → main → mixed → other loaded fonts), 字体混用 weights keyed by char id (`mix_salt` = 换一组); 3:1 over 1,000 chars within ±3 %.
 **Recommended implementation:** core `fontset.rs`:
 `FontSet { roles: FontRoles, fallbacks: Vec<FontId>, mix: Option<Vec<(FontId, f32)>> }` and
 `fn pick(&self, c: char, char_id: u64, seed: u64, fonts: &FontCache) -> Option<FontId>`.
@@ -781,7 +781,7 @@ Tests: missing glyph falls through to fallback; mix weights 3:1 give ≈ 75% ove
 text area plus one button [ui-form]) (A, C) [high]. Missing chars are reported to the server
 on exit (`user/collect_missing_characters`). The failure message for unloadable fonts:
 "字体（…）加载失败，建议重启或取消收藏该字体。如是您本人的字体，请确保该字符已有录制数据" (C @9511728).
-**chixie-rs today:** Done (M4): fall-through via `FontSet`; `Document.missing_at` → dashed boxes in the editor (never plotted); status item 缺字 n opens 缺失字符 with 复制. Nothing is reported to the server.
+**PenKaku today:** Done (M4): fall-through via `FontSet`; `Document.missing_at` → dashed boxes in the editor (never plotted); status item 缺字 n opens 缺失字符 with 复制. Nothing is reported to the server.
 **Recommended implementation:** fall through `FontSet` first; if still missing, draw a dashed
 box placeholder in the preview (never plotted) and show a status-bar badge "缺字 N" that opens a
 list with 复制. Do not report to the server.
@@ -792,7 +792,7 @@ the font dropdown's 今日免费试用字体 region; members do not see that reg
 `UI_DailyFreeFontDialog` [ui-form] (title 今日试用字体) greets "哈喽，亲爱的用户。", says "当前为普通账号，如需升级请前往个人中心或炽写店铺",
 "今日炽写为您准备的全量试用字体是", then shows 标题预览：, 字体描述：, 字符数量：, 字体类型：, 作者 ：, 字体名： and closes with
 "祝您有个愉快的一天！". The dropdown region label itself is 今日试用 (see below).
-**chixie-rs today:** Dropped by BOSS (2026-11-17).
+**PenKaku today:** Dropped by BOSS (2026-11-17).
 **Recommended implementation:** P3; a single call shown as a card in 字体库 when the account is
 `ordinary_user`.
 
@@ -803,13 +803,13 @@ the font dropdown's 今日免费试用字体 region; members do not see that reg
 (`previewFont`, `fontPreviewRestore`) (C) [high]. Fonts are pre-parsed after login with
 progress tooltips ("收藏字体预解析中", "个字体解析完毕"); "请等待字体加载完成后使用！" blocks actions
 until done (A) [high].
-**chixie-rs today:** `font_preview.rs` picker items (own-stroke name or sample, 云端 badge).
+**PenKaku today:** `font_preview.rs` picker items (own-stroke name or sample, 云端 badge).
 **Recommended implementation:** add hover preview on the selection (layout with a temporary
 font override, no edit recorded). Load fonts lazily per use instead of blocking the UI.
 
 #### Offline font store (本地字体)
 **ChiXie3:** none; every session re-downloads and decrypts fonts (6–13 MB each) (server-api.md).
-**chixie-rs today:** Done (M4): SVG font files in `Documents/chixie-rs/Fonts` (movable) plus extra folders, watched with `notify`; the pre-M4 `<config>/fonts` JSON store is converted once and kept as `fonts.migrated`.
+**PenKaku today:** Done (M4): SVG font files in `Documents/penkaku/Fonts` (movable) plus extra folders, watched with `notify`; the pre-M4 `<config>/fonts` JSON store is converted once and kept as `fonts.migrated`.
 (`<config>/fonts/<id>.json` + `index.json`), usable without login.
 **Recommended implementation:** keep; consider a compact binary cache (`postcard` or a custom
 f32 array file) if load time > 200 ms per font (measure first).
@@ -821,7 +821,7 @@ official account 炽写智能, bind the account in its menu, open the 炽写字�
 [ui-form] (title 录制字体指南, two tabs): 入口1（推荐）: "1、微信关注“炽写智能”公众号", "2、公众号菜单栏，进行账号绑定",
 "3、绑定后进入炽写字体小程序"; 入口2: "1、微信搜索或扫码“炽写字体”小程序", "2、在小程序内进行炽写账号绑定",
 "（推荐使用方式一）".
-**chixie-rs today:** Not planned (link only).
+**PenKaku today:** Not planned (link only).
 **Recommended implementation:** a link/help card only. Not planned.
 
 #### Font data optimisation (字体优化 / 字体数据优化)
@@ -831,7 +831,7 @@ three per-font buttons are labelled 统一字符尺寸, 重复轨迹优化, 异�
 (the 百宝箱 tile subtitle is 优化部分字体问题). Unify: compute each glyph's bbox, fetch a standard bbox
 set (`font/get_standard_br`), scale/move strokes into the target box (default size 10). Uses a
 Fernet key embedded in the binary (A §Font data optimize) [med].
-**chixie-rs today:** Done (M4): `font::fix` (统一字符尺寸 / 重复轨迹优化 / 异常宽度优化) applied on load, toggled in 选项 › 字体; files are never rewritten.
+**PenKaku today:** Done (M4): `font::fix` (统一字符尺寸 / 重复轨迹优化 / 异常宽度优化) applied on load, toggled in 选项 › 字体; files are never rewritten.
 **Recommended implementation:** core `glyph_fix.rs` with three pure functions over `Glyph`:
 `normalize_bbox(glyph, target)`, `dedupe_overlapping_segments(glyph, tol_mm)` (same as 字符重复轨迹优化,
 §3.4), `clamp_abnormal_width(glyph, median_advance)`. Apply on load when enabled ("启动自动调用"),
@@ -851,7 +851,7 @@ drawn per character at layout time, stable across writes; first-char offset on e
 (protocol.md [cap]).
 **How it works there:** `GenerateTextItem.__get_h_offset` (uniform in the zh/en range by the
 character's class), `get_v_offset`; space width chosen by the previous character's class.
-**chixie-rs today:** Done in `handwriting.rs` (`HandwritingStyle`, `Jitter`, SplitMix64 `Rng`,
+**PenKaku today:** Done in `handwriting.rs` (`HandwritingStyle`, `Jitter`, SplitMix64 `Rng`,
 per-id streams), `style_dialog.rs` (↘ ranges dialog), `config::import_chixie3`.
 **Recommended implementation:** keep; add the live-UI labels verbatim in the dialog. Space width
 VERIFY by capture (stream stalled before).
@@ -860,7 +860,7 @@ VERIFY by capture (stream stalled before).
 **ChiXie3:** with `intelligent_vertical_offset` the offset depends on the position along the
 row (`position_proportion = target_pos_x / cell_width`), i.e. a smooth drift instead of noise;
 TODOs mention following a whole-row trajectory (C §字符间距) [med]. UI label "(同向偏移)".
-**chixie-rs today:** Done (M5): per-row drift — each row draws a sweep (keyed by its first char) and the offset runs across the range along the row, ±20 % noise; 随机纠正 halves the sweep. Formula still a best guess (VERIFY).
+**PenKaku today:** Done (M5): per-row drift — each row draws a sweep (keyed by its first char) and the offset runs across the range along the row, ±20 % noise; 随机纠正 halves the sweep. Formula still a best guess (VERIFY).
 **Recommended implementation:** change to a per-row linear drift: draw a slope `k ∈ [−r, r]`
 per row (r = max offset / row width) and offset = k·x + small noise, clamped to the range; this
 matches "position proportion" and "同向" (same direction). Capture to confirm.
@@ -872,7 +872,7 @@ matches "position proportion" and "同向" (same direction). Capture to confirm.
 paragraph at the caret or every selected paragraph; needs a caret or selection
 ("当前版本首行缩进需在‘选中字符’或‘放置光标’后使用"). In 作文格 it toggles two indent cells (C §首行缩进)
 [high]. This explains why the capture showed no indent (protocol.md).
-**chixie-rs today:** Done (M3): Tab / 首行缩进 toggle `Para.first_indent`, width drawn once from the style range (15.5–17 mm default) keyed by the paragraph's first char; two cells in 作文格. A style range set in 设置 still indents every paragraph (as before).
+**PenKaku today:** Done (M3): Tab / 首行缩进 toggle `Para.first_indent`, width drawn once from the style range (15.5–17 mm default) keyed by the paragraph's first char; two cells in 作文格. A style range set in 设置 still indents every paragraph (as before).
 **Recommended implementation:** paragraph attribute `indent: bool` toggled by Tab-at-paragraph-
 start and the ribbon button; width drawn per paragraph id from the span; grid templates indent
 by two cells. Better than ChiXie3: Tab at paragraph start indents, elsewhere inserts a tab-width
@@ -888,7 +888,7 @@ about the glyph centre, then per-stroke scale/rotation/offset derived from the s
 (C §基础变形) [high]. Captured magnitudes in protocol.md [cap]. Note protocol.md lists 高矮 as
 96–104 while the UI and config say 98–102 (conflict: the UI/config value is authoritative for
 defaults; the capture's fits are consistent with either).
-**chixie-rs today:** Done (M5): `deformation.rs` (per-glyph scale, rotation, per-stroke shift) plus 随机删除小尾巴 (`remove_tails`, p = 0.3 per stroke, hook < 0.3 mm turning > 90°; VERIFY), drawn last from its own stream.
+**PenKaku today:** Done (M5): `deformation.rs` (per-glyph scale, rotation, per-stroke shift) plus 随机删除小尾巴 (`remove_tails`, p = 0.3 per stroke, hook < 0.3 mm turning > 90°; VERIFY), drawn last from its own stream.
 **Recommended implementation:** add tail removal: with probability p per stroke, drop the last
 k points whose cumulative length < 0.3 mm and whose turn angle > 90° (a "hook"); VERIFY against
 a capture with many hooked glyphs. Expose the master switch in the 手写 tab. Keep separate RNG
@@ -900,7 +900,7 @@ random perturbations (corner/centre/edge waves); result accepted only when simil
 original (Haar-wavelet similarity, alternatives Euclidean and DTW); retries (`tps_times`). Very
 slow; a TODO says to rewrite in numpy/JIT/C (C §字形变形) [med-high]. Captured: italic-like
 slant on CJK, small smooth residual (protocol.md [cap]).
-**chixie-rs today:** Done (M5): CJK slant plus a thin-plate-spline warp (4×4 control grid, hand-written 19×19 solve, affine part dropped), ~8 µs per glyph in release. Calibrated on the level-7 capture and scaled linearly; captures at 3 and 10 (2026-11-17) cannot resolve the level because ChiXie3's per-paste randomness is as large (see protocol.md).
+**PenKaku today:** Done (M5): CJK slant plus a thin-plate-spline warp (4×4 control grid, hand-written 19×19 solve, affine part dropped), ~8 µs per glyph in release. Calibrated on the level-7 capture and scaled linearly; captures at 3 and 10 (2026-11-17) cannot resolve the level because ChiXie3's per-paste randomness is as large (see protocol.md).
 **Recommended implementation:** implement a real TPS: 3×3 or 4×4 control grid over the glyph
 bbox, displacements drawn from the seed scaled by level, solve the (n+3)² linear system once per
 glyph (small dense solve; write it by hand or add `nalgebra` — already common, pure Rust).
@@ -919,7 +919,7 @@ the character) and 异常宽度字符处理 (static name 异常宽度字符优�
 form [ui-form]. Needs a selected character ("请选中字符后使用"). 变形 needs deformation on
 ("请先在设置窗口中启用变形配置"). 同步至服务器 only for 超级管理员 (`font/admin_tune_fonts`) (C §字符微调)
 [UI][high].
-**chixie-rs today:** Done (M5, matched to the dialog 2026-11-25): `Attrs.tuning` (`layout::Tuning`: dx/dy mm, scale, width, reroll). The task-pane card 字符微调 follows the dialog: 字符 with a preview of the laid-out glyph, 字体 (the char's own font), 字号 with A+/A− (±5 % of 字号), 微调 pad (0.2 mm, centre = back to the original position) beside 变形 / 变瘦 / 变胖, 恢复默认 (only 变形 / 变胖 / 变瘦, as ChiXie3), 应用至同字符 ▾ (字体, 字号 and 微调; 同时变形 also copies 变形), and the red 字符重复轨迹优化 / 异常宽度字符处理 that turn the clean-up on for the selected char's font only (`FontSettings.fix_fonts`). No server sync.
+**PenKaku today:** Done (M5, matched to the dialog 2026-11-25): `Attrs.tuning` (`layout::Tuning`: dx/dy mm, scale, width, reroll). The task-pane card 字符微调 follows the dialog: 字符 with a preview of the laid-out glyph, 字体 (the char's own font), 字号 with A+/A− (±5 % of 字号), 微调 pad (0.2 mm, centre = back to the original position) beside 变形 / 变瘦 / 变胖, 恢复默认 (only 变形 / 变胖 / 变瘦, as ChiXie3), 应用至同字符 ▾ (字体, 字号 and 微调; 同时变形 also copies 变形), and the red 字符重复轨迹优化 / 异常宽度字符处理 that turn the clean-up on for the selected char's font only (`FontSettings.fix_fonts`). No server sync.
 **Recommended implementation:** per-character overrides stored in the document:
 `CharTweak { dx, dy, scale_x, font: Option<FontId>, size: Option<f32>, reroll: u32 }` keyed by
 char id (`reroll` bumps the RNG salt = "变形" again). "应用至同字符" copies the tweak to all
@@ -933,7 +933,7 @@ modal dialog; live preview on the page. No server sync.
 (spin box; presumably `RouteImproveValue`, inferred), 恢复默认, 应用至选中字符; at write time `GenerateGcodeOfWritingWithImprove` applies it with progress
 "书写路径优化中". Simplify = Douglas-Peucker (`epsilon`); 方案1 = Catmull-Rom densification
 (`num_points`); 方案2 = uniform arc-length resampling (A §Writing improve; C §路径优化) [high].
-**chixie-rs today:** Done (M5): `path.rs` (Douglas-Peucker, Catmull-Rom, uniform resampling), `DeviceProfile.route` applied per stroke in `gcode::emit_mapped` (resume map unchanged), 设备 › 参数设置 › 书写优化; default 无优化.
+**PenKaku today:** Done (M5): `path.rs` (Douglas-Peucker, Catmull-Rom, uniform resampling), `DeviceProfile.route` applied per stroke in `gcode::emit_mapped` (resume map unchanged), 设备 › 参数设置 › 书写优化; default 无优化.
 **Recommended implementation:** core `path.rs`: `simplify_dp(&[P], eps)`,
 `catmull_rom(&[P], per_seg)`, `resample_uniform(&[P], step_mm)`; applied in `gcode::emit` from a
 `RouteImprove` setting in `DeviceProfile` (it is a machine-smoothness choice, not a layout one).
@@ -949,7 +949,7 @@ note creates a new page; in a table cell the cell gains a row, scales, or record
 Return adds a `LineBreakItem` (and can add a page); Space inserts a random-width space by the
 previous char's class; Backspace at row start pulls rows up (C §输入排版) [high].
 Captured: wrap at ≈ 168 mm writable width on A4 (protocol.md [cap]).
-**chixie-rs today:** `layout.rs` full relayout with wrap and paging per template.
+**PenKaku today:** `layout.rs` full relayout with wrap and paging per template.
 **Recommended implementation:** keep full relayout; VERIFY whether the wrap tests glyph origin
 or right edge (one more capture with a near-margin glyph).
 
@@ -958,7 +958,7 @@ or right edge (one more capture with a near-margin glyph).
 together) so a word is not broken across grid rows; blocks that do not fit wrap down; two digits
 can share one cell (`generate_combined_text_item`) (C §作文格排版) [med-high]. A server endpoint
 `text_processing/text_block` also exists (A).
-**chixie-rs today:** Done (M3): two digits (optionally two letters) share a cell; 作文格分词 (jieba-rs, off by default, 布局 › 排版) keeps a word on one row.
+**PenKaku today:** Done (M3): two digits (optionally two letters) share a cell; 作文格分词 (jieba-rs, off by default, 布局 › 排版) keeps a word on one row.
 **Recommended implementation:** do not keep words together by default in 作文格: Chinese school
 composition paper breaks anywhere (inferred; check with users). Implement only the parts that
 matter: punctuation rules (below) and "two digits / two Latin letters per cell" as an option.
@@ -972,7 +972,7 @@ is a closing mark (`PostPunctuation`) or whose last char is an opening mark
 (`LeadingPunctuation`) and paints them with the warning colour; a badge "存在一些标点符号位置异常 /
 点击处理" (A §Main window; C §字符位置合理性检测) [med]. Punctuation sets (A @944dfb9, @944e001):
 opening `([{·‘“〈《「『【〔〖（．［｛￡￥`; closing `!),.:;?]}¨·ˇˉ―‖’”…∶、。〃々〉》」』】〕〗！＂＇），．：；？］｀｜｝～￠%`.
-**chixie-rs today:** Done (M3): 避头尾 on by default (布局 › 排版): ruled/free pull up to 3 chars down; 作文格 hangs up to two closing marks in the last cell; leftovers listed in `Document::punct_issues` and shown as a status-bar badge that jumps to them. 1,000-char fuzz in `core/tests/kinsoku_fuzz.rs`.
+**PenKaku today:** Done (M3): 避头尾 on by default (布局 › 排版): ruled/free pull up to 3 chars down; 作文格 hangs up to two closing marks in the last cell; leftovers listed in `Document::punct_issues` and shown as a status-bar badge that jumps to them. 1,000-char fuzz in `core/tests/kinsoku_fuzz.rs`.
 **Recommended implementation:** real kinsoku in `layout.rs` (better than ChiXie3): when a closing
 mark would start a line, either (a) hang it in the margin (default for 作文格: draw it in the
 last cell's lower right, as Chinese composition rules require) or (b) pull the previous char
@@ -982,7 +982,7 @@ default tables (configurable). Tests: "你好，" at a forced wrap never starts 
 #### Full-width / half-width conversion (全角/半角)
 **ChiXie3:** `FullAndHalfWidthUtil.auto_convert` runs before glyph generation (`Q2B`, `B2Q`,
 two mapping tables) (C) [med]; direction per context not recoverable.
-**chixie-rs today:** Done (M3): `layout::glyph_for` falls back to the width counterpart (ASCII ↔ U+FF01–FF5E, space ↔ U+3000) when the font lacks a char; the text is unchanged.
+**PenKaku today:** Done (M3): `layout::glyph_for` falls back to the width counterpart (ASCII ↔ U+FF01–FF5E, space ↔ U+3000) when the font lacks a char; the text is unchanged.
 **Recommended implementation:** convert only when the chosen font lacks the glyph in the typed
 width (e.g. font has `，` but not `,` → use `，`). Implement as a fallback step in
 `FontSet::pick`; the text itself is never changed.
@@ -1000,7 +1000,7 @@ button 清空/忽略溢出内容. `UI_BatchOverflowHandlingDialog` (title 批量
 "点击溢出单元格左上角的警告标志，即可处理单个单元格溢出" (the warning badge sits at the cell's top-left corner), and three radio
 buttons 优先缩放字符 / 优先增加内部行数 / 优先忽略溢出内容, the counter 当前溢出单元格： ("0 个" placeholder) and the
 button 开始处理.
-**chixie-rs today:** Done (M7a): overflow is a layout result (`Document.cells`, `CellInfo.overflow_from`); per-cell `Overflow::{Shrink, AddRows, Clip}` fitted with a few layout passes; a red badge on each overflowing cell opens 内容溢出 (方案1/2/3 with trial numbers, 清空溢出内容); 表格功能 › 批量溢出处理. Overflow is never written. Editing is never blocked.
+**PenKaku today:** Done (M7a): overflow is a layout result (`Document.cells`, `CellInfo.overflow_from`); per-cell `Overflow::{Shrink, AddRows, Clip}` fitted with a few layout passes; a red badge on each overflowing cell opens 内容溢出 (方案1/2/3 with trial numbers, 清空溢出内容); 表格功能 › 批量溢出处理. Overflow is never written. Editing is never blocked.
 **Recommended implementation:** make overflow a layout result, not an editor state:
 `CellLayout { fitted: bool, overflow_from: Option<usize> }`. Cell policy per cell:
 `Overflow::Shrink { min_size }` (default: binary-search the largest size ≤ the cell size that
@@ -1012,15 +1012,15 @@ Tests: shrink fits a 40-char text into a 2-row cell; clip never emits overflow s
 **ChiXie3:** 作文格: select ≥ 2 consecutive chars → one cell holding a combined glyph (each squeezed
 horizontally). Errors "合并内容只能合并两个以及以上的字符", "作文格模式合并内容只能选中连续文字内容" (C)
 [high]. Ribbon button 合并内容 [UI].
-**chixie-rs today:** Done (M3): `Attrs.combine_next` (custom XML part only); ribbon 合并内容 toggles it on a selection with ChiXie3's errors; the run shares one cell, squeezed across.
+**PenKaku today:** Done (M3): `Attrs.combine_next` (custom XML part only); ribbon 合并内容 toggles it on a selection with ChiXie3's errors; the run shares one cell, squeezed across.
 **Recommended implementation:** a `CharTweak`-like run flag `combine_with_next` honoured by grid
 layout (scale_x = 1/n). P3.
 
 #### Re-typesetting and threads (重排版)
 **ChiXie3:** `ReTypeSettingContinuousItems` pulls items out and re-inserts them; tables use
 `ReNestingTableCell`. Work runs on Qt threads with flags to block input (C) [high].
-**chixie-rs today:** Missing (see §2).
-**Recommended implementation:** not needed as a feature: chixie-rs relayouts the document from
+**PenKaku today:** Missing (see §2).
+**Recommended implementation:** not needed as a feature: PenKaku relayouts the document from
 the model (§3.1). Keep layout off the UI thread only if measurements require it.
 
 ### 3.6 Device and connection (设备管理)
@@ -1059,7 +1059,7 @@ with 其他控制板/设备. The main-window module adds status strings 设备�
 **How it works there:** `DeviceManagement` (A @945a413), config `[DeviceConfig] DeviceParams`
 (QVariant map), `DefaultDevice`, `AutoConnect`, `show_command_window`,
 `show_coordinate_region`, `CustomCommand`, `CustomNetworkDevices`.
-**chixie-rs today:** 设备 ribbon tab and right task pane `device.rs` (port 自动/COMx ★, jog
+**PenKaku today:** 设备 ribbon tab and right task pane `device.rs` (port 自动/COMx ★, jog
 0.1/1/10 mm, 抬笔/落笔, 设为原点, 回原点, 解锁, live state + position, console, job progress);
 `device_params.rs` (参数设置: profile fields, ChiXie3 import, `$$` 机器规格); core `device.rs` actor,
 `config::DeviceSettings`, `chixie3_devices.rs` (QVariant decoder).
@@ -1075,7 +1075,7 @@ rule). Tests: profile switch updates the actor (`Command::SetProfile`).
 [med]; custom type sends the user's raw strings; 3D printer adds offsets and an extrusion move
 (A, C) [med]. `pauseTime` (0 / 0.1 / 0.2 / 0.5 / 1 s) should emit `G4 P` but was not sent over
 Telnet [cap].
-**chixie-rs today:** `gcode::DeviceType::{StepperPenUp, ServoPenUp, ElectromagnetPenUp,
+**PenKaku today:** `gcode::DeviceType::{StepperPenUp, ServoPenUp, ElectromagnetPenUp,
 CustomZ}`; real `G4 P<s>` dwell.
 **Recommended implementation:** add `Laser { power_s: u16 }` (pen down = `M3 S<power>` /
 `M4`, pen up = `M5`, with `$32=1` laser mode check) and `PenPlotter3D { z_up, z_down,
@@ -1089,8 +1089,8 @@ type = 激光雕刻机).
 selectable list of devices (`listWidget`) and one export button [ui-form]; then folder, file
 "<设备名> - 设备参数.cset". The file is a Python **pickle** of the `DeviceParams` dict (A §Device
 parameters) [high] — importing a foreign `.cset` in ChiXie3 can execute code.
-**chixie-rs today:** import from `config.ini` (`chixie3_devices.rs`).
-**Recommended implementation:** export/import chixie-rs profiles as TOML (`.chxdev`). Import
+**PenKaku today:** import from `config.ini` (`chixie3_devices.rs`).
+**Recommended implementation:** export/import PenKaku profiles as TOML (`.chxdev`). Import
 `.cset` through the existing safe pickle reader in `chixie3_templates.rs` (generalise it into
 `pickle.rs`: opcodes only, never resolve classes). Tests: fixture `.cset` (build one with Python
 locally; do not commit user data).
@@ -1101,7 +1101,7 @@ locally; do not commit user data).
 N1; Linux/macOS `/dev/`. Default port priority CH340 first. Non-device port warning
 "此端口应该不是设备端口，连接可能会导致闪退，确认要尝试此端口吗？" (A) [high]. Errors "端口连接超时",
 "连接失败，建议更换usb口尝试", "串口连接失败". Verified hardware: 115200 baud (protocol.md [cap]).
-**chixie-rs today:** Done: `transport.rs` (serial + telnet `LineLink`, CH340/GD32 auto-detect),
+**PenKaku today:** Done: `transport.rs` (serial + telnet `LineLink`, CH340/GD32 auto-detect),
 `Target::Serial { port: None }` = auto.
 **Recommended implementation:** label Bluetooth SPP ports ("（蓝牙）") from the port description
 (`serialport::SerialPortType::BluetoothPort` / description text); try 115200 first, then
@@ -1111,7 +1111,7 @@ on a new COM number, memory `chixie-board-usb-drop`): auto mode re-scans by VID/
 #### Auto connect (自动连接机器)
 **ChiXie3:** checkbox; at start (config `AutoConnect`) and when ticked, a thread waits for a CH340
 port to appear and connects: "自动连接设备，自动获取端口号中", "检测到设备接入,连接中", "自动连接成功" (A) [high].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** in the device actor, an `AutoConnect` mode polling
 `list_ports()` every 1 s while disconnected and not user-disconnected; also used after a USB
 drop during a job (connect only; never auto-resume a job). Test with `grbl::fake`.
@@ -1119,7 +1119,7 @@ drop during a job (connect only; never auto-resume a job). Test with `grbl::fake
 #### CH340 driver check (CH340驱动检查)
 **ChiXie3:** after first show, "检测到未安装CH340驱动，是否下载并安装？" [立即安装] [不再提示]; downloads
 `CH341SER.EXE` from the vendor server (A) [high].
-**chixie-rs today:** Not planned.
+**PenKaku today:** Not planned.
 **Recommended implementation:** not planned (download + run an EXE is a security risk). Show a
 help link when no port is found.
 
@@ -1127,9 +1127,9 @@ help link when no port is found.
 **ChiXie3:** on connect "开始进行Grbl状态检查"; in Alarm: "Grbl控制板当前为“警报”状态，是否发送解锁指令？（解锁后才可正常使用）"
 [立即解锁] → `$X`. Non-炽写 boards are checked with `$WHO`; unknown boards get
 "未经认证的设备，请谨慎使用！！可能即将停止支持！！" (A) [high].
-**chixie-rs today:** 解锁 button; Alarm shown in state.
+**PenKaku today:** 解锁 button; Alarm shown in state.
 **Recommended implementation:** on `Connected`, if status is `Alarm`, show a toast with 解锁.
-Do not warn about "uncertified" boards (vendor lock-in; chixie-rs supports any Grbl).
+Do not warn about "uncertified" boards (vendor lock-in; PenKaku supports any Grbl).
 
 #### Grbl error translation (Grbl错误翻译)
 **ChiXie3:** `error:N` → Chinese texts for all classic Grbl codes (expected command letter, bad
@@ -1138,7 +1138,7 @@ number format, invalid `$`, negative value, homing disabled, step pulse < 3 µs,
 rate, safety door, startup line too long, jog travel, jog syntax, unsupported G-code, modal
 group, undefined feed, integer required, hard limit, target beyond travel, reset while moving,
 homing failures); title "设备报错提示"; unknown "控制板返回了一些未知异常报错：" (A §Grbl error) [high].
-**chixie-rs today:** raw error lines in the console.
+**PenKaku today:** raw error lines in the console.
 **Recommended implementation:** `grbl::error_text(code) -> &'static str` table (codes 1–38 and
 alarms 1–10, Chinese text written fresh from the Grbl wiki meanings, not copied); shown in the
 toast and console. Test: every code maps.
@@ -1148,7 +1148,7 @@ toast and console. Test: every code maps.
 `wireless_ip:23`; failure "无线连接失败，请检查设备是否已正确配网并联网" (A) [high]. The fake-Grbl capture
 used this path; ChiXie3's Telnet streaming stalls on long jobs (~44, ~752, ~1682 lines) and only
 disconnect + restart recovers (protocol.md [cap]).
-**chixie-rs today:** `Target::Telnet` in core; GUI 无线 entry; untested on hardware.
+**PenKaku today:** `Target::Telnet` in core; GUI 无线 entry; untested on hardware.
 **Recommended implementation:** same char-counting streamer as serial; add TCP keepalive and a
 read timeout with `?` probing; on a stall (no `ok` for 5 s while `?` answers `Run`/`Idle`), resync
 by counting outstanding bytes from the status `Bf:` field (Grbl_ESP32 reports it) instead of
@@ -1161,7 +1161,7 @@ hanging. Test with a fake that drops one `ok`.
 only custom ones deletable (A) [high]. Form `UI_AddNetworkDeviceDialog` [ui-form]: title 添加网络设备,
 rows 设备名：(line edit) with checkbox 使用本地默认设备名, IP地址：(line edit), 端口号：(spin box), one
 confirm button.
-**chixie-rs today:** `discovery.rs` (untested), manual IP in settings.
+**PenKaku today:** `discovery.rs` (untested), manual IP in settings.
 **Recommended implementation:** keep arp + UPnP but add mDNS (`_telnet._tcp`/ESP3D advertises
 `http`) via the pure-Rust `mdns-sd` crate (new; reason: works without arp parsing and on
 macOS/Linux). Manual list in settings TOML.
@@ -1174,7 +1174,7 @@ WIFI客户端模式 (STA), 蓝牙模式, 禁用无线(暂未开发); results "�
 three fields 无线网络模式：(combo; its items are filled in code), WIFI密码：(with a Wi-Fi list view and a
 stacked page per mode), 蓝牙名称：; one confirm button. The separate 炽写ESP主板设置 dialog (below) carries
 the richer set of modes (None(有线), WIFI-STA模式, WIFI-AP模式, 蓝牙模式).
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** `esp3d::wifi_scan/set_sta/set_bt` over the serial link
 (`[ESP410]`, `[ESP100]`/`[ESP101]`, `[ESP110]`, `[ESP115]ON`); dialog with an SSID list and a
 password field (password never stored, never logged). P2.
@@ -1197,7 +1197,7 @@ constants). The expert page is a table with row-group labels 三轴步进当量,
 移动加速度 / 抬落笔加速度 (i.e. each of speed and acceleration is split into drawing, travel and pen-lift
 values); buttons: save, import and export of parameters (a parameter file) and 恢复默认. So the dialog also
 has parameter import/export, which this section's earlier text did not list.
-**chixie-rs today:** `$$` read and shown (`grbl::MachineSettings`, 机器规格).
+**PenKaku today:** `$$` read and shown (`grbl::MachineSettings`, 机器规格).
 **Recommended implementation:** an expert table only (sliders hide units): rows from `$$`, editable
 value, description from a local table, "改动" highlight, 应用 sends only changed keys, each acked;
 `$RST=*` behind a typed confirmation. Read back after writing. Block while a job runs.
@@ -1217,7 +1217,7 @@ direction are separate per-axis switches, which the text above did not list. 无
 WIFI-STA模式, WIFI-AP模式, 蓝牙模式), "有线模式无需额外设置", a Wi-Fi list + password for STA, AP SSID + password
 with the note that a default AP password exists (the form text states the value; not repeated here), 控制板蓝牙名称,
 and the button 立即配置 with the caption （无线配置请点这里保存）. Footer: 帮助教程, 恢复默认, save, back.
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3; a preset view over the expert table (filter to these keys).
 
 #### 炽写 N1 device card and drawer (炽写设备管理 / 设备卡片)
@@ -1231,7 +1231,7 @@ probably `$HZ`), 抬笔 `G1G90 Z0 F5000` / pen down `G1G90 Z<v> F5000`, 设置�
 落笔轻重 (更轻Ⅱ / 更轻Ⅰ / 标准(默认) / 更重Ⅰ / 更重Ⅱ), 空驶抬笔, 自动原点; saved under
 `DeviceConfig/ChiXieDevices`. Connect sends `$HZ`; one 炽写 device max ("暂不支持添加多个炽写设备") (A
 §ChiXie device UI) [high]. macOS hides "other device" (A) [high].
-**chixie-rs today:** missing (generic panel only).
+**PenKaku today:** missing (generic panel only).
 **Recommended implementation:** model the N1 as presets over the generic profile instead of a
 second UI: `speed_mode` → feed pair, `pressure` → pen-down Z, `direction_mode` → `AxisMap` +
 180° flag, `done_position` → end move, `done_beep` → end lines. One panel for all devices.
@@ -1249,7 +1249,7 @@ same G-code family). P2.
 保存, 返回. The names (tpwmthrs, tcoolthrs, SGTHRS, IRun/IHold, Mres) are TMC stepper-driver registers, so the N1
 exposes TMC2209-style StealthChop/StallGuard tuning; the values are written as `$` settings (inferred, cf.
 the `$ChiXie/…` and TMC keys in 固件参数).
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3. A preset view over the expert table in 固件参数 (filter to the same
 keys) with plain-language group names; the 出厂设置 button must show the factory values before sending.
 Hide on non-炽写 boards (same `$WHO` gate as 炽写ESP主板设置).
@@ -1264,7 +1264,7 @@ type, e.g. ChiXie N1), 序列号：, 固件版本：, 最新固件： with the s
 buttons [ui-form]: 落笔测试, 回字方框, 蜂鸣器测试, 字符阵列, 自动抬笔测试, 交叉网格, 锯齿折线 (45° zigzag
 50 mm, 10 mm pitch, multiple speeds, tests lost steps), 同心圆与螺旋线, 书写测试 — more than the "buzzer, zigzag,
 基础图形" set earlier recovered from identifiers (A) [med].
-**chixie-rs today:** Not planned.
+**PenKaku today:** Not planned.
 **Recommended implementation:** not planned (vendor firmware; risk of bricking). A generic
 "测试图形" job is useful for any machine: generate it in core (P2, S) with the same set as 设备测试 minus
 the buzzer: 回字方框 (nested squares), 交叉网格, 锯齿折线, 同心圆与螺旋线, 字符阵列 (a glyph grid), and a pen-down
@@ -1277,13 +1277,13 @@ hint "Gcode一般由字母和数字组成，您输入的指令可能有误". 自
 自定义区 grid, stored `CustomCommand {name: cmd}` (A) [high]. Form `UI_CustomCommandDialog` [ui-form]: title
 自定义命令按钮, list 已有按钮, single-line 按钮名称, multi-line 按钮命令 (a command may span several lines), buttons
 保存/添加 and delete.
-**chixie-rs today:** jog pad, pen, zero, home, unlock, console in `device.rs`.
+**PenKaku today:** jog pad, pen, zero, home, unlock, console in `device.rs`.
 **Recommended implementation:** add custom command buttons (TOML list) and command history (↑/↓)
 in the console. Block custom commands during a job (same as ChiXie3).
 
 #### Status-bar position (坐标位置显示)
 **ChiXie3:** a timer polls position; status bar shows 已连接/未连接 and coordinates (A) [high].
-**chixie-rs today:** Done (`?` every 250 ms, live position).
+**PenKaku today:** Done (`?` every 250 ms, live position).
 
 ### 3.7 Job execution (书写任务)
 
@@ -1295,7 +1295,7 @@ with thumbnails, per-page progress, 开始书写 / 暂停书写 / 继续书写 /
 and 开始书写序号为： are main-window strings [ui-form]). Start runs the online check, builds a task per
 page (`initial`, `body`, `end`), enables multicolour, starts the serial thread (A, C §书写管理)
 [high]. Empty task: "书写任务为空，请手动选择任务条目后点击书写，或在页面右键书写尝试".
-**chixie-rs today:** Done: 设备 tab 开始书写 / 暂停 / 继续 / 停止, `device::Job { pages }`,
+**PenKaku today:** Done: 设备 tab 开始书写 / 暂停 / 继续 / 停止, `device::Job { pages }`,
 `Event::Progress`, start confirmation with extents and a 300 mm travel warning, Stop and Done
 park at X0 Y0.
 **Recommended implementation:** add the per-page list (status + character count + thumbnail) to
@@ -1305,13 +1305,13 @@ the task pane and "write from page N". Pause = feed hold `!` (immediate) rather 
 #### Write this page (书写此页 / 直接书写)
 **ChiXie3:** page context menu 书写此页 ▸ 直接书写: confirm "书写确认: 是否立即书写第 N 页…"; errors
 "页没有书写内容", "设备未连接", "当前有书写任务正在进行中，请先结束任务" (C) [high].
-**chixie-rs today:** Partial.
+**PenKaku today:** Partial.
 **Recommended implementation:** `Job { pages, start_page }`; context menu + task-pane button.
 
 #### Sheet change (换纸)
 **ChiXie3:** manual: pages are written one at a time by user click; automatic only with the
 paper-feeder device (A §Page writing management) [high].
-**chixie-rs today:** Done: `Event::AwaitingSheet` → 换纸 dialog → `Command::NextSheet`
+**PenKaku today:** Done: `Event::AwaitingSheet` → 换纸 dialog → `Command::NextSheet`
 (ribbon 已换纸，继续).
 **Recommended implementation:** keep. Optional "每页后自动暂停" vs "连续书写" for continuous paper.
 
@@ -1325,7 +1325,7 @@ skipping items before the chosen one (`can_continue_write`), with initial and en
 title 断点续写, 续写起始字符： showing the selected character (未选中 until one is selected), hint
 "提示：请选中续写的起始字符，然后点击开始", warning "注意：请保证已经设置过原点", button 开始续写 (so the dialog is
 presumably non-modal, letting the user click a character while it is open; inferred).
-**chixie-rs today:** on disconnect, a toast with page and last acknowledged line
+**PenKaku today:** on disconnect, a toast with page and last acknowledged line
 (`Event::Disconnected { page, last_line }`); no resume.
 **Recommended implementation (better):** two resume modes. (1) **Automatic, by line**: the actor
 knows the last acked line; on resume it re-emits from the start of the stroke containing that
@@ -1344,7 +1344,7 @@ to the uninterrupted tail.
 grouped by the item's colour (`getRgb`, default black); at a colour change the sender pauses with
 "换笔提示: 您已启用多色绘制，请更换笔颜色为：<colour>" and [换笔完成] (A §Pen change prompt) [high].
 Automatic mode implementation not found [med].
-**chixie-rs today:** Done (M6): 笔色 menu on 开始 (run colour, coloured preview ink); 多色绘制 groups a page
+**PenKaku today:** Done (M6): 笔色 menu on 开始 (run colour, coloured preview ink); 多色绘制 groups a page
 by colour (first-seen order) and the device pauses with 换笔提示 after a `G4 P0` sync, only when the pen
 changes; automatic mode writes per-pen pick/drop macros from the settings file (no slot editor yet).
 **Recommended implementation:** `layout` keeps per-stroke colour from `CharAttrs.color`; `gcode`
@@ -1363,7 +1363,7 @@ one pause; colour order stable.
 point about the paper/frame centre for rotated pages (`calculate_symmetric_point`) and the origin
 marker moves accordingly (A, C) [high]; numeric mapping [med]. Purpose: writing both sides of a
 sheet or a feeder that returns sheets upside down (inferred).
-**chixie-rs today:** Done (M6): `PageSettings.rotation`, mirrored about the writable frame's centre,
+**PenKaku today:** Done (M6): `PageSettings.rotation`, mirrored about the writable frame's centre,
 stroke order unchanged. **Matches the 2026-11-17 capture** (docs/protocol.md): the centre is the
 frame's (作文格1 grid), not the paper's.
 **Recommended implementation:** `PageRotation::{None, Odd180, Even180, All180}` in
@@ -1382,7 +1382,7 @@ the corners), 巡边范围： 模板框线区域 / 实际书写区域 (template 
 框架线绘制 with 开始绘制 and the note "注：此处是绘制页面中横线/表格/作文格框架". So patrol has three pen modes
 and two ranges, not just the pen-up trace described above. Table borders use `TableDrawingLineGenerator` (outer frame one clockwise path,
 inner lines ordered to cut pen lifts) (C §绘制表格) [med-high].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** `job::patrol(bounds, mode: Up | Down | UpCornersDown) -> String` (pen up
 by default, rectangle at travel feed, back to origin; range = frame or written area) and `job::ruling(template, page) -> Vec<Stroke>` (uses `layout::Guide`s).
 Patrol button next to 开始书写 ("先巡边" is the best way to check paper placement; make it one
@@ -1392,7 +1392,7 @@ click, no dialog). Merge collinear segments and order lines boustrophedon to min
 **ChiXie3:** page menu 上传SD卡书写: uploads the page's G-code to `/chixie_task/` on the board
 (`POST /upload`, multipart `myfile[]`) and asks "是否立即开始书写页面：" then runs `[ESP220]<path>`
 (A §Upload page to SD; protocol.md) [high]. Only for 炽写 ESP32 firmware.
-**chixie-rs today:** Done (M6): 设备 › 上传SD卡 (IP prompt, `standalone` program with G21/G90 and the
+**PenKaku today:** Done (M6): 设备 › 上传SD卡 (IP prompt, `standalone` program with G21/G90 and the
 写完位置 park, upload to `/chixie_task/p<n>.gcode`, `[ESP220]`); tested against a local HTTP mock, not yet
 on a board. Multicolour pages are refused (an SD program cannot pause for a pen).
 **Recommended implementation:** GUI action in the 设备 tab when an IP is known; progress polling via
@@ -1409,7 +1409,7 @@ sends `M119` and checks `z_max: TRIGGERED` ("检测到有物体遮挡限位开�
 Marlin moves on Z/E (`G92 Z0`, `G1 Z500 F9000`, `G1 Z113.84615 E113.84615 F8000`, `G28 Z0`, …);
 Marlin only ("不支持的主板或者固件"); close guard "设备非停止状态下，无法关闭自动换纸控制窗口！" (A §Auto
 paper device) [high]; hardware identity [med].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** P3. Generalise as "sheet change macros": a profile can define
 `feed_out` / `feed_in` G-code macros run at `AwaitingSheet` instead of prompting, plus a loop
 count. Requires a second link (the feeder is a separate Marlin board): `device.rs` gains a
@@ -1423,11 +1423,11 @@ secondary `Target`. Marlin streaming (ok-per-line, no char counting) needed firs
 pen down `G1G90 Z2F19000`, writes, pen up after each stroke, end `G90G0 X0Y0`. Origin = pen
 position at start; Y negative going down. Consecutive repeated points are not sent. Static:
 `_handle_consecutive_negative` fixes `+-`/`--` ("导致N1鬼叫的问题") (A, C) [high].
-**chixie-rs today:** `chixie-rs-output::emit` (`emit`, `emit_document`; travel `G0`, explicit feeds, optional
+**PenKaku today:** `penkaku-output::emit` (`emit`, `emit_document`; travel `G0`, explicit feeds, optional
 dwell, axis map), golden tests.
 **Recommended implementation:** keep our cleaner format (no signs, `G0` travel with a travel
 feed, explicit `F`); add an optional "ChiXie3-compatible" emitter only if a user needs byte
-compatibility (not planned). Add a header comment block (`; chixie-rs v…, page n, font, seed`)
+compatibility (not planned). Add a header comment block (`; PenKaku v…, page n, font, seed`)
 behind a setting (some firmware echo comments; Grbl ignores `;`).
 
 #### Path planning (路径规划: 之字型 / 弓字型)
@@ -1438,7 +1438,7 @@ behind a setting (some firmware echo comments; Grbl ignores `;`).
 弓 = alternate rows reversed (boustrophedon); C says the opposite and calls the second mode 工.
 The character shapes (之 = Z-scan, 弓 = serpentine) and the CNC meaning of 弓字形 favour A
 (inferred).
-**chixie-rs today:** Done (M6): `DeviceProfile.path_plan` (之字型 / 弓字型), output order only; 弓 writes
+**PenKaku today:** Done (M6): `DeviceProfile.path_plan` (之字型 / 弓字型), output order only; 弓 writes
 every second inked row of a page right to left, each character's strokes in order; 作文格 pages are
 left alone. **Matches the 2026-11-17 capture** (A is right: 之 = 1 = all rows left to right, 弓 = 2;
 docs/protocol.md).
@@ -1452,7 +1452,7 @@ nearest-neighbour stroke order option within a character for fonts with bad stro
 **ChiXie3:** `StartPointOfPaper` (paper top-left), `StartPointOfFrame` (frame/margin start; uses
 `origin_point_of_frame`, `end_point_of_frame` and cos/sin for flips), `StartPointOfCustom` (the
 dragged marker); offsets by `get_offset_value`; units px → mm via `PXScale` (A, C) [high].
-**chixie-rs today:** Done (M6), see 书写原点 (§3.2).
+**PenKaku today:** Done (M6), see 书写原点 (§3.2).
 **Recommended implementation:** see 书写原点 (§3.2); emitter subtracts `origin_mm` from every
 point. Test per mode.
 
@@ -1460,7 +1460,7 @@ point. Test per mode.
 **ChiXie3:** `WriteDonePos` 0 原点 `G90G0 X0Y0`, 1 原点左侧2cm `G90G0 X-20Y0` (sign depends on the
 axis map), 2 任务结束点 (no move); prompt "请输入数字（0-原点、1-原点左侧2cm、2-任务结束点处）"; 炽写 devices may
 append the `$Beep …` melody. Marlin back-to-origin `G90` + `G0 X0 Y0 F<speed>` (A, C) [high].
-**chixie-rs today:** always parks at X0 Y0 (BOSS request).
+**PenKaku today:** always parks at X0 Y0 (BOSS request).
 **Recommended implementation:** `EndPosition::{Origin, OriginLeft(mm), Stay, Custom(x, y)}`,
 default Origin; "OriginLeft 20 mm" keeps the pen off the written text so the sheet can be
 removed. Beep only for boards that support `$Beep` (detected from `$I`).
@@ -1469,14 +1469,14 @@ removed. Beep only for boards that support `$Beep` (detected from `$I`).
 **ChiXie3:** `x_plus/x_reduce/y_plus/y_reduce` labels (`X+`, `X-`, `Y+`, `Y-`) mapped to signed
 axes; validation "坐标系中两个不同方向不能为同一个轴"; 炽写 direction modes flip signs and rotate 180°
 (A) [high].
-**chixie-rs today:** `AxisMap { swap_xy, invert_x, invert_y }`.
+**PenKaku today:** `AxisMap { swap_xy, invert_x, invert_y }`.
 **Recommended implementation:** keep; the UI shows a small diagram of the page on the bed with the
 pen at the origin, updating live (ChiXie3 uses two drop-downs).
 
 #### Pen-tip ("笔锋") test
 **ChiXie3:** `enable_route_tip`: lifts Z gradually along the last segment of each stroke to imitate
 a brush tip (`route_tip_test_gcode`, `route_tip_last_z_value`) (A) [high]; labelled 笔锋简单测试.
-**chixie-rs today:** Done (M6, experimental): 参数设置 › 笔锋(实验) for stepper lift, Z rises linearly over
+**PenKaku today:** Done (M6, experimental): 参数设置 › 笔锋(实验) for stepper lift, Z rises linearly over
 the last 1/2/4 mm to halfway up.
 **Recommended implementation:** P3; only meaningful with a Z stepper. `gcode` option
 `tip_taper: Option<(len_mm, z_end)>` interpolating Z on the last `len_mm` of each stroke.
@@ -1485,7 +1485,7 @@ the last 1/2/4 mm to halfway up.
 **ChiXie3:** if `enable_plugin`, page route data (per text, per stroke points) is passed to
 `RouteOptimizer.start_optimizing(...)` loaded from `<user dir>/plugin/test.py` with `importlib`
 — user Python code runs in-process (C §书写G-code生成器) [high].
-**chixie-rs today:** Not planned (replace).
+**PenKaku today:** Not planned (replace).
 **Recommended implementation:** not planned as code loading. If extension is needed: an external
 filter command (`stdin` = JSON strokes, `stdout` = JSON strokes) run as a child process with a
 timeout, opt-in per profile. Safer and language-neutral.
@@ -1493,13 +1493,13 @@ timeout, opt-in per profile. Safer and language-neutral.
 #### Export G-code (导出 G-code)
 **ChiXie3:** `exportAction` (visible only to super users [cap] protocol.md): pick a folder, writes
 `<n>页.gcode` per page; "Gcode导出成功，共导出 N 页数据"; "页面没有数据，请输入内容或导入文件后再导出！" (A) [high].
-**chixie-rs today:** Done (`file_ops.rs`: one file per page, backstage 导出).
+**PenKaku today:** Done (`file_ops.rs`: one file per page, backstage 导出).
 **Recommended implementation:** keep; name files `<doc>-p<n>.gcode`; add "合并为一个文件（含换纸暂停 M0）"
 option for SD use.
 
 ### 3.9 Plotting editor (绘图与激光)
 
-Overall recommendation: build the plotting editor as a **second document kind** in chixie-rs
+Overall recommendation: build the plotting editor as a **second document kind** in PenKaku
 (`PlotDoc`), sharing paper, device, job and G-code code with writing. Core module `plot/`
 (`model.rs`, `geom.rs`, `import_dxf.rs`, `import_svg.rs`, `raster.rs`, `gen/{maze,seal}.rs`),
 GUI `plot_view.rs`. Geometry is kept as exact primitives (line, arc, ellipse, cubic) and only
@@ -1517,7 +1517,7 @@ discrete zoom levels, Esc cancels, Enter finishes a polyline, Delete deletes (B 
 Typing into plotting text fields needs login ("用户未登录，请先登录") (B) [high]. Mode switch
 绘图模式 / 激光模式 (`DrawConfig/DrawOrLaser=Draw|Laser`, tooltip "切换绘图模式或者切换激光模式") (A)
 [high]; **no laser-specific options exist** (no power, speed, fill) (B) [high].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** `plot_view.rs` with the same desk/page painter as `doc_view.rs`,
 rulers as two thin canvases, discrete zoom steps (25–800%), select/pan tools, Space-drag to pan.
 Laser mode becomes a device-profile type (§3.6), not an editor mode.
@@ -1529,7 +1529,7 @@ presets), 宽度 180.0, 高度 150.0 (mm), [确定], 保存 / 删除 presets ("�
 and group 自定义纸张 (纸名：, 宽度：, 高度：) plus a delete button; `UI_DrawingPaperSelection` (the ribbon's paper popup) has
 the same two groups with a 删除此纸张 button. Config `PaperType`, `PaperName=A4`,
 `PaperOrientation=Horizontal`, `CustomPaperSize` (pickled dict) (A, B) [UI][high].
-**chixie-rs today:** 布局 tab paper size / orientation / margins for writing.
+**PenKaku today:** 布局 tab paper size / orientation / margins for writing.
 **Recommended implementation:** share the paper presets list between writing and plotting
 (`PaperPreset { name, w, h }` in settings TOML).
 
@@ -1537,7 +1537,7 @@ the same two groups with a 删除此纸张 button. Config `PaperType`, `PaperNam
 **ChiXie3:** tools 鼠标框选模式 (default), 鼠标拖动画布模式, 启用画布网格 (5 mm default), 启用网格点吸附功能
 (toasts 已启用网格吸附 / 已关闭网格吸附; marker at the nearest intersection), 打开图层属性设置 (B §侧边工具栏)
 [high].
-**chixie-rs today:** Missing (see §2).
+**PenKaku today:** Missing (see §2).
 **Recommended implementation:** same tools; snap targets: grid, endpoints, midpoints, centres
 (object snap is a clear improvement); hold Alt to suspend snapping.
 
@@ -1549,7 +1549,7 @@ press-drag-release or two clicks; 矩形 two corners; 圆/椭圆 centre then rad
 successive clicks, Enter finishes, Backspace removes the last point, Esc cancels; 曲线 press = anchor,
 drag = handles with predicted segment preview (B §基本图形) [high]. Items share a base with handles,
 hover, enlarged hit shape for thin lines.
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** `enum Shape { Point, Line, Rect, Ellipse, Arc, Polyline, Polygon {
 n, r_in }, Path(Vec<Seg>) }` with an affine `transform`; tool state machines per shape in the GUI;
 Shift constrains (45°, square, circle). Tests: emit of a circle with tolerance 0.05 mm has max
@@ -1564,7 +1564,7 @@ rectangle: 宽度：, 高度：; polygon: 边数：, 圆心距：; ellipse: 圆�
 插入圆形, 三点绘制圆弧, 根据圆心绘制圆弧 and 图形属性设置. CAD line types
 CONTINUOUS, CENTER(X2,2), DASHED(X2,2), PHANTOM(X2,2), DASHDOT(X2,2), DOT(X2,2), DIVIDE(X2,2) with
 Chinese labels (中心线, 虚线, 双点划线, 点划线, 点线, …); dashes are real pen lifts (B §线型) [med-high].
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** a docked properties pane (not a floating window). Line types as
 dash arrays in mm applied at flatten time (`kurbo::dash`). Colour drives multicolour pen
 changes (§3.7).
@@ -1574,7 +1574,7 @@ changes (§3.7).
 (`PlottingLayers`, `LayerAttr`) (B) [high]; layer semantics when plotting [med]. Form
 `UI_PlottingLayerManagementDialog` [ui-form] (title 图层管理): the button tooltips are 添加图层, 删除图层,
 合并多个选中图层, 向上移动所选图层顺序, 向下移动所选图层顺序; the column headers (图层名, eye, lock) are not form strings.
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3: layers = ordered groups with `visible`, `locked`, `plot`
 flags; hidden or non-plot layers are not emitted; one layer per pen colour is a handy default.
 
@@ -1588,7 +1588,7 @@ fit-to-paper scaling; Y flip; result is a movable group. Errors "dxf解析异常
 (B §导入 SVG / CAD) [high]. 设置 › 绘图与激光 › CAD导入: 拆分导入(根据源文件属性) ▾ (`CAD_Import_Mode=1`;
 the form now names the pair: 作为整体导入 / 拆分导入(根据源文件属性)) [UI][ui-form]; "split by source-file
 attributes" means layer / colour / linetype of the entities (inferred).
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** `import_dxf.rs` using the `dxf` crate (reads R12–2018 ASCII/binary;
 new dependency, reason: DXF parsing is large) covering LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE,
 POLYLINE, SPLINE (via de Boor → cubic), INSERT, POINT; TEXT/MTEXT → plain text items written with
@@ -1601,7 +1601,7 @@ the current handwriting font; HATCH boundary only. Units from `$INSUNITS`. Impor
 plus Circle, Ellipse, Rect, Polygon, Polyline, Line (some logged "todo"); stroke width and fill
 colour kept; output path items in a group (B) [high]; fills are not hatched (inferred from
 absence).
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** `usvg` (new crate; reason: resolves CSS, transforms, units, use,
 shapes → paths reliably) then convert `usvg::Path` segments to our `Seg`; optional hatch fill for
 filled shapes (scan-line at pen width, angle configurable) — a clear improvement for laser/plotter
@@ -1612,7 +1612,7 @@ fills.
 for CAD, SVG and image, matching `importCadBtn`, `importSvgBtn`, `importImageBtn`); utilities `ImageBinarizer` (global threshold 0–255, Otsu) and
 `PlottingImageScanner.process_image(pixmap, scan_spacing, threshold)` producing horizontal scan
 lines over dark runs (B §几何工具) [high]; no UI caller found statically [low].
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** `raster.rs` on `image`: grayscale → Otsu or manual threshold →
 modes (a) 扫描线 hatch at spacing s mm and angle θ, serpentine order; (b) 轮廓 (marching squares +
 DP simplification) for line art. Dialog with a live preview and stroke count / time estimate.
@@ -1623,7 +1623,7 @@ Tests: a black square at 1 mm spacing gives N lines of the right length.
 circle/ellipse point counts from a max chord-height ratio, `include_start_twice` to close
 shapes; elliptic arcs with adaptive subdivision to `max_error`; arcs emitted as `G2/G3` in the
 plotting generator via `ArcFitterUtil` (A, B, C) [high].
-**chixie-rs today:** Missing (see §2).
+**PenKaku today:** Missing (see §2).
 **Recommended implementation:** flatten everything with `kurbo` to a chord tolerance (default
 0.02 mm); emit `G1` only (Grbl handles `G2/G3` but arcs from fitted ellipses are approximations
 anyway, and pen plotters do not benefit). Optional `G2/G3` for true circles when the firmware
@@ -1637,7 +1637,7 @@ supports it (fewer lines).
 the 文本 / 表格 buttons (`insertTextFieldBtn`, `insertTextBoxBtn`, `insertTableFieldBtn`, `fillingTextFieldBtn`). Typing uses the writing typesetter (note/composition
 modes), alignment, Shift-selection, clipboard; resize handles show dimension lines with inline
 editable width/height (B §文本域) [high/med].
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** a `TextBox { rect, anchor, EditDoc, template: Ruled|Blank }`
 shape that runs the same `layout_ids` inside its rectangle — the plotting editor gets writing for
 free. Double-click to edit text in place. Tables after §3.2 tables exist.
@@ -1655,7 +1655,7 @@ handlers (B) [med]. Flow: choose, click on the paper to place, a config dialog e
   along the circle / ellipse / four sides; 文字角度, 字间距, font (default SimSun bold) (B §印章生成器)
   [high]. Form `UI_PlottingSealConfigDialog` [ui-form] (title 模拟印章配置): 印章类型：, 印章图案：(combo; the 五角星
   centre symbol is one pattern), 印章文字：(multi-line), 字体：, 文字间距：, 文字角度：. Note: the seal text uses a system TrueType font, i.e. outline fonts, not stroke fonts.
-**chixie-rs today:** Not planned.
+**PenKaku today:** Not planned.
 **Recommended implementation:** maze: own Prim/recursive-backtracker in `gen/maze.rs` seeded,
 with the wall polylines merged into long runs (fewer pen lifts) — P3, S. Seal: use the
 handwriting stroke font for the text (single-line strokes plot cleanly; outline fonts draw
@@ -1668,7 +1668,7 @@ Hilbert, dragon) are cheap to add in the same framework and fit a plotter well �
 says it opens the template manager (section A) — conflict: the live ribbon button belongs to
 plotting and the backstage library has drawing/laser categories, so it most likely opens the
 library filtered to drawings (inferred).
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3, after the cloud template endpoint is known.
 
 #### Plotting G-code (绘图 G-code)
@@ -1676,7 +1676,7 @@ library filtered to drawings (inferred).
 polygon, SVG path, curve, maze, seal, text box, table cells, image scan); items outside the paper
 skipped (`item_in_paper`); a third-party copy `PlottingPageToGcodeForOtherDevice` ("完全照搬")
 (A §Plotting G-code) [high]. Only a single plotting page is handled ("暂时只考虑加载一页").
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** flatten → `Page { strokes }` → existing `gcode::emit`. Add stroke
 ordering (greedy nearest neighbour + 2-opt on long jobs, optionally reversing strokes) because
 imported drawings are unordered; report pen-up travel saved. Clip strokes to the paper (not
@@ -1717,7 +1717,7 @@ check, optional fingerprint pin); upload with `STOR`; or 导出Gcode to a folder
 templates ("暂时只支持笔记模式下导出"). G-code: `G1 X.. Y.. F<speed>`, `G1 Z<up/down>`, `G4 P<pause>`,
 end `G90G0 X0Y0` + `M18 X Y Z`; optional A1 tune via `M400 S1`/`M1006` lines. Config
 `[BambuLabConfig]` stores the IP and the access code in plain text (A §Bambu Lab) [high].
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** P3. A device profile type `BambuPrinter { model, ip }` with an
 `FtpsUpload` transport (`suppaftp` crate with rustls; new dependency, reason: implicit FTPS) and
 a 3D-printer emitter (`G28` only if the user opts in; Z pen heights; `M18` at the end). Access
@@ -1732,7 +1732,7 @@ canvas with stats (已解析行, 路径数, 解析时间, 内存使用, FPS), le
 green / 当前位置 red, 适应视图, 性能面板, zoom [UI]. The Qt form `UI_GcodeToolDialog` is only a web view
 (initial URL `about:blank`): every label above comes from the served page, not from Designer [ui-form]. 执行 builds a task and runs it on the 炽写 device;
 refuses "设备未连接", "请先结束书写" (A §G-code tool) [high]. Online only.
-**chixie-rs today:** missing (but the page preview renders strokes natively).
+**PenKaku today:** missing (but the page preview renders strokes natively).
 **Recommended implementation:** P1 (it is the natural "run an arbitrary G-code file" feature):
 core `gcode_parse.rs` (G0/G1/G2/G3/G90/G91/G92/Z moves → pen-up/down polylines, extents),
 GUI dialog reusing the page canvas painter (travel blue dashed, drawn green, live head red dot
@@ -1744,7 +1744,7 @@ Tests: parse the protocol.md capture sample; extents match.
 `UI_PluginEditDialog` [ui-form]: 语言：, 代码：, 输出：, 启用插件, save); edits
 `<user dir>/plugin/test.py`, imported with `importlib` and run in-process (A §Plugin system; UI)
 [high/med].
-**chixie-rs today:** Not planned.
+**PenKaku today:** Not planned.
 **Recommended implementation:** not planned (arbitrary code execution inside the GUI, no
 sandbox). See the external filter design in §3.8.
 
@@ -1752,7 +1752,7 @@ sandbox). See the external filter design in §3.8.
 **ChiXie3:** placeholder cards; subtitles 手动灵活编排任务, 常用控制板烧录固件, 设备群控与任务分配 [UI].
 Not implemented in this build: no click handler in `TreasureBoxDialog` (A @949f622), and nothing
 opens even when run as administrator [UI] [high].
-**chixie-rs today:** Missing (ChiXie3 has no behaviour to match).
+**PenKaku today:** Missing (ChiXie3 has no behaviour to match).
 **Recommended implementation:** design our own when demanded:
 - 任务编程: a job list editor (sequence of pages / files / macros / waits / pen changes) saved as
   TOML; it generalises sheet change and pen change. P3, M.
@@ -1766,7 +1766,7 @@ opens even when run as administrator [UI] [high].
 循环次数 1; [保存] (local `one_stroke_test.txt`) [执行] (form `UI_OneStrokeDrawingDialog` [ui-form]: title 一笔画V1,
 the instruction text quoted above, 循环次数：spin box, run and save buttons); validation "请输入坐标点内容", "坐标点输入异常",
 "设备未连接", "请先结束书写" [UI; A] [high]. 炽写 variant pen `G1G90 Z0 F7000` / `G1 Z-1.5 F7000`.
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3, S: a text area parsed into strokes (`pen_up` / `pen_down`
 keywords), repeat count, preview, run. Same G-code path as everything else.
 
@@ -1780,7 +1780,7 @@ default folder `/chixie_task` auto-created; a websocket is also used (A §Remote
 `UI_SDCardFileManagementDialog` [ui-form] (title 远程SD卡): path label, file list, buttons for new folder / refresh /
 upload / delete / stop, 开始执行 (run), 容量： with "x GB" placeholders and used / total labels plus a status label
 (so the free-space display is used / total capacity).
-**chixie-rs today:** `esp3d.rs` (list, delete, delete_dir, create_dir, upload, run, hold,
+**PenKaku today:** `esp3d.rs` (list, delete, delete_dir, create_dir, upload, run, hold,
 resume, unlock, soft_reset) — untested.
 **Recommended implementation:** GUI file browser dialog over `esp3d::Board`, progress for uploads,
 run/pause/stop buttons with `?` polling. P2. Test against a mock server; then hardware once the
@@ -1804,7 +1804,7 @@ words are rewritten in output.
 **How it works there:** `CallXunFeiAI` websocket to iFlytek Spark v1.1
 (`wss://spark-api.xf-yun.com/v1.1/chat`), HMAC-SHA256 signed URL; vendor API keys fetched from
 `ai/get_ai_account` at runtime (A) [high]; the keys arrive in the client (server-api.md [cap]).
-**chixie-rs today:** missing.
+**PenKaku today:** missing.
 **Recommended implementation:** P3. Provider-neutral `ai.rs` trait with an OpenAI-compatible
 chat-completions client (most Chinese LLM vendors offer that API) configured by the user's own
 endpoint + key in the credential store; prompts as a TOML table (the same menu, editable).
@@ -1821,7 +1821,7 @@ account **and password in plaintext** to `[LoginConfig]` (C §登录) [high]. Au
 ("自动登录成功" / "自动登陆失败，请检查网络连接"). After login: sync collected fonts, pre-parse them with
 progress, show/hide 录制 and 今日试用 regions by role (A §Initialisation) [high]. Request/response
 verified (server-api.md [cap]).
-**chixie-rs today:** Done and optional: `login.rs`, `session.rs`, `credentials.rs` (OS credential
+**PenKaku today:** Done and optional: `login.rs`, `session.rs`, `credentials.rs` (OS credential
 store), app opens straight to the editor; login only to download fonts.
 **Recommended implementation:** keep. Add 注册 / 忘记密码 links (open the website in the browser).
 
@@ -1833,7 +1833,7 @@ Gates seen: not logged in → cannot type, import or use file-menu actions ("请
 设备测试, 同步至服务器 in 字符微调, G-code export button; macOS → third-party devices limited from 2026,
 super VIP exempt (`UserLimitUtil.limit_for_macos`, docstring) (A, C) [high/med]. Live account
 type shown: 通用会员 [UI].
-**chixie-rs today:** no gating (offline-first decision, 2026-11-07).
+**PenKaku today:** no gating (offline-first decision, 2026-11-07).
 **Recommended implementation:** do not replicate client-side gating; the server already decides
 which fonts a user may download. Show the role and expiry on the account page only.
 
@@ -1842,7 +1842,7 @@ which fonts a user may download. Show the role and expiry on the account page on
 `user/heartbeat`; after `OnlineDetectionFailedMaxCount` failures: "在线状态异常，请检查网络后重新登录"
 and **clears fonts and login** (`clear_font_and_login_info`); next check at a random interval; a
 `debug_check` stub suggests anti-debugging (C §AntiCrackingUtil) [high].
-**chixie-rs today:** heartbeat every 60 s in `session.rs` (`SessionLost` event); writing never
+**PenKaku today:** heartbeat every 60 s in `session.rs` (`SessionLost` event); writing never
 depends on it.
 **Recommended implementation:** keep: a lost session only disables cloud actions; local fonts and
 jobs keep working (never interrupt a running job for a network blip).
@@ -1859,7 +1859,7 @@ jobs keep working (never interrupt a running job for a network blip).
 `get_invitation_code`; discounts. 升级: `pay/get_packages` (name, price, duration: one_week /
 one_month / one_year / forever), quantity, confirm "下单确认", `pay/upgrade_payment` → opens Alipay in
 the browser, "支付询问 … 我已支付" → `pay/check_upgrade` (C §用户信息) [high].
-**chixie-rs today:** account page in the backstage (name, logout).
+**PenKaku today:** account page in the backstage (name, logout).
 **Recommended implementation:** show the fields (no phone number in logs). Payments: link to the
 vendor's website only (not planned in-app). License-bound config: not planned.
 
@@ -1868,7 +1868,7 @@ vendor's website only (not planned in-app). License-bound config: not planned.
 #### Parameter sync (参数同步 / `config/font_config`)
 **ChiXie3:** 设置 › 常规设置 › 参数同步 (开启) [UI] = `Synchronization_Parameters=0`; `FUtil.sync_user_font_config`
 GET/POST `config/font_config` round-trips main font ids and deformation settings (C) [high].
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3; optional "从云端导入设置" one-shot button (read only), to avoid
 two-way sync conflicts.
 
@@ -1876,7 +1876,7 @@ two-way sync conflicts.
 **ChiXie3:** `config/query_exclusive_config_file`, `config/query_config_download_url`,
 `config/download_exclusive_config_file`: a license-bound `config.ini` replaces the user's; also a
 TODO to fetch platform defaults when the local config fails (A, C) [high].
-**chixie-rs today:** Not planned.
+**PenKaku today:** Not planned.
 **Recommended implementation:** not planned. Our `config::import_chixie3` covers migration.
 
 #### Auto upgrade (自动升级)
@@ -1884,7 +1884,7 @@ TODO to fetch platform defaults when the local config fails (A, C) [high].
 `update/compare_file_differences` (MD5 per file); chunked download with speed/time remaining;
 restart via `taskkill /f /im` and relaunch; changelog saved to `update_log.txt` and shown once in
 更新日志 (A §Auto upgrade) [high]. Error "更新出错，建议官网下载并安装最新版".
-**chixie-rs today:** Missing (replace).
+**PenKaku today:** Missing (replace).
 **Recommended implementation:** our own channel (GitHub releases or the team's server):
 `self_update`-style check of a signed manifest (version, SHA-256, URL), download to a temp file,
 verify signature (`minisign`/ed25519 via `ed25519-dalek`), swap on next start. Never patch files
@@ -1893,7 +1893,7 @@ of a running exe in place. P2, M.
 #### Missing-character and logout reports (缺字上报 / 退出信息)
 **ChiXie3:** on close: `user/collect_logout_info`, `user/collect_missing_characters`, then logout
 (A §Tray, heartbeat) [high].
-**chixie-rs today:** Not planned.
+**PenKaku today:** Not planned.
 **Recommended implementation:** not planned (telemetry); logout on exit only if the user chose
 "退出时注销".
 
@@ -1935,7 +1935,7 @@ languages (zh-Hans, zh-Hant, en, ja, ko, ru) (A) — only two are shipped [med].
 "页面预览不旋转，只旋转书写模式输出". Each page is a plain group of line edits, spin boxes, sliders, check boxes and
 radio buttons; there is no separate 保存 button (values are saved on close).
 
-**chixie-rs today:** backstage 选项 (dark mode, template grid, imports), 手写效果 ↘
+**PenKaku today:** backstage 选项 (dark mode, template grid, imports), 手写效果 ↘
 `style_dialog.rs` (ranges), `config.rs` TOML settings, `import_chixie3` for `[WriteConfig]` and
 `[CharacterDeformation]`.
 **Recommended implementation:** one 选项 page in the backstage with the same seven groups (Word-
@@ -1950,18 +1950,18 @@ state). Defaults = ChiXie3's shipped values (already in `HandwritingStyle::defau
 **ChiXie3:** live menu: 模板管理 | 新建 ▸ | 打开 | 保存 | 另存为 | 批量导入 | 打印 ▸ | 选项 | 退出 [UI]. Static
 items: 模板管理, 从当前模板新建, 追加当前模板页, 从炽写模板库新建, 另存为, 批量导入, 打印文字, 打印背景图 (C) [high];
 login and font-loading guards; online detection before new/append.
-**chixie-rs today:** backstage 新建 (blank / template), 打开 (.chx, .txt), 保存, 另存为, 导出, 模板管理,
+**PenKaku today:** backstage 新建 (blank / template), 打开 (.chx, .txt), 保存, 另存为, 导出, 模板管理,
 账户, 选项; draft autosave.
 **Recommended implementation:** add 追加当前模板页 (append a page) and 批量导入.
 
-#### ChiXie document (`.cdoc`) vs chixie-rs document (`.chx`)
+#### ChiXie document (`.cdoc`) vs PenKaku document (`.chx`)
 **ChiXie3:** 保存为炽写文档 / 打开炽写文档, filter "炽写文档 (*.cdoc)": items (text, space, line break)
 with font ids and formats plus the template; loads with progress (准备加载炽写文档 … 加载完成); if the
 template is not local it offers to save it ("当前炽写文档对应的模板未在本地保存，是否保存该模板？"). Encrypted
 with Fernet (hard-coded key); serialisation probably pickle (A §Save/open) [high/low]. The
 handwriting itself (random draws, deformation) is **not** guaranteed reproducible on reopen
 (inferred: randomness is drawn at layout time and not stored).
-**chixie-rs today:** `.chx` JSON: text + per-character ids + handwriting seed, so a reopened
+**PenKaku today:** `.chx` JSON: text + per-character ids + handwriting seed, so a reopened
 document keeps exactly the same handwriting (`file_ops.rs`).
 **Recommended implementation:** extend `.chx` (versioned: `"version": 2`) with attribute runs,
 paragraph attributes, template (embedded copy), origin, page rotation, char tweaks, font roles
@@ -1977,7 +1977,7 @@ encoding, one paragraph per line. DOCX (python-docx): runs with italic, underlin
 superscript, paragraph alignment (centre/right; no justify); errors for Strict OOXML and broken
 images. PDF (PyMuPDF): plain text lines. `.doc` / `.xls` refused with conversion hints (C
 §导入文件) [high]. Notes import is a fast path placing items directly into rows.
-**chixie-rs today:** `.txt` import (`file_ops.rs`).
+**PenKaku today:** `.txt` import (`file_ops.rs`).
 **Recommended implementation:** TXT: detect UTF-8/UTF-16 BOM, else try GB18030 (`encoding_rs`,
 new dependency, small and standard). DOCX: unzip (`zip` crate) + read `word/document.xml` with
 `quick-xml` (both new; reason: a full docx crate is unnecessary for runs/paragraphs) mapping
@@ -1989,7 +1989,7 @@ poor; ask users to copy-paste). Overwrite/append/insert-at-caret choice in one d
 expanded; cells with `accept_import=False` or a custom data source skipped; visual row/column
 mapping; number formats `General`, `0`, `0.0`, `0.00`, `0.000`, `0_ `, `m"月"d"日";@` (→ M月D日),
 datetime suffix stripped; formulas not supported (C §XLSX) [high].
-**chixie-rs today:** Done (M7a): `calamine` 0.38 (xlsx / xls / ods), merges expanded, cached formula values; numbers without trailing zeros (calamine does not expose number formats, so `0.00` prints `36.5`), dates as M月D日.
+**PenKaku today:** Done (M7a): `calamine` 0.38 (xlsx / xls / ods), merges expanded, cached formula values; numbers without trailing zeros (calamine does not expose number formats, so `0.00` prints `36.5`), dates as M月D日.
 **Recommended implementation:** after tables: `calamine` (new crate; reason: reads xlsx/xls/ods,
 pure Rust, gives cached formula results — supports `.xls` too, better than ChiXie3) mapped through
 the page's `excel_range`. Tests on a fixture workbook with merges and formats.
@@ -2002,7 +2002,7 @@ line and writes the line into the selected target cell; other cells keep data-so
 (card text "批量导入数据文件，或导入多页表格实现批量数据导入") and 批量名单建页 (card text "根据名单数据，自动新建对应数量表格页面并填充",
 button 批量建页, label 目标单元格 showing 未选中 until a cell is chosen, text box 名单数据：). The first page has only the
 hint card on the form, so it is probably a pointer to normal data-file import (inferred).
-**chixie-rs today:** Done (M7a): 表格功能 › 批量导入… with 批量导入数据 (a workbook, one page per sheet) and 批量名单建页 (one page per line into the caret's cell, ChiXie3's messages). The CSV / `{{name}}` mail merge for notes is not done.
+**PenKaku today:** Done (M7a): 表格功能 › 批量导入… with 批量导入数据 (a workbook, one page per sheet) and 批量名单建页 (one page per line into the caret's cell, ChiXie3's messages). The CSV / `{{name}}` mail merge for notes is not done.
 **Recommended implementation:** generalise to mail merge: a CSV/TSV with a header row; each column
 binds to a cell (tables) or to a `{{name}}` placeholder in note text; one page (or one document
 copy) per row. Works for notes too (e.g. 30 personalised letters). P2, S after tables / with
@@ -2011,7 +2011,7 @@ placeholders.
 #### Print (打印文字 / 打印背景图)
 **ChiXie3:** `QPrinter` with print dialog and preview, page by page; 打印 ▸ submenu with 打印文字 and
 打印背景图 (C §打印) [med]; meaning inferred (text only vs template background only).
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** P3: export a PDF of the preview (vector strokes) with `printpdf`
 (new crate) or SVG per page (no dependency) and let the OS print it. "打印背景图" = print the template
 ruling on blank paper (useful: make your own 作文纸), "打印文字" = preview of the handwriting.
@@ -2038,7 +2038,7 @@ the form), a 单页视图 / 双页视图，适用于写本子预览 pair, status
 新建模板 / 新建文档 / 新建表格 / 新建作文, 炽写AI, 插件平台 / 插件广场 (plugin platform ribbon text, no handler known).
 Contextual categories: table and
 composition panels appear by selection; the template manager category (A §Main window) [high].
-**chixie-rs today:** Word 365-style chrome: custom blue title bar with QAT, centred "文档名 - 赤写",
+**PenKaku today:** Word 365-style chrome: custom blue title bar with QAT, centred "文档名 - 赤写",
 登录/account, tab strip (文件 backstage, 开始 / 布局 / 手写 / 设备 / 视图), ribbon card with large/small
 buttons and ↘ launchers, status bar (`ribbon.rs`, `app.rs`, `app/ribbon_tabs.rs`).
 **Recommended implementation:** keep the Word mapping (users know Word better than ChiXie3's
@@ -2048,14 +2048,14 @@ hybrid). Add a 插入 tab later (表格, 文本框) and a 工具 tab hosting the
 #### Status bar (状态栏)
 **ChiXie3:** 设备未连接 button (opens the device pane) | "第 N 页，共 M 页" | word count | two view-mode
 toggles | zoom spinner 100% | font name (A, UI) [high].
-**chixie-rs today:** Done: hover cells (字体 opens 字体库, 设备 opens the pane), job progress bar,
+**PenKaku today:** Done: hover cells (字体 opens 字体库, 设备 opens the pane), job progress bar,
 two-sided zoom slider.
 
 #### Backstage home page (主页)
 **ChiXie3:** left rail ← back, 字体, 模板, 教程 | bottom 账户, 设置, 反馈 [UI] (form `UI_HomePage` has only a rail of
 tool buttons and a stacked widget [ui-form]; the page titles come from the child forms 主页-字体 / 主页-模板); back saves each widget's
 config ("返回时候通知各个组件保存配置"); 账户 requires login (A §Home page) [high].
-**chixie-rs today:** `backstage.rs`: ← 返回, 新建, 打开, 保存, 另存为, 导出, 模板管理, 账户, 选项; 字体库 is a
+**PenKaku today:** `backstage.rs`: ← 返回, 新建, 打开, 保存, 另存为, 导出, 模板管理, 账户, 选项; 字体库 is a
 dialog from the ribbon.
 **Recommended implementation:** add 字体库 as a backstage page too (it is a full-window browser
 in ChiXie3) and a 帮助 page with links.
@@ -2065,7 +2065,7 @@ in ChiXie3) and a 帮助 page with links.
 Shift+arrows, Tab (indent), Enter, Backspace/Delete (+ Enter confirms cell clearing), Esc (cancel
 drawing), Ctrl+wheel zoom; others bound in `ChiXieInit.__init_shortcut_signal` (keys not
 recoverable) (A, C) [high/med].
-**chixie-rs today:** Word set in `doc_view.rs::bind_keys` (secondary = Ctrl/⌘): Save, word/line/
+**PenKaku today:** Word set in `doc_view.rs::bind_keys` (secondary = Ctrl/⌘): Save, word/line/
 document moves, select-all, clipboard, undo/redo.
 **Recommended implementation:** add F5 = 开始书写, Shift+F5 = 从光标处书写 (resume by character), Esc =
 暂停 while a job runs (with confirm to stop), Ctrl+F = 查找, Ctrl+H = 替换, Ctrl+P = 导出 PDF.
@@ -2075,7 +2075,7 @@ document moves, select-all, clipboard, undo/redo.
 [ui-form]: a pop-up card with the logo, the user name and type line (普通用户), a 交流反馈 button and 退出炽写); close-to-tray
 drafted but unfinished; close confirm "确认要退出炽写吗？"; remembers `Window_Size`,
 `Window_IsMaximized`; detects a resolution change and offers a restart (A, C) [high].
-**chixie-rs today:** M6 planned (window geometry, icon).
+**PenKaku today:** M6 planned (window geometry, icon).
 **Recommended implementation:** save geometry on exit; confirm close **only** while a job runs or
 the document has unsaved changes (autosave makes the latter rare). No tray (P3). No restart on DPI
 change (gpui handles scale changes).
@@ -2084,7 +2084,7 @@ change (gpui handles scale changes).
 **ChiXie3:** InfoBar success/warning/error tips, file-saved tip with 打开目录, tray balloons; a
 global exception hook shows "异常提示" and logs file/function/line; rotating log `ChiXie-Log.log`
 (A, C) [high]; progress dialog "后台任务(请勿操作)".
-**chixie-rs today:** gpui-component `Notification` toasts; `env_logger`.
+**PenKaku today:** gpui-component `Notification` toasts; `env_logger`.
 **Recommended implementation:** add a rotating file log in the config dir (`log` + a tiny file
 writer, or `flexi_logger`), a panic hook that writes the backtrace there and shows a dialog with
 "打开日志文件夹". Redact tokens/phone numbers in log lines (helper `redact()`).
@@ -2093,49 +2093,49 @@ writer, or `flexi_logger`), a panic hook that writes the backtrace there and sho
 **ChiXie3:** 更新日志 dialog after an upgrade (reads `update_log.txt`, opens `page/update-log`); 用户指南与售后
 web dialog; daily free font dialog (A) [high]. Form `UI_UpdateLogDialog` [ui-form]: title 更新日志, 版本号： with the
 version, 更新内容：, and links 查看所有日志 (command link) plus one close button.
-**chixie-rs today:** Missing.
+**PenKaku today:** Missing.
 **Recommended implementation:** show release notes once after an update (bundled markdown).
 
 #### Internationalisation (语言)
 **ChiXie3:** 简体中文 / English via `.qm` files; enum lists six languages (A, C); the settings form offers
 简体中文, 繁体中文, 日本語, русский язык (four, no English) [ui-form] (§6.5 conflict 11).
-**chixie-rs today:** Chinese strings in code; M6 planned.
+**PenKaku today:** Chinese strings in code; M6 planned.
 **Recommended implementation:** `rust-i18n` or `fluent` (new crate; pick one in M6) with zh-CN as
 the source language and en as the first translation.
 
-## 4. Where chixie-rs can be clearly better
+## 4. Where PenKaku can be clearly better
 
 1. **Streaming robustness.** ChiXie3's Telnet path stalls on long jobs (~44, ~752, ~1682 lines)
    and only disconnect + restart recovers (protocol.md [cap]); CH340 boards drop under motor load
-   and come back on a new COM number (memory `chixie-board-usb-drop`). chixie-rs: one device actor,
+   and come back on a new COM number (memory `chixie-board-usb-drop`). PenKaku: one device actor,
    Grbl character counting with `?` polling, stall detection (no ack for N s while the board
    reports Idle/Run → resync from `Bf:`), auto re-scan by VID/PID, and **line-exact resume**
    (re-emit from the start of the interrupted stroke). Pause uses feed hold `!` so the head stops
    at once; stop = `!` → `0x18` → `$X` → pen up (already in `device.rs`).
 2. **Determinism.** ChiXie3 draws randomness at layout time and does not store it; reopening a
    `.cdoc` or re-pasting text changes the handwriting (protocol.md saw a paste-only scale anomaly).
-   chixie-rs keys every random draw by (document seed, effect salt, character id): byte-identical
+   PenKaku keys every random draw by (document seed, effect salt, character id): byte-identical
    output for the same document, edits never reshuffle other characters, 换一组 re-rolls on purpose.
    Golden tests pin it.
 3. **No code execution from data.** ChiXie3 loads `.cset` and `.cx` with Python `pickle`
    (executes code by design), runs user Python plugins in-process, downloads and runs a driver
-   EXE. chixie-rs: a reader for the pickle opcodes only (never resolves classes), TOML/JSON for
+   EXE. PenKaku: a reader for the pickle opcodes only (never resolves classes), TOML/JSON for
    its own files, external-process filters instead of plugins, no driver installer.
 4. **Secrets.** ChiXie3 stores the password and the Bambu access code in plaintext INI, puts the
    login token in a WebEngine URL, ships hard-coded Fernet keys for templates/documents/fonts and
-   receives the AI vendor's keys from the server. chixie-rs: password and access codes only in the
+   receives the AI vendor's keys from the server. PenKaku: password and access codes only in the
    OS credential store, nothing secret in URLs or logs, no vendor AI keys, decrypted fonts kept
    only on the user's own disk (BOSS decision).
 5. **Offline-first.** ChiXie3 requires login to type, import, or use the file menu, revokes fonts
-   when heartbeats fail, and loads tools from web pages. chixie-rs works fully offline after fonts
+   when heartbeats fail, and loads tools from web pages. PenKaku works fully offline after fonts
    are downloaded; the cloud is used only for fonts (and later templates).
 6. **Typesetting quality.** ChiXie3 has no automatic 避头尾 — only a warning pass — and no justify
-   in docx import; overflow in table cells blocks editing. chixie-rs: real kinsoku (hanging
+   in docx import; overflow in table cells blocks editing. PenKaku: real kinsoku (hanging
    punctuation in 作文格), overflow as a layout policy (shrink / add rows / clip) instead of a modal
    state, real undo, find/replace with options, Word-standard navigation everywhere (ChiXie3 has
    many "尚未开发" paths).
 7. **Native performance.** ChiXie3 uses one QGraphicsItem per character (needs a "large text mode")
-   and a slow Python TPS warp (its own TODO asks for numpy/JIT/C). chixie-rs relayouts from a flat
+   and a slow Python TPS warp (its own TODO asks for numpy/JIT/C). PenKaku relayouts from a flat
    model and paints only visible pages; a TPS solve per glyph is microseconds in Rust. Done in M9:
    deformed glyphs are cached between relayouts and page paths between frames (16 styled pages,
    debug build: relayout ≈ 500 → 40 ms, paint ≈ 140 → 4 ms per frame).
@@ -2143,12 +2143,12 @@ the source language and en as the first translation.
    belong to the document, not to global settings, so a `.chx` file plus a font id is a complete
    job description.
 9. **Cross-platform without vendor locks.** ChiXie3 hides third-party devices on macOS and warns
-   on "uncertified" boards. chixie-rs: gpui runs on Windows, macOS and Linux; any Grbl board works;
+   on "uncertified" boards. PenKaku: gpui runs on Windows, macOS and Linux; any Grbl board works;
    Bluetooth SPP shows as a serial port everywhere.
 10. **Plotting correctness.** Exact primitives flattened at emit time with a chord tolerance, stroke
     ordering to cut pen-up travel, clipping to the paper, hatch fills for SVG/images — none exist in
     ChiXie3.
-11. **中英文分开设置 (M9).** ChiXie3 can only pick a different font for English and digits. chixie-rs
+11. **中英文分开设置 (M9).** ChiXie3 can only pick a different font for English and digits. PenKaku
     also gives letters and digits their own size, baseline, 上下浮动 and 字符变形 (手写效果 dialog,
     英文 / 数字 tabs), so Latin text in a Chinese handwriting font can sit and scale naturally.
 
@@ -2181,9 +2181,9 @@ case, R8 polishes realism, R9–R10 widen the device use, R11–R12 are platform
 ### 6.1 Appendix A: settings keys (`config.ini`)
 
 Defaults are the values of the sample file unless the live UI shows otherwise. "→" is the
-chixie-rs equivalent (`config.rs` `Settings`, `HandwritingStyle`, `DeviceProfile`, `Template`).
+PenKaku equivalent (`config.rs` `Settings`, `HandwritingStyle`, `DeviceProfile`, `Template`).
 
-| Section / key | Meaning | Default (sample / UI) | chixie-rs |
+| Section / key | Meaning | Default (sample / UI) | PenKaku |
 |---|---|---|---|
 | GeneralConfig/Default_Function | start mode (0 = 写字功能) | 0 | not needed (one mode) |
 | GeneralConfig/Synchronization_Parameters | 参数同步 (0 = 开启 per UI) | 0 | not planned |
@@ -2239,9 +2239,9 @@ chixie-rs equivalent (`config.rs` `Settings`, `HandwritingStyle`, `DeviceProfile
 ### 6.2 Appendix B: server endpoints
 
 Base `https://chixie.com.cn/client_api/`. All POST with JSON and header `token` where verified.
-"Used" = used by chixie-rs today.
+"Used" = used by PenKaku today.
 
-| Endpoint | Purpose | Known shape | chixie-rs |
+| Endpoint | Purpose | Known shape | PenKaku |
 |---|---|---|---|
 | `user/login` | login | req `{account, password, platform:"windows"}` → `data {token, access_token, refresh_token, expires_in, backup_token, username, phone, role_code, role, permissions[], expiry_date, period_of_validity, async_operation}` [cap] | used |
 | `user/logout` | logout | body `{}` guessed | used (VERIFY) |
@@ -2283,7 +2283,7 @@ VERIFY); see protocol.md.
 
 ### 6.3 Appendix C: file formats
 
-| File | Owner | Format | Notes | chixie-rs handling |
+| File | Owner | Format | Notes | PenKaku handling |
 |---|---|---|---|---|
 | `config.ini` | ChiXie3 | QSettings INI, `@Variant(...)` QDataStream values, some `PyQt_PyObject` pickles | password in plaintext under `[LoginConfig]` | `config::import_chixie3` (WriteConfig, CharacterDeformation), `chixie3_devices.rs` (DeviceParams); LoginConfig never read |
 | `note_template.cx`, `composition_template.cx` | ChiXie3 | pickle protocol 4 of `{name: NoteTemplate/CompositionTemplate}` | fields in protocol.md | `chixie3_templates.rs` (safe reader) |
@@ -2296,18 +2296,18 @@ VERIFY); see protocol.md.
 | `one_stroke_test.txt` | ChiXie3 | `X,Y` lines + `pen_up`/`pen_down` | one-stroke tool | readable by our one-stroke tool |
 | `<n>页.gcode`, `page_<n>.gcode` | ChiXie3 | G-code per page | export / SD upload | our export: one file per page |
 | `ChiXie-Log.log` | ChiXie3 | rotating text log | `%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s` | — |
-| `settings.toml` | chixie-rs | TOML | `%APPDATA%\chixie-rs\config` | `config.rs` |
-| `templates.toml` | chixie-rs | TOML | user templates | `template.rs` |
-| `*.chx` | chixie-rs | JSON: text, char ids, seed (v2 adds runs, template, origin, tweaks) | reproducible handwriting | `file_ops.rs` |
-| `draft.chx` | chixie-rs | as `.chx` | autosave, restored at start | `file_ops.rs` |
-| `fonts/<id>.json`, `fonts/index.json`, `fonts/previews/<id>.png` | chixie-rs | decrypted glyph map; id → name; ink mask | offline fonts | `font_store.rs`, `cloud_preview.rs` |
+| `settings.toml` | PenKaku | TOML | `%APPDATA%\penkaku\config` | `config.rs` |
+| `templates.toml` | PenKaku | TOML | user templates | `template.rs` |
+| `*.chx` | PenKaku | JSON: text, char ids, seed (v2 adds runs, template, origin, tweaks) | reproducible handwriting | `file_ops.rs` |
+| `draft.chx` | PenKaku | as `.chx` | autosave, restored at start | `file_ops.rs` |
+| `fonts/<id>.json`, `fonts/index.json`, `fonts/previews/<id>.png` | PenKaku | decrypted glyph map; id → name; ink mask | offline fonts | `font_store.rs`, `cloud_preview.rs` |
 | font payload | server | Fernet token (+2 junk chars) → JSON `{char: [advance, X, Y]}` | key = `backup_token` with the last two chars swapped | `font.rs` |
 
 ### 6.4 Appendix D: glossary
 
 | Term | Meaning |
 |---|---|
-| 炽写 / 赤写 | ChiXie3's UI name / chixie-rs's UI name |
+| 炽写 / 赤写 | ChiXie3's UI name / PenKaku's UI name |
 | 写字机 | handwriting robot: a pen plotter with a pen-lift (Z stepper, servo or solenoid) |
 | 书写 / 绘图与激光 / 主页 | writing mode / plotting mode / backstage |
 | 笔记 / 信纸 / 文档模板 | ruled letter paper template |
@@ -2369,7 +2369,7 @@ VERIFY); see protocol.md.
 6. **Servo pen command.** Static literals include `M3S` for the servo branch; the Telnet capture shows
    `G1G90 Z<value>` for servo too. Capture wins.
 7. **落笔后暂停.** Static generator emits `G4 P<pause>`; the Telnet capture sent no dwell with 0.5 s.
-   Capture wins for ChiXie3's behaviour; chixie-rs emits a real dwell deliberately.
+   Capture wins for ChiXie3's behaviour; PenKaku emits a real dwell deliberately.
 8. **First-line indent.** Config holds an indent range; captures showed none. Static C explains it:
    indent is only inserted by Tab or the 首行缩进 button. No conflict after all.
 9. **字符微调 label.** Static "异常宽度字符优化", live "异常宽度字符处理". Live label used.

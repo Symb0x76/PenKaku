@@ -1,6 +1,6 @@
-# chixie-rs UI 重组排列与观感优化指导文档
+# PenKaku UI 重组排列与观感优化指导文档
 
-> **诊断基线**：通过 `CHIXIE_RS_FAKE=1` 启动 `chixie-rs.exe`（默认窗口 `1180×760` 逻辑像素 / `1792×1151` 物理像素，`scale_factor = 1.5`），结合 `agent-desktop` 实机截图与 UI Automation（UIA）无障碍树快照，对照 `crates/chixie-rs-gui/src/` 全量源码完成审计。
+> **诊断基线**：通过 `PENKAKU_FAKE=1` 启动 `penkaku.exe`（默认窗口 `1180×760` 逻辑像素 / `1792×1151` 物理像素，`scale_factor = 1.5`），结合 `agent-desktop` 实机截图与 UI Automation（UIA）无障碍树快照，对照 `crates/penkaku-gui/src/` 全量源码完成审计。
 
 ---
 
@@ -10,16 +10,16 @@
 
 | 级别 | 现象与根因 | 涉及文件 |
 | --- | --- | --- |
-| **P0** | **「开始」选项卡空间分配与使用频率倒置**：低频配置 `中英文`（`SCRIPT_GROUP_W = 256.0`）占用了全栏最大宽度，甚至宽于核心组 `字体`（`224.0`）与 `段落`（`132.0`）；而高频入口（字体库直达、查找/替换、当前模板快切、一键书写/导出）缺失或藏在下拉框内；`编辑` 组的 `撤销`/`重做` 与标题栏快速访问工具栏重复。 | `crates/chixie-rs-gui/src/app/ribbon_tabs.rs` |
-| **P0** | **「首行缩进 (Tab)」图标渲染为空白**：UIA 树中存在 `首行缩进 (Tab)` 按钮，但画布中 `段落` 第一行第 5 个图标位置为空白透明（`IconName::ListIndentIncrease` 在当前图标资源映射中未正确渲染）。 | `crates/chixie-rs-gui/src/app/ribbon_tabs.rs`、`crates/chixie-rs-gui/src/icons.rs` |
-| **P0** | **右侧任务窗格职责混杂且严重挤压**：任务窗格顶部标题硬编码为 `设备`，但点击 `开始 › 段落 › 字符微调` 后，`tune_card` 与 `resume_card` 直接堆叠在 `DevicePanel` 上方；在 `760px` 默认高度下，`字符微调` 占据约 `300px`，将核心的 `点动与笔`、`书写任务`、`控制台`、`自定义命令` 全部挤出首屏。 | `crates/chixie-rs-gui/src/app.rs`（`task_pane`）、`crates/chixie-rs-gui/src/app/tune.rs` |
-| **P0** | **「字符微调」标签列宽过窄导致全部折行**：`tune_card` 中行标签宽度 `w(px(40.))` 小于 14px 字体下 `字体：`、`字号：`、`轻重：`、`微调：` 的实际渲染宽度，导致 4 个标签全部折成两竖行（`字\n体：` 等），破坏对齐与紧凑感。 | `crates/chixie-rs-gui/src/app/tune.rs` |
-| **P1** | **Notification 浮层遮挡 Ribbon 操作区**：连接设备或提示类 Toast 出现在窗口右上角，直接压住 `开始` 页最右侧 `编辑` 组（`全选` 被完全遮住）及右上角 `折叠功能区` 按钮。 | `crates/chixie-rs-gui/src/app.rs`、通知挂点配置 |
-| **P1** | **「文件」标签缺乏 Backstage 视觉区隔**：代码注释要求 Word 风格的填充色 `文件` 标签，但 `ribbon::tab_item` 将 `文件` 渲染成与 `开始`/`布局`/`手写`/`设备`/`视图` 完全相同的纯文字样式，难以一眼识别其全局菜单入口属性。 | `crates/chixie-rs-gui/src/app.rs`（`tab_strip`）、`crates/chixie-rs-gui/src/ribbon.rs` |
-| **P1** | **「手写」选项卡空旷而核心调参被深藏**：`手写` 页只有 4 个小分组，右侧大片留白，而用户最常调整的字距、上下浮动、缩放、旋转、扭曲/倾斜强度、连笔概率等全部藏在 `10px` 大小的 `↘` 对话框启动按钮之后。 | `crates/chixie-rs-gui/src/app/ribbon_tabs.rs`（`tab_style`）、`crates/chixie-rs-gui/src/style_dialog.rs` |
-| **P1** | **「手写效果范围」弹窗遮挡预览且控件细节不统一**：模态窗居中弹出直接挡住中间书写画布，调参时无法看清字形变化；`NumberInput` 单位后缀间距不统一（`100 %`、`0.5mm`、`1 mm`）；底部缺少关闭按钮且暴露内部同步提示（`"范围数值需重新打开本窗口才会刷新"`）。 | `crates/chixie-rs-gui/src/style_dialog.rs` |
-| **P1** | **跨区域重复入口与稀疏页签**：`从炽写导入` 在 3 处重复（`手写`、`设备 › 参数设置`、`文件 › 选项`）；`单页/双页` 与 `缩放` 在 `视图` 页与底部状态栏完全重复；`设备` 页与右侧 `DevicePanel` 均放置 `连接/断开`、`暂停/停止`，但高频校验工具 `落笔校准…` 仅存在于右侧面板中。 | `crates/chixie-rs-gui/src/app/ribbon_tabs.rs`、`device.rs`、`device_params.rs`、`backstage.rs` |
-| **P2** | **UIA 无障碍树与自动化可读性缺失**：Ribbon 选项卡与状态栏单元格使用裸 `div` 绑定 `on_click`，对 UIA/读屏器完全不可见；`粘贴` 按钮、字体 `Select`、缩放 `Slider` 缺少可读 `name`；`StyleDialog` 两个复选框同名 `"同中文"`，`中英文` 两个按钮同名 `"字形"`，触发 `AMBIGUOUS_TARGET`。 | `crates/chixie-rs-gui/src/ribbon.rs`、`app.rs`、`style_dialog.rs`、`ribbon_tabs.rs` |
+| **P0** | **「开始」选项卡空间分配与使用频率倒置**：低频配置 `中英文`（`SCRIPT_GROUP_W = 256.0`）占用了全栏最大宽度，甚至宽于核心组 `字体`（`224.0`）与 `段落`（`132.0`）；而高频入口（字体库直达、查找/替换、当前模板快切、一键书写/导出）缺失或藏在下拉框内；`编辑` 组的 `撤销`/`重做` 与标题栏快速访问工具栏重复。 | `crates/penkaku-gui/src/app/ribbon_tabs.rs` |
+| **P0** | **「首行缩进 (Tab)」图标渲染为空白**：UIA 树中存在 `首行缩进 (Tab)` 按钮，但画布中 `段落` 第一行第 5 个图标位置为空白透明（`IconName::ListIndentIncrease` 在当前图标资源映射中未正确渲染）。 | `crates/penkaku-gui/src/app/ribbon_tabs.rs`、`crates/penkaku-gui/src/icons.rs` |
+| **P0** | **右侧任务窗格职责混杂且严重挤压**：任务窗格顶部标题硬编码为 `设备`，但点击 `开始 › 段落 › 字符微调` 后，`tune_card` 与 `resume_card` 直接堆叠在 `DevicePanel` 上方；在 `760px` 默认高度下，`字符微调` 占据约 `300px`，将核心的 `点动与笔`、`书写任务`、`控制台`、`自定义命令` 全部挤出首屏。 | `crates/penkaku-gui/src/app.rs`（`task_pane`）、`crates/penkaku-gui/src/app/tune.rs` |
+| **P0** | **「字符微调」标签列宽过窄导致全部折行**：`tune_card` 中行标签宽度 `w(px(40.))` 小于 14px 字体下 `字体：`、`字号：`、`轻重：`、`微调：` 的实际渲染宽度，导致 4 个标签全部折成两竖行（`字\n体：` 等），破坏对齐与紧凑感。 | `crates/penkaku-gui/src/app/tune.rs` |
+| **P1** | **Notification 浮层遮挡 Ribbon 操作区**：连接设备或提示类 Toast 出现在窗口右上角，直接压住 `开始` 页最右侧 `编辑` 组（`全选` 被完全遮住）及右上角 `折叠功能区` 按钮。 | `crates/penkaku-gui/src/app.rs`、通知挂点配置 |
+| **P1** | **「文件」标签缺乏 Backstage 视觉区隔**：代码注释要求 Word 风格的填充色 `文件` 标签，但 `ribbon::tab_item` 将 `文件` 渲染成与 `开始`/`布局`/`手写`/`设备`/`视图` 完全相同的纯文字样式，难以一眼识别其全局菜单入口属性。 | `crates/penkaku-gui/src/app.rs`（`tab_strip`）、`crates/penkaku-gui/src/ribbon.rs` |
+| **P1** | **「手写」选项卡空旷而核心调参被深藏**：`手写` 页只有 4 个小分组，右侧大片留白，而用户最常调整的字距、上下浮动、缩放、旋转、扭曲/倾斜强度、连笔概率等全部藏在 `10px` 大小的 `↘` 对话框启动按钮之后。 | `crates/penkaku-gui/src/app/ribbon_tabs.rs`（`tab_style`）、`crates/penkaku-gui/src/style_dialog.rs` |
+| **P1** | **「手写效果范围」弹窗遮挡预览且控件细节不统一**：模态窗居中弹出直接挡住中间书写画布，调参时无法看清字形变化；`NumberInput` 单位后缀间距不统一（`100 %`、`0.5mm`、`1 mm`）；底部缺少关闭按钮且暴露内部同步提示（`"范围数值需重新打开本窗口才会刷新"`）。 | `crates/penkaku-gui/src/style_dialog.rs` |
+| **P1** | **跨区域重复入口与稀疏页签**：`从炽写导入` 在 3 处重复（`手写`、`设备 › 参数设置`、`文件 › 选项`）；`单页/双页` 与 `缩放` 在 `视图` 页与底部状态栏完全重复；`设备` 页与右侧 `DevicePanel` 均放置 `连接/断开`、`暂停/停止`，但高频校验工具 `落笔校准…` 仅存在于右侧面板中。 | `crates/penkaku-gui/src/app/ribbon_tabs.rs`、`device.rs`、`device_params.rs`、`backstage.rs` |
+| **P2** | **UIA 无障碍树与自动化可读性缺失**：Ribbon 选项卡与状态栏单元格使用裸 `div` 绑定 `on_click`，对 UIA/读屏器完全不可见；`粘贴` 按钮、字体 `Select`、缩放 `Slider` 缺少可读 `name`；`StyleDialog` 两个复选框同名 `"同中文"`，`中英文` 两个按钮同名 `"字形"`，触发 `AMBIGUOUS_TARGET`。 | `crates/penkaku-gui/src/ribbon.rs`、`app.rs`、`style_dialog.rs`、`ribbon_tabs.rs` |
 
 ---
 
@@ -42,7 +42,7 @@
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ [写]  保存 撤销 重做 | 查找        文档1 - chixie-rs       ● 已连接模拟设备 | 登录  − □ × │  ← 标题栏 (36px)
+│ [写]  保存 撤销 重做 | 查找        文档1 - PenKaku       ● 已连接模拟设备 | 登录  − □ × │  ← 标题栏 (36px)
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [文件]  开始   页面   手写   设备   视图   [表格工具*]                        ^ │  ← Tab Strip (34px)
 ├──────────────────────────────────────────────────────────────────────────────┤
@@ -214,30 +214,30 @@
 按推荐执行顺序（P0 → P1 → P2）拆分以下独立修改批次：
 
 ### Batch 1（P0 — 视觉缺陷修复与信息架构骨架）
-1. **`crates/chixie-rs-gui/src/icons.rs` & `app/ribbon_tabs.rs`**：
+1. **`crates/penkaku-gui/src/icons.rs` & `app/ribbon_tabs.rs`**：
    - 排查并修复 `IconName::ListIndentIncrease` 空白问题（替换为 `gpui-kit` 已内置存在的缩进图标或补充对应 SVG 资产），确保 `首行缩进` 按钮可见。
-2. **`crates/chixie-rs-gui/src/app/tune.rs`**：
+2. **`crates/penkaku-gui/src/app/tune.rs`**：
    - 将 `row()` 标签列宽从 `px(40.)` 改为 `px(54.)` 并加 `.whitespace_nowrap()`，消除 `字\n体：` 折行；
    - 将底部两个红色全局 `FontFix` 按钮折叠入可展开子区或加二级警告说明。
-3. **`crates/chixie-rs-gui/src/app.rs`**：
+3. **`crates/penkaku-gui/src/app.rs`**：
    - 重构 `task_pane`：移除 `tune_card` 与 `DevicePanel` 的纵向硬叠，引入侧栏模式枚举（`PaneMode::Device | PaneMode::Tune`）与顶部 Segmented `TabBar`；
    - 将 Toast 位置下移至 Ribbon 下方或窗口右下角，解除对右上角功能区的遮挡；
    - 标题栏右侧新增设备状态胶囊按钮，点击直达侧栏 `设备控制`。
-4. **`crates/chixie-rs-gui/src/ribbon.rs` & `app.rs`**：
+4. **`crates/penkaku-gui/src/ribbon.rs` & `app.rs`**：
    - 为 `文件` 标签提供填充主色胶囊样式（`tab_file`）；
    - 重排 `TABS` 顺序与命名（`["开始", "页面", "手写", "设备", "视图"]`）。
 
 ### Batch 2（P1 — Ribbon 重排与侧栏/弹窗瘦身）
-5. **`crates/chixie-rs-gui/src/app/ribbon_tabs.rs`**：
+5. **`crates/penkaku-gui/src/app/ribbon_tabs.rs`**：
    - **`tab_home`**：移除 `编辑` 组中的 `撤销`/`重做`，补入 `查找`/`替换` 与 `文本清理 ▾`（全选/中英空格/标点空格）；移出 `script_group` 到 `tab_style`；`合并内容` 改为仅 `grid` 模式显示；`笔色` 按钮底部增加当前色条；末尾增加 `书写与输出` 组（主色 `书写` + 选页 + `导出 G-code`）；
    - **`tab_layout`（现「页面」）**：将 `模板` 画廊移至最左，移除重复的 `页面尺寸` 大按钮，在 `页面设置` 添加转为自由页提示；
    - **`tab_style`（现「手写」）**：接入 `script_group`，增加常用强度快捷下拉（扭曲/倾斜/笔画/连笔参数/智能偏移）与风格预设菜单，移除重复的 `从炽写导入`；
    - **`tab_device`**：补入 `落笔校准…` 与 `导出 G-code/PDF/打印`，报警时在连接区直接展示 `解锁 $X`；
    - **`tab_view`**：补入 `导航窗格` 开关。
-6. **`crates/chixie-rs-gui/src/device.rs`**：
+6. **`crates/penkaku-gui/src/device.rs`**：
    - 将 `连接` 的端口选择器从 Segmented `TabBar` 改为紧凑 `Select` 下拉框；
    - 为 `自定义命令` 和 `串口控制台` 增加折叠开关（控制台默认折叠）。
-7. **`crates/chixie-rs-gui/src/style_dialog.rs`**：
+7. **`crates/penkaku-gui/src/style_dialog.rs`**：
    - 统一单位格式、增设底部关闭按钮、将 `"同中文"` 改为 `"上下浮动同中文"` / `"字符变形同中文"`、增加外部状态变化监听刷新输入框。
 
 ### Batch 3（P2 — 无障碍 UIA 语义完善）
@@ -250,7 +250,7 @@
 
 ## 8. 改后验收检查清单（基于 `agent-desktop`）
 
-完成代码改造后，执行 `cargo build -p chixie-rs-gui` 并使用 `CHIXIE_RS_FAKE=1` 启动验证：
+完成代码改造后，执行 `cargo build -p penkaku-gui` 并使用 `PENKAKU_FAKE=1` 启动验证：
 
 1. **UIA 快照验收**：运行 `agent-desktop snapshot --window-id <id> --compact`：
    - 所有选项卡（`文件`/`开始`/`页面`/`手写`/`设备`/`视图`）均在 UIA 树中可见且可 `click`；
