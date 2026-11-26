@@ -28,6 +28,19 @@ pub fn open(path: &Path) -> std::io::Result<Loaded> {
     }
 }
 
+/// How many pictures (图k spaces) the document holds.
+pub fn picture_count(doc: &Document) -> usize {
+    (0..doc.len()).filter(|&i| doc.chars()[i] == model::OBJECT && matches!(doc.attrs(i).block, Some(model::Block::Picture { .. }))).count()
+}
+
+/// The image bytes of the picture whose anchor is char `i`.
+pub fn picture_data(doc: &Document, i: usize) -> Option<std::sync::Arc<[u8]>> {
+    match doc.attrs(i.min(doc.len().saturating_sub(1))).block.as_ref() {
+        Some(model::Block::Picture { data, .. }) => data.0.clone(),
+        _ => None,
+    }
+}
+
 /// Save as DOCX. Write-then-rename, so a crash never leaves a half-written document. `tables`:
 /// the table form's pages, when the document is written on one (see [`docx::write_tables`]).
 pub fn save(path: &Path, doc: &Document, seed: u64, tables: &[Vec<docx::TableShape>]) -> std::io::Result<()> {

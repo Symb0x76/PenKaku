@@ -139,13 +139,84 @@ fn esc(s: &str) -> String {
 // ---- writing ----
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/customXml/itemProps1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/></Types>"#;
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="bmp" ContentType="image/bmp"/><Default Extension="tif" ContentType="image/tiff"/><Default Extension="emf" ContentType="image/x-emf"/><Default Extension="wmf" ContentType="image/x-wmf"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/customXml/itemProps1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/></Types>"#;
 
 const ROOT_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#;
 
 const DOC_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml" Target="../customXml/item1.xml"/></Relationships>"#;
+
+/// EMU (Word's drawing unit) per mm.
+const EMU_PER_MM: f32 = 36_000.0;
+
+/// The pictures of a document as written: per anchor char, its relationship id, media file and
+/// drawing id, in text order.
+struct Pictures {
+    by_char: std::collections::HashMap<usize, usize>,
+    items: Vec<PicFile>,
+}
+
+/// One picture as written: relationship id, `media/<file>`, bytes, size (mm) and number.
+struct PicFile {
+    rid: String,
+    file: String,
+    bytes: std::sync::Arc<[u8]>,
+    w: f32,
+    h: f32,
+    number: u32,
+}
+
+/// A picture file's extension from its bytes (falling back to the stored name's).
+fn image_ext(bytes: &[u8], name: &str) -> String {
+    match bytes {
+        [0x89, b'P', b'N', b'G', ..] => "png".into(),
+        [0xFF, 0xD8, ..] => "jpeg".into(),
+        [b'G', b'I', b'F', ..] => "gif".into(),
+        [b'B', b'M', ..] => "bmp".into(),
+        _ => name.rsplit_once('.').map_or("bin".into(), |(_, e)| e.to_ascii_lowercase()),
+    }
+}
+
+impl Pictures {
+    fn of(doc: &Document) -> Self {
+        let (mut by_char, mut items) = (std::collections::HashMap::new(), Vec::new());
+        for (i, &c) in doc.chars().iter().enumerate() {
+            if c != OBJECT {
+                continue;
+            }
+            if let Some(Block::Picture { w_mm, h_mm, number, media, data }) = &doc.attrs(i).block
+                && let Some(bytes) = data.0.clone()
+            {
+                let k = items.len() + 1;
+                let file = format!("media/image{k}.{}", image_ext(&bytes, media));
+                by_char.insert(i, items.len());
+                items.push(PicFile { rid: format!("rIdImg{k}"), file, bytes, w: *w_mm, h: *h_mm, number: *number });
+            }
+        }
+        Self { by_char, items }
+    }
+
+    /// `<w:r>` holding picture `k` as a Word inline image.
+    fn run(&self, k: usize) -> String {
+        let PicFile { rid, file, w, h, number, .. } = &self.items[k];
+        let (cx, cy) = ((w * EMU_PER_MM).round() as i64, (h * EMU_PER_MM).round() as i64);
+        let id = k + 1;
+        let name = esc(file.trim_start_matches("media/"));
+        format!(
+            r#"<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{id}" name="图{number}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{id}" name="{name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"#
+        )
+    }
+
+    /// `document.xml.rels` with a relationship per picture.
+    fn rels(&self) -> String {
+        let mut s = DOC_RELS.trim_end_matches("</Relationships>").to_string();
+        for PicFile { rid, file, .. } in &self.items {
+            s += &format!(r#"<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{file}"/>"#);
+        }
+        s + "</Relationships>"
+    }
+}
 
 const ITEM_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps1.xml"/></Relationships>"#;
@@ -217,22 +288,28 @@ pub struct TableShape {
 }
 
 const DOC_HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>"#;
 
 /// Paragraphs for chars `range` (split at `'\n'`), starting with paragraph record `para`.
 /// Returns the next paragraph index. Outside a table a cell break is written as a tab (XML can't
-/// hold U+001F).
-fn paragraphs_xml(x: &mut String, doc: &Document, range: std::ops::Range<usize>, mut para: usize) -> usize {
+/// hold U+001F); a picture is written as a Word inline image.
+fn paragraphs_xml(x: &mut String, doc: &Document, pics: &Pictures, range: std::ops::Range<usize>, mut para: usize) -> usize {
     let chars = doc.chars();
+    let picture = |i: usize| if chars[i] == OBJECT { pics.by_char.get(&i).copied() } else { None };
     let mut i = range.start;
     loop {
         *x += "<w:p>";
         *x += &para_props(&doc.paras()[para.min(doc.paras().len() - 1)]);
         // Runs up to the paragraph's end.
         while i < range.end && chars[i] != '\n' {
+            if let Some(k) = picture(i) {
+                *x += &pics.run(k);
+                i += 1;
+                continue;
+            }
             let a = doc.attrs(i);
             let start = i;
-            while i < range.end && chars[i] != '\n' && doc.attrs(i) == a {
+            while i < range.end && chars[i] != '\n' && doc.attrs(i) == a && picture(i).is_none() {
                 i += 1;
             }
             *x += "<w:r>";
@@ -262,6 +339,7 @@ const FENCE_OPEN: &str = "```mermaid";
 const FENCE_CLOSE: &str = "```";
 
 fn document_xml(doc: &Document) -> String {
+    let pics = Pictures::of(doc);
     let chars = doc.chars();
     let mut x = String::from(DOC_HEAD);
     let mut start = 0;
@@ -271,8 +349,9 @@ fn document_xml(doc: &Document) -> String {
             k += 1;
             continue;
         };
+        let picture = |j: usize| matches!(doc.attrs(j).block, Some(Block::Picture { .. }));
         let end = match block {
-            Block::Table { .. } => match (k + 1..chars.len()).find(|&j| matches!(chars[j], TABLE_END | OBJECT)).filter(|&j| chars[j] == TABLE_END) {
+            Block::Table { .. } => match penkaku_core::layout::table_end(chars, k, picture) {
                 Some(e) => e,
                 None => {
                     k += 1;
@@ -280,14 +359,20 @@ fn document_xml(doc: &Document) -> String {
                 }
             },
             Block::Diagram { .. } => k,
+            // A picture is a run of its paragraph (`paragraphs_xml`).
+            Block::Picture { .. } => {
+                k += 1;
+                continue;
+            }
         };
         // The paragraphs before it (the newline that ends them starts the object's paragraph).
         if k > start {
             let to = if chars[k - 1] == '\n' { k - 1 } else { k };
-            paragraphs_xml(&mut x, doc, start..to, doc.para_of(start));
+            paragraphs_xml(&mut x, doc, &pics, start..to, doc.para_of(start));
         }
         match block {
-            Block::Table { cols } => table_xml(&mut x, doc, k, end, cols),
+            Block::Table { cols } => table_xml(&mut x, doc, &pics, k, end, cols),
+            Block::Picture { .. } => {}
             Block::Diagram { source } => {
                 for line in std::iter::once(FENCE_OPEN).chain(source.lines()).chain(std::iter::once(FENCE_CLOSE)) {
                     x += &format!(r#"<w:p><w:r><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#, esc(line));
@@ -301,13 +386,13 @@ fn document_xml(doc: &Document) -> String {
         k = start;
     }
     // Word needs a paragraph after a table, so the tail is written even when empty.
-    paragraphs_xml(&mut x, doc, start.min(chars.len())..chars.len(), doc.para_of(start.min(chars.len())));
+    paragraphs_xml(&mut x, doc, &pics, start.min(chars.len())..chars.len(), doc.para_of(start.min(chars.len())));
     x += "</w:body></w:document>";
     x
 }
 
 /// An inline table (`OBJECT` at `anchor` … `TABLE_END` at `end`) as a Word table.
-fn table_xml(x: &mut String, doc: &Document, anchor: usize, end: usize, cols: &[f32]) {
+fn table_xml(x: &mut String, doc: &Document, pics: &Pictures, anchor: usize, end: usize, cols: &[f32]) {
     let cells = penkaku_core::layout::table_cells(doc.chars(), anchor, end);
     *x += r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>"#;
     for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
@@ -322,7 +407,7 @@ fn table_xml(x: &mut String, doc: &Document, anchor: usize, end: usize, cols: &[
         *x += "<w:tr>";
         for r in row {
             *x += "<w:tc>";
-            paragraphs_xml(x, doc, r.clone(), doc.para_of(r.start));
+            paragraphs_xml(x, doc, pics, r.clone(), doc.para_of(r.start));
             *x += "</w:tc>";
         }
         *x += "</w:tr>";
@@ -333,6 +418,7 @@ fn table_xml(x: &mut String, doc: &Document, anchor: usize, end: usize, cols: &[
 /// `document.xml` of a table form: the text's cell segments fill the tables of `pages` (repeated
 /// in order) until every segment is placed.
 fn tables_xml(doc: &Document, pages: &[Vec<TableShape>]) -> String {
+    let pics = Pictures::of(doc);
     let chars = doc.chars();
     let mut segs: Vec<std::ops::Range<usize>> = Vec::new();
     let mut start = 0;
@@ -383,7 +469,7 @@ fn tables_xml(doc: &Document, pages: &[Vec<TableShape>]) -> String {
                     x += "</w:tcPr>";
                     match segs.get(first + ci).filter(|_| r == r0) {
                         Some(range) => {
-                            paragraphs_xml(&mut x, doc, range.clone(), para_at(range.start));
+                            paragraphs_xml(&mut x, doc, &pics, range.clone(), para_at(range.start));
                         }
                         None => x += "<w:p/>",
                     }
@@ -425,13 +511,14 @@ pub fn write(doc: &Document, seed: u64) -> Result<Vec<u8>, Error> {
 /// cell segments are written into Word tables. Empty `pages` = plain paragraphs.
 pub fn write_tables(doc: &Document, seed: u64, pages: &[Vec<TableShape>]) -> Result<Vec<u8>, Error> {
     let body = if pages.is_empty() { document_xml(doc) } else { tables_xml(doc, pages) };
+    let pics = Pictures::of(doc);
     let mut z = ZipWriter::new(Cursor::new(Vec::new()));
     let opt = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).last_modified_time(DateTime::default());
     let parts: [(&str, String); 7] = [
         ("[Content_Types].xml", CONTENT_TYPES.into()),
         ("_rels/.rels", ROOT_RELS.into()),
         ("word/document.xml", body),
-        ("word/_rels/document.xml.rels", DOC_RELS.into()),
+        ("word/_rels/document.xml.rels", pics.rels()),
         ("customXml/item1.xml", extras_xml(doc, seed)),
         ("customXml/itemProps1.xml", ITEM_PROPS.into()),
         ("customXml/_rels/item1.xml.rels", ITEM_RELS.into()),
@@ -439,6 +526,12 @@ pub fn write_tables(doc: &Document, seed: u64, pages: &[Vec<TableShape>]) -> Res
     for (name, body) in parts {
         z.start_file(name, opt)?;
         z.write_all(body.as_bytes())?;
+    }
+    // Pictures are already compressed: stored as they are.
+    let stored = opt.compression_method(CompressionMethod::Stored);
+    for PicFile { file, bytes, .. } in &pics.items {
+        z.start_file(format!("word/{file}"), stored)?;
+        z.write_all(bytes)?;
     }
     Ok(z.finish()?.into_inner())
 }
@@ -486,6 +579,8 @@ fn parse_document(xml: &str, inline: bool) -> Result<Parsed, Error> {
     let (mut in_tc, mut tc_first_p, mut tc_skip, mut tc_seen) = (false, false, false, 0usize);
     // Inline tables: nesting depth, and the anchor of the open one.
     let (mut tbl_depth, mut tbl_anchor) = (0usize, None::<usize>);
+    // The open `w:drawing`: its size (mm) and image relationship id.
+    let mut drawing: Option<(f32, f32, Option<String>)> = None;
     loop {
         let ev = r.read_event()?;
         let (e, open) = match &ev {
@@ -512,6 +607,20 @@ fn parse_document(xml: &str, inline: bool) -> Result<Parsed, Error> {
                         && let Some(Block::Table { cols }) = chars[a].1.block.as_mut()
                     {
                         cols.push(w / TWIPS_PER_MM);
+                    }
+                }
+                b"w:drawing" if open && !tc_skip => drawing = Some((0.0, 0.0, None)),
+                b"wp:extent" if drawing.is_some() => {
+                    let mm = |n: &str| -> Result<f32, Error> { Ok(attr(&e, n)?.and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0) / EMU_PER_MM) };
+                    let (w, h) = (mm("cx")?, mm("cy")?);
+                    if let Some(d) = drawing.as_mut() {
+                        (d.0, d.1) = (w, h);
+                    }
+                }
+                b"a:blip" if drawing.is_some() => {
+                    let rid = attr(&e, "r:embed")?;
+                    if let Some(d) = drawing.as_mut() {
+                        d.2 = d.2.take().or(rid);
                     }
                 }
                 b"w:tc" if open => (in_tc, tc_first_p, tc_skip) = (true, true, false),
@@ -599,6 +708,14 @@ fn parse_document(xml: &str, inline: bool) -> Result<Parsed, Error> {
                     }
                 }
                 b"w:tc" => (in_tc, tc_skip) = (false, false),
+                // A picture (shapes and text boxes have no image) becomes an object char; its
+                // bytes are attached once the package's relationships are read.
+                b"w:drawing" => {
+                    if let Some((w, h, Some(rid))) = drawing.take() {
+                        let block = Block::Picture { w_mm: w, h_mm: h, number: 0, media: rid, data: Default::default() };
+                        chars.push((OBJECT, Attrs { block: Some(block), ..Attrs::default() }));
+                    }
+                }
                 b"w:pPr" => in_ppr = false,
                 b"w:rPr" => in_rpr = false,
                 b"w:t" => in_t = false,
@@ -752,6 +869,67 @@ fn merge(parsed: Vec<(char, Attrs)>, paras: Vec<Para>, ex: &Extras) -> Option<Do
     Document::from_loaded(chars, paras)
 }
 
+/// The package path of each relationship target of `word/document.xml` (`rId7` →
+/// `word/media/image1.png`).
+fn relationships(zip: &mut ZipArchive<Cursor<&[u8]>>) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let mut s = String::new();
+    if zip.by_name("word/_rels/document.xml.rels").ok().and_then(|mut f| f.read_to_string(&mut s).ok()).is_none() {
+        return out;
+    }
+    let mut r = Reader::from_str(&s);
+    while let Ok(ev) = r.read_event() {
+        match ev {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"Relationship" => {
+                let get = |n: &str| attr(&e, n).ok().flatten();
+                if get("TargetMode").as_deref() == Some("External") {
+                    continue;
+                }
+                if let (Some(id), Some(t)) = (get("Id"), get("Target")) {
+                    let path = match t.strip_prefix('/') {
+                        Some(abs) => abs.to_string(),
+                        None => format!("word/{}", t.trim_start_matches("./")),
+                    };
+                    out.insert(id, path);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Give each picture its image bytes: `media` is a relationship id (a Word file) or, in a file
+/// we wrote, the image's name under `word/media/`. Pictures read from Word are numbered 1, 2, …
+/// in text order; numbers we saved are kept.
+fn attach_pictures(zip: &mut ZipArchive<Cursor<&[u8]>>, doc: &mut Document) {
+    let pictures: Vec<usize> = (0..doc.len()).filter(|&i| doc.chars()[i] == OBJECT && matches!(doc.attrs(i).block, Some(Block::Picture { .. }))).collect();
+    if pictures.is_empty() {
+        return;
+    }
+    let rels = relationships(zip);
+    for (n, i) in pictures.into_iter().enumerate() {
+        let mut a = doc.attrs(i).clone();
+        let Some(Block::Picture { number, media, data, .. }) = a.block.as_mut() else { continue };
+        // A Word relationship id; a name under word/media; or, in a file we wrote, the n-th
+        // picture's own relationship (`Pictures::of` numbers them in text order).
+        let candidates = [rels.get(media.as_str()).cloned(), Some(format!("word/media/{media}")), rels.get(&format!("rIdImg{}", n + 1)).cloned()];
+        let mut bytes = Vec::new();
+        if let Some(path) = candidates.into_iter().flatten().find(|p| {
+            bytes.clear();
+            zip.by_name(p).ok().and_then(|mut f| f.read_to_end(&mut bytes).ok()).is_some()
+        }) {
+            *data = penkaku_core::layout::ImageData::new(bytes);
+            *media = path.rsplit('/').next().unwrap_or(&path).to_string();
+        }
+        if *number == 0 {
+            *number = n as u32 + 1;
+        }
+        doc.apply(crate::model::Command::SetAttrs { at: i, attrs: vec![a] });
+    }
+}
+
 /// Read DOCX bytes.
 pub fn read(bytes: &[u8]) -> Result<Loaded, Error> {
     let mut zip = ZipArchive::new(Cursor::new(bytes))?;
@@ -766,12 +944,14 @@ pub fn read(bytes: &[u8]) -> Result<Loaded, Error> {
     let form = extras.as_ref().is_some_and(|ex| ex.text.contains(CELL_BREAK) && !ex.text.contains(TABLE_END));
     let (parsed, paras) = parse_document(&xml, !form)?;
     if let Some(ex) = extras
-        && let Some(doc) = merge(parsed.clone(), paras.clone(), &ex)
+        && let Some(mut doc) = merge(parsed.clone(), paras.clone(), &ex)
     {
+        attach_pictures(&mut zip, &mut doc);
         return Ok(Loaded { doc, seed: Some(ex.seed) });
     }
     let chars = parsed.into_iter().enumerate().map(|(i, (ch, attrs))| Char { ch, id: i as u64, attrs }).collect();
-    let doc = Document::from_loaded(chars, paras).ok_or_else(|| Error::Xml("inconsistent paragraphs".into()))?;
+    let mut doc = Document::from_loaded(chars, paras).ok_or_else(|| Error::Xml("inconsistent paragraphs".into()))?;
+    attach_pictures(&mut zip, &mut doc);
     Ok(Loaded { doc, seed: None })
 }
 
@@ -969,6 +1149,70 @@ mod tests {
             Some(Block::Table { cols }) => assert_eq!(cols.iter().map(|c| c.round()).collect::<Vec<_>>(), vec![25.0, 51.0]),
             b => panic!("{b:?}"),
         }
+    }
+
+    /// A Word file: "图如下" ¶ a 50.8 × 25.4 mm PNG ¶ a table whose cell holds a 25.4 mm JPEG.
+    fn word_with_pictures() -> Vec<u8> {
+        let drawing = |rid: &str, cx: u32, cy: u32| {
+            format!(r#"<w:r><w:drawing><wp:inline><wp:extent cx="{cx}" cy="{cy}"/><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="{rid}"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"#)
+        };
+        let doc = format!(
+            r#"<w:document xmlns:w="x" xmlns:wp="y" xmlns:a="z" xmlns:pic="p" xmlns:r="r"><w:body><w:p><w:r><w:t>图如下</w:t></w:r></w:p><w:p>{}</w:p><w:tbl><w:tblGrid><w:gridCol w:w="2880"/></w:tblGrid><w:tr><w:tc><w:p>{}</w:p></w:tc></w:tr></w:tbl><w:p/></w:body></w:document>"#,
+            drawing("rId5", 1_828_800, 914_400),
+            drawing("rId6", 914_400, 914_400)
+        );
+        let rels = r#"<Relationships xmlns="x"><Relationship Id="rId5" Type="image" Target="media/image1.png"/><Relationship Id="rId6" Type="image" Target="/word/media/photo.jpg"/></Relationships>"#;
+        let mut z = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, body) in [("word/document.xml", doc.as_bytes()), ("word/_rels/document.xml.rels", rels.as_bytes()), ("word/media/image1.png", &[0x89, b'P', b'N', b'G', 1, 2][..]), ("word/media/photo.jpg", &[0xFF, 0xD8, 9][..])] {
+            z.start_file(name, SimpleFileOptions::default()).unwrap();
+            z.write_all(body).unwrap();
+        }
+        z.finish().unwrap().into_inner()
+    }
+
+    fn pictures_of(d: &Document) -> Vec<(usize, f32, f32, u32, String, Vec<u8>)> {
+        (0..d.len())
+            .filter_map(|i| match &d.attrs(i).block {
+                Some(Block::Picture { w_mm, h_mm, number, media, data }) => Some((i, w_mm.round(), h_mm.round(), *number, media.clone(), data.bytes().unwrap_or_default().to_vec())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn word_pictures_open_as_numbered_picture_objects() {
+        let l = read(&word_with_pictures()).unwrap();
+        assert!(l.doc.is_consistent());
+        let p = pictures_of(&l.doc);
+        assert_eq!(p.len(), 2);
+        assert_eq!((p[0].1, p[0].2, p[0].3, p[0].4.as_str()), (51.0, 25.0, 1, "image1.png"));
+        assert_eq!(p[0].5, vec![0x89, b'P', b'N', b'G', 1, 2]);
+        assert_eq!((p[1].1, p[1].2, p[1].3, p[1].4.as_str()), (25.0, 25.0, 2, "photo.jpg"));
+        // The second sits in the table's only cell.
+        let t = l.doc.text();
+        assert_eq!(t, format!("图如下\n{OBJECT}\n{OBJECT}{OBJECT}{TABLE_END}\n"));
+        assert_eq!(p[1].0, 7);
+    }
+
+    #[test]
+    fn pictures_survive_saving_and_show_in_word() {
+        let d = read(&word_with_pictures()).unwrap().doc;
+        let bytes = write(&d, 3).unwrap();
+        // Word's view: two inline images with their media and relationships.
+        let mut z = ZipArchive::new(Cursor::new(&bytes[..])).unwrap();
+        let mut xml = String::new();
+        z.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
+        assert_eq!(xml.matches("<wp:inline").count(), 2);
+        assert!(xml.contains(r#"<wp:extent cx="1828800" cy="914400"/>"#));
+        assert!(z.by_name("word/media/image1.png").is_ok() && z.by_name("word/media/image2.jpeg").is_ok());
+        let mut rels = String::new();
+        z.by_name("word/_rels/document.xml.rels").unwrap().read_to_string(&mut rels).unwrap();
+        assert!(rels.contains(r#"Id="rIdImg2""#) && rels.contains("media/image2.jpeg"));
+        // Ours back: same text, numbers, sizes and bytes.
+        let back = read(&bytes).unwrap().doc;
+        assert!(back.same_content(&d) || back.text() == d.text());
+        let (a, b) = (pictures_of(&back), pictures_of(&d));
+        assert_eq!(a.iter().map(|p| (p.0, p.1, p.2, p.3, p.5.clone())).collect::<Vec<_>>(), b.iter().map(|p| (p.0, p.1, p.2, p.3, p.5.clone())).collect::<Vec<_>>());
     }
 
     #[test]

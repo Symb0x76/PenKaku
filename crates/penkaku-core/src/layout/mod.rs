@@ -208,6 +208,12 @@ pub const OBJECT: char = '\u{FFFC}';
 /// Ends an inline table: `OBJECT` cell `CELL_BREAK` cell … `TABLE_END`.
 pub const TABLE_END: char = '\u{1E}';
 
+/// The [`TABLE_END`] of the inline table whose [`OBJECT`] is at `anchor`: the next one, unless
+/// another object (not a picture in a cell, `is_picture(k)`) comes first (a broken table).
+pub fn table_end(chars: &[char], anchor: usize, is_picture: impl Fn(usize) -> bool) -> Option<usize> {
+    (anchor + 1..chars.len()).find(|&k| chars[k] == TABLE_END || (chars[k] == OBJECT && !is_picture(k))).filter(|&k| chars[k] == TABLE_END)
+}
+
 /// The cells of the inline table whose [`OBJECT`] is at `anchor` and [`TABLE_END`] at `end`:
 /// the [`CELL_BREAK`]-separated char ranges between them, row by row.
 pub fn table_cells(chars: &[char], anchor: usize, end: usize) -> Vec<std::ops::Range<usize>> {
@@ -232,6 +238,59 @@ pub enum Block {
     Table { cols: Vec<f32> },
     /// Flowchart from Mermaid source (see [`crate::diagram::mermaid`]).
     Diagram { source: String },
+    /// A picture from a Word document: the pen leaves a `w_mm` × `h_mm` space (smaller when the
+    /// line or cell is narrower) with 「图`number`」 in its corner; the image itself goes on the
+    /// picture sheet, printed at the space's size, to cut out and glue in. `media`: its file name
+    /// in the DOCX (`word/media/…`); `data`: its bytes (not stored in the extras JSON).
+    Picture {
+        w_mm: f32,
+        h_mm: f32,
+        number: u32,
+        media: String,
+        #[serde(skip)]
+        data: ImageData,
+    },
+}
+
+/// A picture's bytes, shared (copying a picture's char does not copy them). Prints as its size.
+#[derive(Clone, Default)]
+pub struct ImageData(pub Option<std::sync::Arc<[u8]>>);
+
+impl ImageData {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(Some(bytes.into()))
+    }
+    pub fn bytes(&self) -> Option<&[u8]> {
+        self.0.as_deref()
+    }
+}
+
+impl std::fmt::Debug for ImageData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ImageData({} bytes)", self.0.as_ref().map_or(0, |b| b.len()))
+    }
+}
+
+impl PartialEq for ImageData {
+    fn eq(&self, o: &Self) -> bool {
+        match (&self.0, &o.0) {
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b) || a == b,
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
+}
+
+/// The space left for a [`Block::Picture`]: page, rectangle in machine mm (left, top; y up, so the
+/// box runs down from `top`) and size, and the anchor char.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PictureSlot {
+    pub number: u32,
+    pub char_ix: usize,
+    pub page: usize,
+    pub x: f32,
+    pub top: f32,
+    pub w: f32,
+    pub h: f32,
 }
 
 /// Vertical placement of a cell's lines.
@@ -334,6 +393,8 @@ pub struct Document {
     pub cells: Vec<CellInfo>,
     /// Objects that could not be drawn: (anchor char index, message), e.g. a Mermaid syntax error.
     pub block_errors: Vec<(usize, String)>,
+    /// The spaces left for pictures, in text order (the picture sheet prints them at these sizes).
+    pub pictures: Vec<PictureSlot>,
 }
 
 impl Document {

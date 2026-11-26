@@ -3,7 +3,7 @@
 //! are tagged to the [`OBJECT`] char except cell text, which keeps its own chars.
 
 use super::pen::Pen;
-use super::{Align, Block, CharBox, Document, EM_UNITS, Flow, LineInfo, OBJECT, PageBox, PageParams, Para, Ruling, TABLE_END, layout_pass, table_cells};
+use super::{Align, Block, CharBox, Document, EM_UNITS, Flow, LineInfo, PageBox, PageParams, Para, PictureSlot, Ruling, layout_pass, table_cells};
 use crate::diagram::{self, mermaid};
 use crate::font::fontset::Glyphs;
 use crate::handwriting::{SALT_FRAME, rng_for};
@@ -15,7 +15,7 @@ type Pt = (f32, f32);
 pub(super) fn lay(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, b: &Block) -> Option<(usize, usize)> {
     match b {
         Block::Table { cols } => {
-            let end = (i + 1..f.chars.len()).find(|&k| matches!(f.chars[k], TABLE_END | OBJECT)).filter(|&k| f.chars[k] == TABLE_END)?;
+            let end = super::table_end(f.chars, i, |k| matches!(f.blocks.get(k), Some(Some(Block::Picture { .. }))))?;
             start_fresh(pen, i);
             lay_table(pen, f, font, i, end, cols);
             Some((end + 1, f.chars[i..end].iter().filter(|&&c| c == '\n').count()))
@@ -23,6 +23,11 @@ pub(super) fn lay(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usi
         Block::Diagram { source } => {
             start_fresh(pen, i);
             lay_diagram(pen, f, font, i, source);
+            Some((i + 1, 0))
+        }
+        &Block::Picture { w_mm, h_mm, number, .. } => {
+            start_fresh(pen, i);
+            lay_picture(pen, f, font, i, (w_mm, h_mm), number);
             Some((i + 1, 0))
         }
     }
@@ -150,6 +155,8 @@ fn sub_layout(pen: &Pen, f: &Flow, font: &(impl Glyphs + ?Sized), chars: &[char]
         ..p.clone()
     };
     let paras = vec![Para { align: Align::Left, first_indent: Some(0.0) }; chars.iter().filter(|&&c| c == '\n').count() + 1];
+    // A table cell keeps its pictures (side-by-side figures in a Word table); no nested tables.
+    let pictures: Vec<Option<&Block>> = r.as_ref().map_or(Vec::new(), |r| part(f.blocks, r.clone()).iter().map(|b| b.filter(|b| matches!(b, Block::Picture { .. }))).collect());
     let flow = match r {
         Some(r) => Flow {
             chars,
@@ -159,7 +166,7 @@ fn sub_layout(pen: &Pen, f: &Flow, font: &(impl Glyphs + ?Sized), chars: &[char]
             tuning: part(f.tuning, r.clone()),
             styles: part(f.styles, r),
             deform_cache: f.deform_cache,
-            blocks: &[],
+            blocks: &pictures,
         },
         None => Flow { chars, ids, paras: &paras, deform_cache: f.deform_cache, ..Flow::default() },
     };
@@ -179,6 +186,9 @@ fn graft(pen: &mut Pen, sub: Document, first: usize, dx: f32, dy: f32, line_dy: 
     }
     if tag.is_some() {
         return;
+    }
+    for pic in sub.pictures {
+        pen.doc.pictures.push(PictureSlot { char_ix: pic.char_ix + first, page, x: pic.x + dx, top: pic.top + dy, ..pic });
     }
     for b in sub.boxes {
         pen.doc.boxes.push(CharBox { page, line: base_line + b.line, x0: b.x0 + dx, x1: b.x1 + dx });
@@ -211,6 +221,11 @@ fn graft_lines(pen: &mut Pen, sub: &Document, first: usize, range: std::ops::Ran
                 pen.page.strokes.push(s.iter().map(|&(x, y)| (x + dx, y + dy - lift)).collect());
                 pen.page.stroke_chars.push(first + c);
             }
+        }
+    }
+    for pic in &sub.pictures {
+        if sub.boxes.get(pic.char_ix).is_some_and(|b| in_range(b.line)) {
+            pen.doc.pictures.push(PictureSlot { char_ix: pic.char_ix + first, page, x: pic.x + dx, top: pic.top + dy - lift, ..pic.clone() });
         }
     }
     for (k, b) in sub.boxes.iter().enumerate() {
@@ -339,7 +354,12 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
     let (mut top, mut bottom, mut last_slot) = (0.0, 0.0, pen.slot);
     for r in 0..cells.len().div_ceil(ncols) {
         let row = r * ncols..((r + 1) * ncols).min(cells.len());
-        let lines = row.clone().map(|c| subs[c].lines.len().max(1)).max().unwrap_or(1);
+        // A cell's height in lines: its text lines, or more when a picture reaches lower.
+        let depth = |d: &Document| {
+            let pic = d.pictures.iter().map(|s| s.h - s.top).fold(0.0f32, f32::max);
+            ((pic / pitch) - 1e-3).ceil().max(0.0) as usize
+        };
+        let lines = row.clone().map(|c| subs[c].lines.len().max(depth(&subs[c])).max(1)).max().unwrap_or(1);
         if r > 0 {
             // Below the previous row.
             match p.ruling {
@@ -506,4 +526,45 @@ fn lay_diagram(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize,
     pen.line_start = i;
     pen.cx = d.size.0;
     pen.doc.boxes.push(CharBox { page: pen.page_ix, line: pen.doc.lines.len(), x0, x1: x0 + d.size.0 });
+}
+
+/// A picture's space: Word's size, shrunk (aspect kept) to the line or cell width and a page's
+/// height; whole ruled rows on ruled paper; 「图`number`」 small in its top-left corner. Its
+/// paragraph's alignment places it, like a table.
+fn lay_picture(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, (w_mm, h_mm): (f32, f32), number: u32) {
+    // 「图k」 is this size of the text, inset by this many em from the corner.
+    const LABEL_SCALE: f32 = 0.6;
+    const LABEL_INSET_EM: f32 = 0.25;
+    let p = pen.p;
+    let (ox, oy) = p.origin;
+    let avail_h = match p.ruling {
+        Ruling::Rows { .. } => pen.rows.max(1) as f32 * pen.row_h,
+        _ => p.page.map_or(f32::INFINITY, |b| b.height),
+    };
+    let k = (pen.line_w / w_mm.max(1e-3)).min(avail_h / h_mm.max(1e-3)).min(1.0);
+    let (w, h) = (w_mm.max(1.0) * k, h_mm.max(1.0) * k);
+    let slots = (h / pitch(pen) - 1e-3).ceil().max(1.0) as usize;
+    let top = make_room(pen, h, slots);
+    let first_slot = pen.slot;
+    let xoff = match pen.align {
+        _ if !pen.line_w.is_finite() => 0.0,
+        Align::Center => ((pen.line_w - w) / 2.0).max(0.0),
+        Align::Right => (pen.line_w - w).max(0.0),
+        _ => 0.0,
+    };
+    let x0 = ox + pen.line_x + xoff;
+    let em = EM_UNITS * p.mm_per_unit;
+    let chars: Vec<char> = format!("图{number}").chars().collect();
+    let id = f.ids[i];
+    let ids: Vec<u64> = (0..chars.len()).map(|j| sub_id(id, j as u64 + 1)).collect();
+    let label = sub_layout(pen, f, font, &chars, &ids, None, LABEL_SCALE, f32::INFINITY, em * 1.3 * LABEL_SCALE);
+    let inset = em * LABEL_INSET_EM;
+    graft(pen, label, i, x0 + inset, oy - (top + inset), 0.0, Some(i));
+    pen.doc.pictures.push(PictureSlot { number, char_ix: i, page: pen.page_ix, x: x0, top: oy - top, w, h });
+    leave(pen, top, top + h, first_slot + slots - 1);
+    // One wide char on the line it opens, already placed: no alignment shift afterwards.
+    pen.line_start = i;
+    pen.cx = xoff + w;
+    pen.doc.boxes.push(CharBox { page: pen.page_ix, line: pen.doc.lines.len(), x0, x1: x0 + w });
+    pen.align = Align::Left;
 }

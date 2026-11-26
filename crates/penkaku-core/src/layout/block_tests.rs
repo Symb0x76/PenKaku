@@ -149,6 +149,63 @@ fn free_table_row_taller_than_the_page_goes_on_overleaf() {
     assert!(doc.pages.len() >= 3);
 }
 
+fn picture(w: f32, h: f32, number: u32) -> Block {
+    Block::Picture { w_mm: w, h_mm: h, number, media: format!("image{number}.png"), data: ImageData::default() }
+}
+
+#[test]
+fn picture_leaves_its_space_with_its_number_and_text_goes_on_below() {
+    // "X" ¶ picture 40 × 25 mm ¶ "X", centred paragraph for the picture.
+    let t = format!("X\n{OBJECT}\nX");
+    let ps = [Para::default(), Para { align: Align::Center, ..Para::default() }, Para::default()];
+    let mut font = x_font();
+    for c in ['图', '3'] {
+        font.glyphs.insert(c, Glyph { advance: 7.0, strokes: vec![vec![(0.0, 0.0), (7.0, 7.0)]] });
+    }
+    let chars: Vec<char> = t.chars().collect();
+    let ids: Vec<u64> = (0..chars.len() as u64).collect();
+    let pic = picture(40.0, 25.0, 3);
+    let mut bl: Vec<Option<&Block>> = vec![None; chars.len()];
+    bl[2] = Some(&pic);
+    let doc = layout_flow(&Flow { chars: &chars, ids: &ids, paras: &ps, blocks: &bl, ..Default::default() }, &font, &tall_page(200.0));
+    assert_eq!(doc.boxes.len(), t.chars().count());
+    let slot = &doc.pictures[0];
+    assert_eq!((slot.number, slot.char_ix, slot.page), (3, 2, 0));
+    assert_eq!((slot.w, slot.h), (40.0, 25.0));
+    assert!((slot.x - 30.0).abs() < 1e-3, "centred on the 100 mm line: {}", slot.x);
+    // 「图3」: two strokes tagged to the anchor, in the box's top-left corner.
+    let (top, below) = (-slot.top, -(slot.top - slot.h));
+    let label = tagged(&doc, 2);
+    assert_eq!(label.len(), 2);
+    assert!(label.iter().all(|s| x_span(s).0 >= slot.x && x_span(s).1 <= slot.x + slot.w / 2.0 && y_span(s).0 >= top && y_span(s).1 <= top + slot.h / 2.0));
+    // The text after the picture starts below its space.
+    assert!(tagged(&doc, 4).iter().all(|s| y_span(s).0 >= below - 1e-3));
+}
+
+#[test]
+fn picture_shrinks_to_the_line_and_keeps_its_shape() {
+    let doc = with_blocks(&format!("{OBJECT}"), &[(0, picture(200.0, 100.0, 1))], &[], &tall_page(400.0));
+    let s = &doc.pictures[0];
+    assert!((s.w - 100.0).abs() < 1e-3 && (s.h - 50.0).abs() < 1e-3, "{s:?}");
+}
+
+#[test]
+fn pictures_in_table_cells_stay_side_by_side() {
+    // A 2-column table, a 50 × 30 picture in each cell.
+    let t = format!("{OBJECT}{OBJECT}{CELL_BREAK}{OBJECT}{TABLE_END}");
+    let b = vec![(0, Block::Table { cols: vec![60.0, 60.0] }), (1, picture(50.0, 30.0, 1)), (3, picture(50.0, 30.0, 2))];
+    let doc = with_blocks(&t, &b, &[], &tall_page(200.0));
+    let p: Vec<(u32, usize)> = doc.pictures.iter().map(|s| (s.number, s.char_ix)).collect();
+    assert_eq!(p, vec![(1, 1), (2, 3)]);
+    let (a, c) = (&doc.pictures[0], &doc.pictures[1]);
+    assert!((a.top - c.top).abs() < 1e-3, "same row: {a:?} {c:?}");
+    assert!(c.x >= a.x + a.w, "second to the right of the first");
+    assert!(a.w <= 50.0 + 1e-3 && a.h > 20.0);
+    // The row grows to hold the pictures: the table's frame reaches below them.
+    let frame_bottom = tagged(&doc, 0).iter().map(|s| y_span(s).1).fold(0.0f32, f32::max);
+    assert!(frame_bottom >= -(a.top - a.h) - 1e-3, "frame {frame_bottom} vs picture foot {}", -(a.top - a.h));
+}
+
 #[test]
 fn inline_table_frame_wavers_with_handwriting_but_keeps_corners() {
     let (t, b) = small_table();

@@ -49,9 +49,11 @@ impl EditDoc {
     pub fn table_at(&self, i: usize) -> Option<TableSpan> {
         let c = self.doc.chars();
         let i = i.min(c.len());
-        let anchor = c[..i].iter().rposition(|&x| x == OBJECT)?;
+        let picture = |k: usize| matches!(self.doc.attrs(k).block, Some(Block::Picture { .. }));
+        // The nearest object before the caret that is not a picture in a cell.
+        let anchor = (0..i).rev().find(|&k| c[k] == OBJECT && !picture(k))?;
         let Some(Block::Table { cols }) = &self.doc.attrs(anchor).block else { return None };
-        let end = (anchor + 1..c.len()).find(|&k| matches!(c[k], TABLE_END | OBJECT)).filter(|&k| c[k] == TABLE_END)?;
+        let end = penkaku_core::layout::table_end(c, anchor, picture)?;
         if i > end {
             return None;
         }
