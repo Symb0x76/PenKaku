@@ -2,9 +2,8 @@
 
 ## Status
 - 2026-11-26: renamed chixie-rs → PenKaku (crates `penkaku-*`, bins `penkaku`/`penkaku-cli`,
-  `PENKAKU_*` env, dirs/keyring `penkaku`, XML ns `urn:penkaku:*`). Legacy read paths kept:
-  `penkaku_core::env_var` (CHIXIE_RS_* fallback), `config::migrate_legacy_dirs`, credentials
-  fallback, old docx/font/template markers. ChiXie3 compat names (`chixie3_*`) unchanged.
+  `PENKAKU_*` env, dirs/keyring `penkaku`, XML ns `urn:penkaku:*`). No compatibility with the old
+  chixie-rs names (dirs, keyring entry, CHIXIE_RS_* env, XML markers) is kept. ChiXie3 compat names (`chixie3_*`) unchanged.
   Pending: rename repo root folder `D:\Projects\Rust\chixie-rs` and the GitHub repo.
 - Plan: `C:\Users\Symb0x76\.claude\plans\d-projects-rust-chixie-rs-docs-handoff-fluttering-iverson.md`.
 - M0 done: workspace, golden, gpui-kit spike.
@@ -82,7 +81,7 @@
   X0 Y0.
 - Word 365 "Colorful" chrome (2026-11-07):
   - custom blue title bar (`appears_transparent`): app mark, quick access toolbar, centred
-    "文档名 - 赤写", 登录/account, own min/max/close via `WindowControlArea` (Windows hit-test);
+    "文档名 - 炽写", 登录/account, own min/max/close via `WindowControlArea` (Windows hit-test);
     the backstage keeps the bar.
   - light tab strip with plain 文件 tab; ribbon is a white rounded card; groups split by inset rules.
   - grey desk with drop-shadowed pages; 设备 task pane with titled header + close.
@@ -132,7 +131,7 @@
 - **M0 done (2026-11-08), branch `m0-foundations`** (not merged; no git remote yet):
   - Naming: crates `penkaku-{core,cli,gui}`, binaries `penkaku` / `penkaku-cli`, env
     `PENKAKU_{FAKE,AUTOTEST,SIM_DELAY_MS,ACCOUNT,PASSWORD}`, data dir and keychain service
-    `penkaku` (renamed from `chixie-rs` on 2026-11-26; legacy dirs/passwords/env still read). Hardware/ChiXie3 names unchanged.
+    `penkaku` (renamed from `chixie-rs` on 2026-11-26; old names no longer read). Hardware/ChiXie3 names unchanged.
   - CI `.github/workflows/ci.yml`: Windows/macOS/Linux build, clippy -D warnings, tests, GUI
     autotest (non-blocking until seen green), debug artifacts. NOT run yet: needs a GitHub remote.
   - Capture harness `tools/capture/` (`penkaku-cli fake-grbl`, `capture-diff`,
@@ -273,7 +272,7 @@
   - Open: real forms from BOSS (photos with strong perspective are the risk), thumbnails, 截图生成, 占位符识别.
 - **M7b merged 2026-11-18** (`fc2076d`).
 - **M7c merged 2026-11-18** (`120ba7e`). Details:
-  - Template crate: `svg.rs` (template ↔ SVG; TOML in `<metadata id="chixie-template">`, backgrounds as data URIs
+  - Template crate: `svg.rs` (template ↔ SVG; TOML in `<metadata id="penkaku-template">`, backgrounds as data URIs
     restored into the assets folder by FNV hash), `library.rs` (TemplateLibrary: scan / save / remove / sync /
     import SVG-ZIP-XLSX-cx / export SVG-XLSX-ZIP / move_default / migrate_toml / load_store), `xlsx_template.rs`
     (rust_xlsxwriter export; import reads sheet XML for widths / heights / merges); `Template.tags`, `.favourite`.
@@ -314,12 +313,12 @@
   - Perf, measured by `AUTOTEST_PERF` (16 styled pages, CI debug; macOS runner paints no frames) and
     `crates/penkaku-core/tests/layout_timing.rs` (`--ignored`, 8000 chars):
 
-    | step | relayout | paint/frame |
-    |---|---|---|
-    | before | ~500 ms (mac 690) | ~140 ms |
-    | visible pages + path cache (`doc_view.rs` `PathCache`, `PagePaths`) | ~500 | ~15 |
-    | `layout::DeformCache` (core, passed in `Flow`) | ~40 (mac 58) | ~15 |
-    | deps `opt-level = 2` in debug | ~37 (mac 74) | ~3–5 |
+    | step                                                                | relayout          | paint/frame |
+    | ------------------------------------------------------------------- | ----------------- | ----------- |
+    | before                                                              | ~500 ms (mac 690) | ~140 ms     |
+    | visible pages + path cache (`doc_view.rs` `PathCache`, `PagePaths`) | ~500              | ~15         |
+    | `layout::DeformCache` (core, passed in `Flow`)                      | ~40 (mac 58)      | ~15         |
+    | deps `opt-level = 2` in debug                                       | ~37 (mac 74)      | ~3–5        |
 
     Core timing: styled 8000 chars 262 → 7.6 ms debug, 15.7 → 1.6 ms release. Incremental reflow
     (plan step 3b) not needed after the cache; not done. `[profile.dev.package."*"] opt-level = 2`

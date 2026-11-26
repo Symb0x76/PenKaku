@@ -30,14 +30,14 @@ jog `$J=G21G91 …`, manual pen jog `G21G91 Z` / `G21G91 Z-`.
 User config `%USERPROFILE%\ChiXie3\conf\config.ini` `[DeviceConfig] DeviceParams`
 (QVariantMap, device "guangku"):
 
-| key | value |
-|---|---|
-| deviceType | 0 (= `WritingRobot_StepperPenUp`) |
-| firmware | 3 (enum index, **VERIFY** mapping) |
-| penUp | 0 |
-| penDown | "2" |
-| writeSpeed | "19000" (mm/min) |
-| pauseTime | "0" |
+| key                             | value                                        |
+| ------------------------------- | -------------------------------------------- |
+| deviceType                      | 0 (= `WritingRobot_StepperPenUp`)            |
+| firmware                        | 3 (enum index, **VERIFY** mapping)           |
+| penUp                           | 0                                            |
+| penDown                         | "2"                                          |
+| writeSpeed                      | "19000" (mm/min)                             |
+| pauseTime                       | "0"                                          |
 | x_plus/x_reduce/y_plus/y_reduce | `X+` `X-` `Y+` `Y-` (axis direction mapping) |
 
 ⇒ on this machine: pen up `G1G90 Z0`, pen down `G1G90 Z2`. Verified on hardware 2026-11-06
@@ -46,10 +46,10 @@ with `F1000` (operator confirmed pen touched paper and lifted). Original literal
 
 ## Firmware families (`core.ChiXie` / `firmware_type`)
 
-| Value | Meaning |
-|---|---|
+| Value                                       | Meaning                                                        |
+| ------------------------------------------- | -------------------------------------------------------------- |
 | `ChiXie`, `ESP32_Grbl`, `ChiXie_ESP32_Grbl` | Grbl / Grbl_ESP32 → `__connect_grbl`, `__send_command_of_grbl` |
-| `Marlin` | Marlin → `__connect_marlin`, `__send_command_of_marlin` |
+| `Marlin`                                    | Marlin → `__connect_marlin`, `__send_command_of_marlin`        |
 
 ## Transports (`SerialMode`: `OnlineMode` / `TelnetMode`)
 
@@ -76,16 +76,16 @@ stroke under it among those the acks allow (up to 16 planner blocks + ~8 RX line
 
 ## ESP32 config commands (serial, `wireless_esp32_setting_dialog`)
 
-| Cmd | Use |
-|---|---|
-| `[ESP110]` | query radio mode (`$ESP110=`); `[ESP110]STA`, `[ESP110]BT` set mode |
-| `[ESP100]` / `[ESP101]` | STA SSID / password |
-| `[ESP131]23` | telnet port |
-| `[ESP140]` | BT name (`$ESP140=`) |
-| `[ESP115]ON` | radio on; replies `Connected with` / `BT Started with` |
-| `[ESP410]` | Wi-Fi scan, JSON `{"AP_LIST":[{"SSID":..,"SIGNAL":..}]}` |
-| `[ESP210]` | SD status |
-| `[ESP220]<path>` | run file from SD |
+| Cmd                     | Use                                                                 |
+| ----------------------- | ------------------------------------------------------------------- |
+| `[ESP110]`              | query radio mode (`$ESP110=`); `[ESP110]STA`, `[ESP110]BT` set mode |
+| `[ESP100]` / `[ESP101]` | STA SSID / password                                                 |
+| `[ESP131]23`            | telnet port                                                         |
+| `[ESP140]`              | BT name (`$ESP140=`)                                                |
+| `[ESP115]ON`            | radio on; replies `Connected with` / `BT Started with`              |
+| `[ESP410]`              | Wi-Fi scan, JSON `{"AP_LIST":[{"SSID":..,"SIGNAL":..}]}`            |
+| `[ESP210]`              | SD status                                                           |
+| `[ESP220]<path>`        | run file from SD                                                    |
 
 ## HTTP API (`sd_card_file_management_dialog`, `upload_file_to_sd`)
 
@@ -112,7 +112,7 @@ Runs `arp -a`, then for each IP `GET http://<ip>/description.xml` (UPnP,
 The Export G-code button (`MainWindow.set_export_gcode_btn_visible`) is gated to `super_user`. The
 fake-Grbl path works for any account. ChiXie3 runs elevated, so UI automation must run elevated too.
 
-**Format** (艾玛体, text `你好赤写 A1`, size 100):
+**Format** (艾玛体, text `你好炽写 A1`, size 100):
 ```
 G21
 G90
@@ -137,11 +137,11 @@ G90G0 X0Y0                  (return to origin)
 
 **Handwriting effects in the default config** (deformation off, so RMS 0):
 
-| quantity | size 100 | size 50 | conclusion |
-|---|---|---|---|
-| first glyph x | 2.03 | 2.03 | absolute mm; fits `first_text_not_align_range` 2.0 |
-| glyph y offsets (你好赤写A1) | −0.276 −0.296 −0.326 −0.186 −0.206 −0.236 | same deltas | absolute mm; spread ≤ 0.3, fits `vertical_offset` 0.0–0.3 |
-| extra spacing per glyph (你/好/赤) | — | — | ≈ 1.08 / 1.04 / 0.92 mm: absolute, within zh 0.6–1.1 |
+| quantity                           | size 100                                  | size 50     | conclusion                                                |
+| ---------------------------------- | ----------------------------------------- | ----------- | --------------------------------------------------------- |
+| first glyph x                      | 2.03                                      | 2.03        | absolute mm; fits `first_text_not_align_range` 2.0        |
+| glyph y offsets (你好炽写A1)       | −0.276 −0.296 −0.326 −0.186 −0.206 −0.236 | same deltas | absolute mm; spread ≤ 0.3, fits `vertical_offset` 0.0–0.3 |
+| extra spacing per glyph (你/好/赤) | —                                         | —           | ≈ 1.08 / 1.04 / 0.92 mm: absolute, within zh 0.6–1.1      |
 
 - Extra spacing is solved from advance = a·(size/100) + spacing across both sizes.
 - Random values are drawn **per character when the text is laid out**, not per write. Repeated
@@ -156,13 +156,13 @@ residual after it. Single-stroke `1` is collinear, so its sx is unreliable.
 - **基础变形 (base)** — defaults: 胖瘦 96–104%, 高矮 96–104%, rotation −2…+2°, 笔画变形幅度 1,
   随机删除小尾巴 on.
 
-  | glyph | sx | sy | rot | shear | residual mm |
-  |---|---|---|---|---|---|
-  | 你 | 1.037 | 1.072 | −0.85° | +0.017 | 0.061 |
-  | 好 | 1.051 | 0.981 | −1.48° | −0.019 | 0.046 |
-  | 赤 | 1.018 | 0.959 | −0.17° | −0.003 | 0.044 |
-  | 写 | 0.941 | 1.027 | +0.05° | +0.011 | 0.022 |
-  | A | 0.979 | 0.978 | +0.77° | +0.004 | 0.043 |
+  | glyph | sx    | sy    | rot    | shear  | residual mm |
+  | ----- | ----- | ----- | ------ | ------ | ----------- |
+  | 你    | 1.037 | 1.072 | −0.85° | +0.017 | 0.061       |
+  | 好    | 1.051 | 0.981 | −1.48° | −0.019 | 0.046       |
+  | 赤    | 1.018 | 0.959 | −0.17° | −0.003 | 0.044       |
+  | 写    | 0.941 | 1.027 | +0.05° | +0.011 | 0.022       |
+  | A     | 0.979 | 0.978 | +0.77° | +0.004 | 0.043       |
 
   - A per-glyph random x/y scale (≈ the configured %; a few values land just outside ±4%,
     **VERIFY** whether the range is exclusive or composed with other terms) and a rotation within ±2°.
@@ -175,7 +175,7 @@ residual after it. Single-stroke `1` is collinear, so its sx is unreliable.
 - **Paste vs typed (unexplained, VERIFY):** text pasted with deformation **off** still gets a
   per-glyph axis-aligned scale relative to typed text (sx 0.70–1.05, sy 0.86–1.01, no rotation, exact
   fit). Typed text matched the raw font at scale 1.
-- **Pasted text is not repeatable (2026-11-08, harness):** the same text `你好赤写 A1` pasted into
+- **Pasted text is not repeatable (2026-11-08, harness):** the same text `你好炽写 A1` pasted into
   two fresh ChiXie3 sessions with 字符变形 off gives the same structure (21 strokes, identical point
   counts per stroke) but each stroke differs by 0.1–1.3 mm. The best per-stroke scale ranges
   0.84–1.23 and leaves up to 1.0 mm residual, so this is independent per-stroke variation, not one
@@ -189,11 +189,11 @@ Captures: `captures/{a2_pasted_deform_off,d_base_deform,d_shape_deform7}.gcode` 
 two deform-off controls, two captures at level 3 and two at 10, each pasted fresh (`tools/capture`,
 fit `tools/capture/shape_fit.py`, local only). Per-glyph affine fit against control 1, medians:
 
-| capture | sx | sy | rot | shear | residual mm |
-|---|---|---|---|---|---|
-| control 2 (deform off) | 1.062 | 1.003 | −0.30° | +0.019 | 0.066 |
-| level 3 (a / b) | 1.023 / 1.003 | 0.993 / 0.980 | +0.68° / +2.41° | +0.064 / +0.119 | 0.105 / 0.191 |
-| level 10 (a / b) | 1.017 / 1.022 | 1.015 / 1.010 | +1.18° / +0.16° | +0.039 / +0.016 | 0.092 / 0.059 |
+| capture                | sx            | sy            | rot             | shear           | residual mm   |
+| ---------------------- | ------------- | ------------- | --------------- | --------------- | ------------- |
+| control 2 (deform off) | 1.062         | 1.003         | −0.30°          | +0.019          | 0.066         |
+| level 3 (a / b)        | 1.023 / 1.003 | 0.993 / 0.980 | +0.68° / +2.41° | +0.064 / +0.119 | 0.105 / 0.191 |
+| level 10 (a / b)       | 1.017 / 1.022 | 1.015 / 1.010 | +1.18° / +0.16° | +0.039 / +0.016 | 0.092 / 0.059 |
 
 Two deform-off pastes differ from each other as much as level 3 or 10 differs from the control
 (per glyph: scale 0.95–1.10, shear ±0.08, residual 0.05–0.2 mm), and level 10 is not larger
@@ -202,7 +202,7 @@ cannot calibrate it. PenKaku keeps the level-7 fit (slant −0.12…−0.13, res
 and scales it linearly with the level (VERIFY with typed text if it ever matters).
 
 **Multi-line layout (captured 2026-11-07, 艾玛体 100, effects off)**
-- Text: `你好赤写`×10 + ` A1 A1` ⏎ `写赤好你 写赤 A1` ⏎ `你 好 赤 写`.
+- Text: `你好炽写`×10 + ` A1 A1` ⏎ `写赤好你 写赤 A1` ⏎ `你 好 赤 写`.
 - ChiXie3's Telnet streaming stalls on long jobs: at ~44, ~752 and ~1682 lines, even with a 3 ms ack
   delay. After a stall, the only reliable reset is disconnect + restart. The first 2 lines (34 glyphs)
   were captured; every glyph fits the typed reference exactly (no per-glyph scale).
@@ -231,13 +231,13 @@ and scales it linearly with the level (VERIFY with typed text if it ever matters
 Fake-Grbl captures, 艾玛体 100, deformation off, text `一二` ⏎ `三十` (typed Enter), each option set in
 `config.ini` for one run (`tools/capture/capture.ps1 -Config`, `-Text2`, `-StartX 805` for 我的笔记).
 
-| Setting | Template | Result |
-|---|---|---|
-| `path_planning_type=1` (之字型) | 我的笔记1 | 一 二 三 十: every row left to right |
-| `path_planning_type=2` (弓字型) | 我的笔记1 | 一 二 十 三: row 2 right to left, each character's strokes in font order |
-| `path_planning_type=1` / `2` | 作文格1 | 一 二 三 十 in both: 弓 does not reverse grid rows |
+| Setting                                      | Template        | Result                                                                             |
+| -------------------------------------------- | --------------- | ---------------------------------------------------------------------------------- |
+| `path_planning_type=1` (之字型)              | 我的笔记1       | 一 二 三 十: every row left to right                                               |
+| `path_planning_type=2` (弓字型)              | 我的笔记1       | 一 二 十 三: row 2 right to left, each character's strokes in font order           |
+| `path_planning_type=1` / `2`                 | 作文格1         | 一 二 三 十 in both: 弓 does not reverse grid rows                                 |
 | `ParityPageDirectionMode=1` (奇数页旋转180°) | 作文格1, 1 page | page 1 turned: `(x, y) → (159.8 − x, −214.9 − y)` ± 0.4 mm, stroke order unchanged |
-| `ParityPageDirectionMode=2` (偶数页旋转180°) | 作文格1, 1 page | page 1 as written unturned |
+| `ParityPageDirectionMode=2` (偶数页旋转180°) | 作文格1, 1 page | page 1 as written unturned                                                         |
 
 - The rotation centre is the grid frame's: 20 cells × 8 mm = 160 mm wide; 20 rows × 8 mm + 19 gaps ×
   2.9 mm = 215.1 mm tall (the measured 159.8 × 214.9 is within the per-layout jitter). The pen's start
@@ -255,12 +255,12 @@ and streamed to the fake Grbl (394 lines).
 - The pen origin is the table's top-left corner (the 书写原点 ring sits there).
 - Ink of each cell's first character (mm from the origin):
 
-| Cell | Char | Left | Top | Bottom |
-|---|---|---|---|---|
-| 1 | 你 | 3.04 | −3.35 | −9.78 |
-| 2 | 好 | 85.94 | −3.04 | −8.68 |
-| 3 | 你 | 2.07 | −14.69 | −21.76 |
-| 4 | 好 | 86.02 | −15.25 | −21.10 |
+| Cell | Char | Left  | Top    | Bottom |
+| ---- | ---- | ----- | ------ | ------ |
+| 1    | 你   | 3.04  | −3.35  | −9.78  |
+| 2    | 好   | 85.94 | −3.04  | −8.68  |
+| 3    | 你   | 2.07  | −14.69 | −21.76 |
+| 4    | 好   | 86.02 | −15.25 | −21.10 |
 
 - Vertically the em box is **centred in the row** (glyph tops 2.3–3.0 mm into a 12 mm row; centred
   = 2.5), not set on the row's line like ruled notes.
@@ -276,14 +276,14 @@ and streamed to the fake Grbl (394 lines).
 PenKaku draws 字符格式 with its own factors until a ChiXie3 capture of one line with each format
 (倾斜, 下划线, 删除线, 上标, 下标, 标题, a size change) pins them (`layout/mod.rs` constants):
 
-| Format | PenKaku | To pin from the capture |
-|---|---|---|
-| 倾斜 | shear 12° about the glyph foot, right or left | angle, pivot |
-| 下划线 | one stroke per run per line, 0.12 em below the foot | depth, one stroke or per char |
-| 删除线 | one stroke per run per line at 0.55 em | height |
-| 上标 / 下标 | 0.6 × size; foot raised 0.35 em / lowered 0.15 em | size, shift |
-| 标题 | 1.5 × size; the row keeps its pitch, so on ruled templates the glyph tops reach into the line above | factor (or a bolder pen pass); whether ChiXie3 grows the row, shrinks to fit, or overlaps |
-| 字号 | size relative to the page's (字号 100 = 20 pt in DOCX) | that advances scale with size |
+| Format      | PenKaku                                                                                             | To pin from the capture                                                                   |
+| ----------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 倾斜        | shear 12° about the glyph foot, right or left                                                       | angle, pivot                                                                              |
+| 下划线      | one stroke per run per line, 0.12 em below the foot                                                 | depth, one stroke or per char                                                             |
+| 删除线      | one stroke per run per line at 0.55 em                                                              | height                                                                                    |
+| 上标 / 下标 | 0.6 × size; foot raised 0.35 em / lowered 0.15 em                                                   | size, shift                                                                               |
+| 标题        | 1.5 × size; the row keeps its pitch, so on ruled templates the glyph tops reach into the line above | factor (or a bolder pen pass); whether ChiXie3 grows the row, shrinks to fit, or overlaps |
+| 字号        | size relative to the page's (字号 100 = 20 pt in DOCX)                                              | that advances scale with size                                                             |
 
 Rules waver a little with handwriting on (their own random stream, keyed by the run's last char).
 

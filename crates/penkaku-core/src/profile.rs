@@ -259,7 +259,7 @@ impl PageRotation {
 impl Default for DeviceProfile {
     fn default() -> Self {
         Self {
-            name: "赤写写字机".into(),
+            name: "炽写写字机".into(),
             firmware: Firmware::default(),
             device_type: DeviceType::default(),
             pen_up_z: 0.0,

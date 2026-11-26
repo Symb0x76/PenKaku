@@ -91,7 +91,7 @@ pub fn read(bytes: &[u8]) -> Result<(Font, FontMeta)> {
             _ => continue,
         };
         match e.local_name().as_ref() {
-            b"font" if matches!(e.name().as_ref(), b"penkaku:font" | b"chixie:font") => {
+            b"font" if e.name().as_ref() == b"penkaku:font" => {
                 name = attr(e, "name");
                 source = match (attr(e, "source").as_deref(), attr(e, "cloud-id").and_then(|v| v.parse().ok())) {
                     (Some("cloud"), Some(id)) => FontSource::Cloud { id },
@@ -139,7 +139,7 @@ pub fn read_meta(bytes: &[u8]) -> Option<(FontMeta, usize)> {
             _ => continue,
         };
         match e.local_name().as_ref() {
-            b"font" if matches!(e.name().as_ref(), b"penkaku:font" | b"chixie:font") => {
+            b"font" if e.name().as_ref() == b"penkaku:font" => {
                 name = attr(e, "name");
                 chars = attr(e, "chars").and_then(|v| v.parse().ok());
                 source = match (attr(e, "source").as_deref(), attr(e, "cloud-id").and_then(|v| v.parse().ok())) {
@@ -240,15 +240,6 @@ mod tests {
         f.glyphs.insert('\u{3000}', Glyph { advance: 7.0, strokes: vec![] });
         let svg = write(&f, &meta());
         assert_eq!(svg, write(&f, &meta()), "deterministic");
-        let (back, m) = read(svg.as_bytes()).unwrap();
-        assert_eq!(m, meta());
-        assert_eq!(back, f);
-    }
-
-    #[test]
-    fn fonts_saved_before_the_rename_keep_their_metadata() {
-        let f = Font::from_json(FIXTURE).unwrap();
-        let svg = write(&f, &meta()).replace("penkaku:font", "chixie:font").replace("xmlns:penkaku", "xmlns:chixie").replace(NS, "urn:chixie-rs:font:1");
         let (back, m) = read(svg.as_bytes()).unwrap();
         assert_eq!(m, meta());
         assert_eq!(back, f);

@@ -17,11 +17,11 @@ laser engravers and a "toolbox" of add-ons.
 
 The window has three top-level modes, shown as ribbon tabs (UI, shot 01):
 
-| Tab | Mode | Content |
-|---|---|---|
-| 主页 | backstage | full-window page: 字体 (font library), 模板 (template library), 教程, 账户, 设置, 反馈 |
-| 书写 | writing | Word-like page editor on 笔记 / 表格 / 作文格 paper, font/format ribbon, job box, device drawer |
-| 绘图与激光 | plotting | vector canvas with rulers/grid, shapes, DXF/SVG/image import, text fields, generators |
+| Tab        | Mode      | Content                                                                                         |
+| ---------- | --------- | ----------------------------------------------------------------------------------------------- |
+| 主页       | backstage | full-window page: 字体 (font library), 模板 (template library), 教程, 账户, 设置, 反馈          |
+| 书写       | writing   | Word-like page editor on 笔记 / 表格 / 作文格 paper, font/format ribbon, job box, device drawer |
+| 绘图与激光 | plotting  | vector canvas with rulers/grid, shapes, DXF/SVG/image import, text fields, generators           |
 
 A fourth, contextual ribbon category (页面模板 › 模板管理) appears while editing page templates.
 
@@ -60,16 +60,16 @@ identifier order. Every conflict found is listed in §6.5.
 
 ### 1.4 Confidence legend
 
-| Tag | Meaning |
-|---|---|
-| **[cap]** | confirmed by a wire capture or hardware test |
-| **[UI]** | seen in the live UI |
-| **[high]** | static: docstring or exact UI string |
-| **[ui-form]** | exact Designer form label (`ui.UI_*` constants, `docs/chixie3-analysis/ui-labels.md`): user-visible text and control names in form order; no defaults, ranges or enum values |
-| **[med]** | static: inferred from identifier names / order |
-| **[low]** | guess from weak evidence |
-| **(inferred)** | the sentence is our reading, not the source's |
-| **VERIFY** | must be confirmed (capture, hardware, or the vendor) before relying on it |
+| Tag            | Meaning                                                                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[cap]**      | confirmed by a wire capture or hardware test                                                                                                                                 |
+| **[UI]**       | seen in the live UI                                                                                                                                                          |
+| **[high]**     | static: docstring or exact UI string                                                                                                                                         |
+| **[ui-form]**  | exact Designer form label (`ui.UI_*` constants, `docs/chixie3-analysis/ui-labels.md`): user-visible text and control names in form order; no defaults, ranges or enum values |
+| **[med]**      | static: inferred from identifier names / order                                                                                                                               |
+| **[low]**      | guess from weak evidence                                                                                                                                                     |
+| **(inferred)** | the sentence is our reading, not the source's                                                                                                                                |
+| **VERIFY**     | must be confirmed (capture, hardware, or the vendor) before relying on it                                                                                                    |
 
 ### 1.5 What could not be determined
 
@@ -100,150 +100,150 @@ paper → write on the machine, reliably), **P1** daily-use features of real use
 but secondary, **P3** niche / vendor-specific / not worth porting soon. Effort: **S** ≤ 2 days,
 **M** ≤ 2 weeks, **L** more.
 
-| Area | Feature | Description | PenKaku | Pri | Effort |
-|---|---|---|---|---|---|
-| Editor | 页面编辑器 | WYSIWYG pages, caret, selection, mouse, keys | Done (`editor.rs`, `doc_view.rs`) | P0 | — |
-| Editor | 剪切/复制/粘贴 | internal items + plain text; Excel XML; WPS RTF super/sub | Done (M8: our copies keep formats; Excel / WPS tab text fills cells; WPS RTF not readable through gpui) | P1 | M |
-| Editor | 全选 | Ctrl+A per template type | Done | P0 | — |
-| Editor | 撤销 | ChiXie3: not implemented | Done (undo/redo, better) | P0 | — |
-| Editor | 删除/退格 | incl. "清空所选单元格" confirm for tables | Partial (no tables) | P0 | S |
-| Editor | 方向键/Shift 选择 | caret and selection movement | Done (text); tables missing | P0 | S |
-| Editor | 半格空格 | modifier+Space inserts half space | Done (M3, Shift+Space) | P2 | S |
-| Editor | 查找和替换 | plain substring find / replace / replace all | Done (M8: Ctrl+F / Ctrl+H bar, 区分大小写, 全角半角等同) | P1 | S |
-| Editor | 右键菜单 | page / origin / table / base menus | Done (M8: edit, 查找, 书写此页, 巡边, 框架线, 断点续写, table tools; origin menu M6) | P1 | M |
-| Editor | 插入菜单 | 表格 公式 图表 图片 文本框 形状 内容块 思维导图 (mostly stubs) | Missing | P3 | L |
-| Editor | 字符格式 | 倾斜 下划线 删除线 颜色 上/下标 标题 清除格式 | Done (M8; factors VERIFY, docs/protocol.md) | P2 | M |
-| Editor | 格式刷 | copy format (UI only) | Done (M8: click once, double-click sticky) | P3 | S |
-| Editor | 字体/字号 per selection | font and size of selected characters | Done (M8) | P1 | M |
-| Editor | 对齐 | left / centre / right / justify; vertical in cells | Done (M3; vertical in cells with tables) | P1 | M |
-| Editor | 缩放/单双页 | Ctrl+wheel zoom, single/double page preview | Done (M8) | P2 | S |
-| Editor | 显示框线/行号/页码 | toggles | Done (M8) | P2 | S |
-| Editor | 大文本模式 | visible-item culling for big docs | Not needed (native) | P3 | — |
-| Templates | 笔记 (信纸) | ruled rows, fixed/random count, margins | Done (`template.rs` Ruled) | P0 | — |
-| Templates | 双线文档 | dual-line rows, dashed partition | Done (M7a: upper / lower band; placement VERIFY) | P2 | S |
-| Templates | 笔记分栏 | columns, widths, dividers, 异栏同型 | Partial (M7a: per-column widths; 异栏同型 missing) | P2 | S |
-| Templates | 作文格 | composition grid | Done (`template.rs` Grid) | P0 | — |
-| Templates | 表格模板 | parent cells, internal rows, margins, flags | Done (M7a; matches 2×2 capture) | P1 | L |
-| Templates | 插入表格 / 绘制表格 / 截图生成 | build table frames | Partial (M7a: 插入表格; 截图生成 P3) | P2 | M |
-| Templates | PDF/图片 → 表格框架 | cloud table recognition | Done (M7b, local detector) | P2 | M |
-| Templates | Excel导入配置 | per-page Excel range | Done (M7a) | P2 | S |
-| Templates | 同型标记 | linked cells across pages | Partial (M7a: records only; sync VERIFY) | P3 | M |
-| Templates | 数据源配置 | default / random / custom cell data | Done (M7a) | P2 | M |
-| Templates | 合并/拆分单元格 | merge, full split, split handles | Done (M7a; drag lines to resize) | P2 | M |
-| Templates | 内边距识别 | detect left padding from background image | Done (M7b) | P3 | S |
-| Templates | 页面缩略图面板 | page list, background preview, opacity | Done (M7a page list, M7b background + 透明度; no thumbnails) | P2 | S |
-| Templates | 模板管理 UI | create / save / delete / export, validation | Done (M7a validation; M7c 导入 / 导出 SVG, ZIP, XLSX) | P1 | S |
-| Templates | `.cx` import | note / composition pickles | Done (`chixie3_templates.rs`) | P1 | — |
-| Templates | 表格模板 import | Fernet + pickle table templates | Missing | P2 | M |
-| Templates | 书写原点 | origin marker, 纸张/框线/自定义 | Done (M6; right-click menu M7a) | P1 | M |
-| Templates | 模板库 (cloud) | online templates: 绘图/激光/写字 | Partial (M7c local library + gallery; online needs a backend, M10) | P3 | M |
-| Fonts | 字体库 browse | 在线字体 / 我的收藏 / 我的录制, filter, sort, search, pager | Partial (no 录制, no filter/sort UI) | P1 | S |
-| Fonts | 收藏/取消收藏 | `font/collect_a_font`, 30-font cap | Dropped (BOSS, 2026-11-17) | — | — |
-| Fonts | 主字体 slots | 主线/主英文/主符号/主数字 font | Done (M4, local) | P1 | M |
-| Fonts | 字体调用/混用 | per char-type fallback lists; weighted mix | Done (M4) | P1 | M |
-| Fonts | 缺字处理 | auto-substitute, 查看缺失字符 dialog | Done (M4) | P1 | S |
-| Fonts | 今日试用字体 | daily free font for ordinary users | Dropped (BOSS, 2026-11-17) | — | — |
-| Fonts | 字体下拉框 | regions, hover preview | Partial (`font_preview.rs` picker) | P1 | S |
-| Fonts | 本地字体 (offline) | ChiXie3 has none | Done (M4: SVG font folders, watched) | P0 | — |
-| Fonts | 录制字体 | WeChat mini-program guide only | Not planned (link only) | P3 | S |
-| Effects | 字符间隔/空格/垂直偏移/首字不对齐 | layout-time jitter | Done (`handwriting.rs`) | P0 | — |
-| Effects | 智能垂直偏移 | position-proportional drift | Done (M5, per-row drift; formula VERIFY) | P2 | S |
-| Effects | 首行缩进 | Tab / button inserts random indent | Done (M3) | P1 | S |
-| Effects | 基础变形 | scale, rotate, stroke jitter, tail removal | Done (M5) | P1 | S |
-| Effects | 字形变形 (TPS) | thin-plate-spline warp with similarity check | Done (M5, TPS without the similarity check) | P2 | M |
-| Effects | 字符微调 | per-char font/size/offset/thin/fat/apply-to-same | Done (M5; card matches the dialog) | P2 | M |
-| Effects | 重复轨迹/异常宽度优化 | glyph clean-ups | Done (M4, 字体优化) | P2 | S |
-| Effects | 书写优化 (路径) | Douglas-Peucker / Catmull-Rom / uniform | Done (M5) | P2 | S |
-| Typeset | 输入排版 / 换行 | width-based row fill, pages | Done (`layout.rs`) | P0 | — |
-| Typeset | 作文格 + 分词 | jieba word blocks kept on one row | Done (M3, option off by default) | P2 | M |
-| Typeset | 合并内容 | several chars in one grid cell | Done (M3) | P3 | S |
-| Typeset | 全角/半角 | auto conversion | Missing | P2 | S |
-| Typeset | 位置合理性检测 | warn on bad line-start/end punctuation | Done (M3, status-bar badge) | P1 | S |
-| Typeset | 避头尾 | automatic kinsoku (ChiXie3 lacks it) | Done (M3) | P1 | S |
-| Typeset | 表格单元格排版 / 溢出 | rows in cells, 3 overflow plans, batch | Done (M7a) | P1 | L |
-| Device | 设备列表 / 参数 | named profiles, firmware, type, speed, pen, axis map | Done (`device_params.rs`) | P0 | — |
-| Device | `.cset` import/export | pickled device params | Partial (config.ini import) | P2 | S |
-| Device | USB 连接 / 自动检测 | CH340 / GD32, baud probe | Done (`transport.rs`) | P0 | — |
-| Device | 自动连接机器 | connect when a port appears | Missing | P1 | S |
-| Device | CH340 驱动检查 | download + install prompt | Not planned | P3 | — |
-| Device | Grbl 报警解锁 | Alarm → `$X` prompt | Partial (解锁 button) | P0 | S |
-| Device | Grbl 错误翻译 | `error:N` → Chinese | Missing | P1 | S |
-| Device | 无线 (Telnet) | ESP32 only | Done (core) / untested | P1 | S |
-| Device | 无线发现 | arp + UPnP `description.xml` | Partial (core, untested) | P2 | S |
-| Device | 手动添加网络设备 | name/IP/port | Partial | P1 | S |
-| Device | ESP32 配网 | STA / AP / BT / none | Missing | P2 | M |
-| Device | 固件参数 ($$) | easy/expert editor, `$RST=*` | Done (M9: table editor, numeric + named keys, typed-confirm `$RST=*`) | P2 | M |
-| Device | 炽写ESP主板设置 | PWM, axis follow, CoreXY, radio | Missing | P3 | M |
-| Device | 炽写 N1 card | speed/direction/pressure modes, beep | Missing | P2 | M |
-| Device | 炽写设备高级设置 | N1 TMC driver + per-axis parameters (current, microstep, stall, offsets) | Missing | P3 | M |
-| Device | N1 固件更新 / 设备测试 | `$WHO`, bootloader, admin tests | Not planned | P3 | — |
-| Device | 手动控制 | jog, pen, origin, home, Z trim | Done (`device.rs` GUI) | P0 | — |
-| Device | 命令窗口 / 自定义命令 | console, custom buttons | Partial (console) | P2 | S |
-| Device | 坐标位置显示 | status-bar position | Done | P1 | — |
-| Jobs | 书写管理 | page list, start/pause/resume/stop | Done (`device.rs`) | P0 | — |
-| Jobs | 书写此页 | write a chosen page | Partial | P1 | S |
-| Jobs | 换纸 | sheet change between pages | Done | P0 | — |
-| Jobs | 断点续写 | resume from a chosen character | Partial (page/line toast) | P0 | M |
-| Jobs | 多色绘制 / 换笔 | manual / automatic pen change | Done (M6; auto slots in settings file only) | P2 | M |
-| Jobs | 页面旋转 (奇偶页) | 180° rotation of odd/even pages | Done (M6; matches capture) | P2 | S |
-| Jobs | 自动换纸设备 | Marlin sheet feeder, loops | Missing | P3 | M |
-| Jobs | 工作区巡边/绘制框架线 | trace bounds; draw template lines | Missing | P1 | S |
-| Jobs | 上传SD卡书写 | upload page to TF and run | Done (M6; untested on a board) | P2 | S |
-| G-code | 书写 G-code | initial/body/end, signed coords | Done (`penkaku-output`) | P0 | — |
-| G-code | 路径规划 之/弓 | row order | Done (M6; matches capture) | P1 | S |
-| G-code | 起点模式 | 纸张/框线/自定义 origin | Done (M6) | P1 | S |
-| G-code | 写完位置 | 原点 / 原点左2cm / 任务结束点 | Partial (always X0 Y0) | P1 | S |
-| G-code | 抬落笔 per device type | stepper / servo / magnet / laser / 3D / custom | Partial (Z + custom) | P1 | S |
-| G-code | 导出 G-code | one file per page | Done (`file_ops.rs`) | P0 | — |
-| G-code | 笔锋测试 | Z lift along stroke tail | Done (M6, experimental) | P3 | S |
-| G-code | 路径优化插件 | user Python RouteOptimizer | Not planned (replace) | P3 | M |
-| Plot | 绘图画布 | rulers, grid, snap, zoom, select/pan | Missing | P2 | L |
-| Plot | 纸型设置 | standard / custom paper, presets | Missing | P2 | S |
-| Plot | 基本图形 | point line rect circle/ellipse polyline curve polygon arc | Missing | P2 | M |
-| Plot | 图形属性 / 线型 | numeric edit, CAD linetypes | Missing | P2 | M |
-| Plot | 图层 | add / delete / merge / order / visible / lock | Missing | P3 | M |
-| Plot | 导入 CAD (DXF) | ezdxf entities, units, fit | Missing | P2 | M |
-| Plot | 导入 SVG | svgelements paths | Missing | P2 | M |
-| Plot | 导入图片 | binarise, scan-line hatch | Missing | P2 | M |
-| Plot | 文本 / 文本框 / 表格 | handwriting text fields on canvas | Missing | P2 | L |
-| Plot | 酷玩: 印章 / 迷宫 | seal and maze generators | Missing | P3 | M |
-| Plot | 酷玩: 分形 / 立体字 | stubs | Not planned | P3 | — |
-| Plot | 拟人 / AI绘图 | buttons only | Not planned | P3 | — |
-| Plot | 模板库 (绘图) | online drawing templates | Missing | P3 | M |
-| Plot | 激光模式 | `DrawOrLaser` switch, no laser options | Missing | P3 | M |
-| Toolbox | 拓竹写字助手 | Bambu Lab FTPS upload | Missing | P3 | M |
-| Toolbox | Gcode预览执行器 | preview / run G-code (web page) | Missing | P1 | M |
-| Toolbox | 插件管理 | in-process Python | Not planned | P3 | — |
-| Toolbox | 任务编程 | placeholder in ChiXie3 (no handler) | Not planned | P3 | — |
-| Toolbox | 自动换纸控制 | see Jobs | Missing | P3 | M |
-| Toolbox | 固件烧录 | placeholder in ChiXie3 (no handler) | Not planned | P3 | — |
-| Toolbox | 一笔画【简易】 | coordinate list → one path | Missing | P3 | S |
-| Toolbox | 多设备群控 | placeholder in ChiXie3 (no handler) | Not planned | P3 | — |
-| Toolbox | 远程文件 | TF card browser | Partial (core) | P2 | M |
-| Toolbox | 字体优化 | unify glyph sizes, clean routes | Missing | P2 | S |
-| AI | 炽写AI (小炽) | Spark LLM edit/draft menus | Missing | P3 | M |
-| Account | 登录 / 自动登录 | account + password | Done (optional, keyring) | P0 | — |
-| Account | 心跳 / 在线检测 | heartbeat; revoke on failure | Done (`session.rs`) | P1 | — |
-| Account | 用户信息 | role, VIP, expiry | Partial (account page) | P2 | S |
-| Account | 升级/注册码/邀请码 | pay, license, invitation | Not planned | P3 | M |
-| Cloud | 参数同步 | `config/font_config` | Missing | P3 | S |
-| Cloud | 专属配置 | license-bound config.ini | Not planned | P3 | — |
-| Cloud | 自动升级 | MD5 diff download | Missing (replace) | P2 | M |
-| Cloud | 缺字上报 / 退出信息 | `user/collect_*` | Not planned | P3 | S |
-| Settings | 设置 dialog (7 pages) | 常规 写字偏好 多色 绘图 变形 主题 页面旋转 | Partial (`style_dialog.rs`, options) | P1 | M |
-| Files | `.cdoc` | ChiXie document | Missing (`.chx` instead) | P2 | M |
-| Files | 导入 txt/docx/pdf/xlsx | parsers + overwrite/append | Done (M8: 覆盖 / 追加 / 在光标处插入; GB18030; PDF text via lopdf) | P1 | M |
-| Files | 批量导入 (批量建页) | one page per list line | Done (M7a: list and xlsx) | P2 | S |
-| Files | 打印文字/打印背景图 | QPrinter | Done (M8: vector PDF, OS viewer prints) | P3 | M |
-| Files | 草稿自动保存 | ChiXie3 has none | Done (better) | P1 | — |
-| Shell | ribbon / QAT / status bar | Word-like chrome | Done (`ribbon.rs`, `app.rs`) | P0 | — |
-| Shell | 主页 backstage | fonts, templates, tutorial, account, settings, feedback | Partial (`backstage.rs`) | P1 | S |
-| Shell | 托盘 / 关闭确认 / 窗口记忆 | tray, close confirm, geometry | Partial (M6 planned) | P2 | S |
-| Shell | 屏幕分辨率检测 | restart prompt | Not needed | P3 | — |
-| Shell | 教程与售后 / 反馈 / 在线客服 | web links | Missing | P3 | S |
-| Shell | 更新日志 | after upgrade | Missing | P3 | S |
-| Shell | 异常提示 | global exception dialog + log | Partial (logging) | P1 | S |
-| Shell | 多语言 | CN / EN `.qm` | Missing (M6) | P2 | M |
+| Area      | Feature                           | Description                                                              | PenKaku                                                                                                 | Pri | Effort |
+| --------- | --------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --- | ------ |
+| Editor    | 页面编辑器                        | WYSIWYG pages, caret, selection, mouse, keys                             | Done (`editor.rs`, `doc_view.rs`)                                                                       | P0  | —      |
+| Editor    | 剪切/复制/粘贴                    | internal items + plain text; Excel XML; WPS RTF super/sub                | Done (M8: our copies keep formats; Excel / WPS tab text fills cells; WPS RTF not readable through gpui) | P1  | M      |
+| Editor    | 全选                              | Ctrl+A per template type                                                 | Done                                                                                                    | P0  | —      |
+| Editor    | 撤销                              | ChiXie3: not implemented                                                 | Done (undo/redo, better)                                                                                | P0  | —      |
+| Editor    | 删除/退格                         | incl. "清空所选单元格" confirm for tables                                | Partial (no tables)                                                                                     | P0  | S      |
+| Editor    | 方向键/Shift 选择                 | caret and selection movement                                             | Done (text); tables missing                                                                             | P0  | S      |
+| Editor    | 半格空格                          | modifier+Space inserts half space                                        | Done (M3, Shift+Space)                                                                                  | P2  | S      |
+| Editor    | 查找和替换                        | plain substring find / replace / replace all                             | Done (M8: Ctrl+F / Ctrl+H bar, 区分大小写, 全角半角等同)                                                | P1  | S      |
+| Editor    | 右键菜单                          | page / origin / table / base menus                                       | Done (M8: edit, 查找, 书写此页, 巡边, 框架线, 断点续写, table tools; origin menu M6)                    | P1  | M      |
+| Editor    | 插入菜单                          | 表格 公式 图表 图片 文本框 形状 内容块 思维导图 (mostly stubs)           | Missing                                                                                                 | P3  | L      |
+| Editor    | 字符格式                          | 倾斜 下划线 删除线 颜色 上/下标 标题 清除格式                            | Done (M8; factors VERIFY, docs/protocol.md)                                                             | P2  | M      |
+| Editor    | 格式刷                            | copy format (UI only)                                                    | Done (M8: click once, double-click sticky)                                                              | P3  | S      |
+| Editor    | 字体/字号 per selection           | font and size of selected characters                                     | Done (M8)                                                                                               | P1  | M      |
+| Editor    | 对齐                              | left / centre / right / justify; vertical in cells                       | Done (M3; vertical in cells with tables)                                                                | P1  | M      |
+| Editor    | 缩放/单双页                       | Ctrl+wheel zoom, single/double page preview                              | Done (M8)                                                                                               | P2  | S      |
+| Editor    | 显示框线/行号/页码                | toggles                                                                  | Done (M8)                                                                                               | P2  | S      |
+| Editor    | 大文本模式                        | visible-item culling for big docs                                        | Not needed (native)                                                                                     | P3  | —      |
+| Templates | 笔记 (信纸)                       | ruled rows, fixed/random count, margins                                  | Done (`template.rs` Ruled)                                                                              | P0  | —      |
+| Templates | 双线文档                          | dual-line rows, dashed partition                                         | Done (M7a: upper / lower band; placement VERIFY)                                                        | P2  | S      |
+| Templates | 笔记分栏                          | columns, widths, dividers, 异栏同型                                      | Partial (M7a: per-column widths; 异栏同型 missing)                                                      | P2  | S      |
+| Templates | 作文格                            | composition grid                                                         | Done (`template.rs` Grid)                                                                               | P0  | —      |
+| Templates | 表格模板                          | parent cells, internal rows, margins, flags                              | Done (M7a; matches 2×2 capture)                                                                         | P1  | L      |
+| Templates | 插入表格 / 绘制表格 / 截图生成    | build table frames                                                       | Partial (M7a: 插入表格; 截图生成 P3)                                                                    | P2  | M      |
+| Templates | PDF/图片 → 表格框架               | cloud table recognition                                                  | Done (M7b, local detector)                                                                              | P2  | M      |
+| Templates | Excel导入配置                     | per-page Excel range                                                     | Done (M7a)                                                                                              | P2  | S      |
+| Templates | 同型标记                          | linked cells across pages                                                | Partial (M7a: records only; sync VERIFY)                                                                | P3  | M      |
+| Templates | 数据源配置                        | default / random / custom cell data                                      | Done (M7a)                                                                                              | P2  | M      |
+| Templates | 合并/拆分单元格                   | merge, full split, split handles                                         | Done (M7a; drag lines to resize)                                                                        | P2  | M      |
+| Templates | 内边距识别                        | detect left padding from background image                                | Done (M7b)                                                                                              | P3  | S      |
+| Templates | 页面缩略图面板                    | page list, background preview, opacity                                   | Done (M7a page list, M7b background + 透明度; no thumbnails)                                            | P2  | S      |
+| Templates | 模板管理 UI                       | create / save / delete / export, validation                              | Done (M7a validation; M7c 导入 / 导出 SVG, ZIP, XLSX)                                                   | P1  | S      |
+| Templates | `.cx` import                      | note / composition pickles                                               | Done (`chixie3_templates.rs`)                                                                           | P1  | —      |
+| Templates | 表格模板 import                   | Fernet + pickle table templates                                          | Missing                                                                                                 | P2  | M      |
+| Templates | 书写原点                          | origin marker, 纸张/框线/自定义                                          | Done (M6; right-click menu M7a)                                                                         | P1  | M      |
+| Templates | 模板库 (cloud)                    | online templates: 绘图/激光/写字                                         | Partial (M7c local library + gallery; online needs a backend, M10)                                      | P3  | M      |
+| Fonts     | 字体库 browse                     | 在线字体 / 我的收藏 / 我的录制, filter, sort, search, pager              | Partial (no 录制, no filter/sort UI)                                                                    | P1  | S      |
+| Fonts     | 收藏/取消收藏                     | `font/collect_a_font`, 30-font cap                                       | Dropped (BOSS, 2026-11-17)                                                                              | —   | —      |
+| Fonts     | 主字体 slots                      | 主线/主英文/主符号/主数字 font                                           | Done (M4, local)                                                                                        | P1  | M      |
+| Fonts     | 字体调用/混用                     | per char-type fallback lists; weighted mix                               | Done (M4)                                                                                               | P1  | M      |
+| Fonts     | 缺字处理                          | auto-substitute, 查看缺失字符 dialog                                     | Done (M4)                                                                                               | P1  | S      |
+| Fonts     | 今日试用字体                      | daily free font for ordinary users                                       | Dropped (BOSS, 2026-11-17)                                                                              | —   | —      |
+| Fonts     | 字体下拉框                        | regions, hover preview                                                   | Partial (`font_preview.rs` picker)                                                                      | P1  | S      |
+| Fonts     | 本地字体 (offline)                | ChiXie3 has none                                                         | Done (M4: SVG font folders, watched)                                                                    | P0  | —      |
+| Fonts     | 录制字体                          | WeChat mini-program guide only                                           | Not planned (link only)                                                                                 | P3  | S      |
+| Effects   | 字符间隔/空格/垂直偏移/首字不对齐 | layout-time jitter                                                       | Done (`handwriting.rs`)                                                                                 | P0  | —      |
+| Effects   | 智能垂直偏移                      | position-proportional drift                                              | Done (M5, per-row drift; formula VERIFY)                                                                | P2  | S      |
+| Effects   | 首行缩进                          | Tab / button inserts random indent                                       | Done (M3)                                                                                               | P1  | S      |
+| Effects   | 基础变形                          | scale, rotate, stroke jitter, tail removal                               | Done (M5)                                                                                               | P1  | S      |
+| Effects   | 字形变形 (TPS)                    | thin-plate-spline warp with similarity check                             | Done (M5, TPS without the similarity check)                                                             | P2  | M      |
+| Effects   | 字符微调                          | per-char font/size/offset/thin/fat/apply-to-same                         | Done (M5; card matches the dialog)                                                                      | P2  | M      |
+| Effects   | 重复轨迹/异常宽度优化             | glyph clean-ups                                                          | Done (M4, 字体优化)                                                                                     | P2  | S      |
+| Effects   | 书写优化 (路径)                   | Douglas-Peucker / Catmull-Rom / uniform                                  | Done (M5)                                                                                               | P2  | S      |
+| Typeset   | 输入排版 / 换行                   | width-based row fill, pages                                              | Done (`layout.rs`)                                                                                      | P0  | —      |
+| Typeset   | 作文格 + 分词                     | jieba word blocks kept on one row                                        | Done (M3, option off by default)                                                                        | P2  | M      |
+| Typeset   | 合并内容                          | several chars in one grid cell                                           | Done (M3)                                                                                               | P3  | S      |
+| Typeset   | 全角/半角                         | auto conversion                                                          | Missing                                                                                                 | P2  | S      |
+| Typeset   | 位置合理性检测                    | warn on bad line-start/end punctuation                                   | Done (M3, status-bar badge)                                                                             | P1  | S      |
+| Typeset   | 避头尾                            | automatic kinsoku (ChiXie3 lacks it)                                     | Done (M3)                                                                                               | P1  | S      |
+| Typeset   | 表格单元格排版 / 溢出             | rows in cells, 3 overflow plans, batch                                   | Done (M7a)                                                                                              | P1  | L      |
+| Device    | 设备列表 / 参数                   | named profiles, firmware, type, speed, pen, axis map                     | Done (`device_params.rs`)                                                                               | P0  | —      |
+| Device    | `.cset` import/export             | pickled device params                                                    | Partial (config.ini import)                                                                             | P2  | S      |
+| Device    | USB 连接 / 自动检测               | CH340 / GD32, baud probe                                                 | Done (`transport.rs`)                                                                                   | P0  | —      |
+| Device    | 自动连接机器                      | connect when a port appears                                              | Missing                                                                                                 | P1  | S      |
+| Device    | CH340 驱动检查                    | download + install prompt                                                | Not planned                                                                                             | P3  | —      |
+| Device    | Grbl 报警解锁                     | Alarm → `$X` prompt                                                      | Partial (解锁 button)                                                                                   | P0  | S      |
+| Device    | Grbl 错误翻译                     | `error:N` → Chinese                                                      | Missing                                                                                                 | P1  | S      |
+| Device    | 无线 (Telnet)                     | ESP32 only                                                               | Done (core) / untested                                                                                  | P1  | S      |
+| Device    | 无线发现                          | arp + UPnP `description.xml`                                             | Partial (core, untested)                                                                                | P2  | S      |
+| Device    | 手动添加网络设备                  | name/IP/port                                                             | Partial                                                                                                 | P1  | S      |
+| Device    | ESP32 配网                        | STA / AP / BT / none                                                     | Missing                                                                                                 | P2  | M      |
+| Device    | 固件参数 ($$)                     | easy/expert editor, `$RST=*`                                             | Done (M9: table editor, numeric + named keys, typed-confirm `$RST=*`)                                   | P2  | M      |
+| Device    | 炽写ESP主板设置                   | PWM, axis follow, CoreXY, radio                                          | Missing                                                                                                 | P3  | M      |
+| Device    | 炽写 N1 card                      | speed/direction/pressure modes, beep                                     | Missing                                                                                                 | P2  | M      |
+| Device    | 炽写设备高级设置                  | N1 TMC driver + per-axis parameters (current, microstep, stall, offsets) | Missing                                                                                                 | P3  | M      |
+| Device    | N1 固件更新 / 设备测试            | `$WHO`, bootloader, admin tests                                          | Not planned                                                                                             | P3  | —      |
+| Device    | 手动控制                          | jog, pen, origin, home, Z trim                                           | Done (`device.rs` GUI)                                                                                  | P0  | —      |
+| Device    | 命令窗口 / 自定义命令             | console, custom buttons                                                  | Partial (console)                                                                                       | P2  | S      |
+| Device    | 坐标位置显示                      | status-bar position                                                      | Done                                                                                                    | P1  | —      |
+| Jobs      | 书写管理                          | page list, start/pause/resume/stop                                       | Done (`device.rs`)                                                                                      | P0  | —      |
+| Jobs      | 书写此页                          | write a chosen page                                                      | Partial                                                                                                 | P1  | S      |
+| Jobs      | 换纸                              | sheet change between pages                                               | Done                                                                                                    | P0  | —      |
+| Jobs      | 断点续写                          | resume from a chosen character                                           | Partial (page/line toast)                                                                               | P0  | M      |
+| Jobs      | 多色绘制 / 换笔                   | manual / automatic pen change                                            | Done (M6; auto slots in settings file only)                                                             | P2  | M      |
+| Jobs      | 页面旋转 (奇偶页)                 | 180° rotation of odd/even pages                                          | Done (M6; matches capture)                                                                              | P2  | S      |
+| Jobs      | 自动换纸设备                      | Marlin sheet feeder, loops                                               | Missing                                                                                                 | P3  | M      |
+| Jobs      | 工作区巡边/绘制框架线             | trace bounds; draw template lines                                        | Missing                                                                                                 | P1  | S      |
+| Jobs      | 上传SD卡书写                      | upload page to TF and run                                                | Done (M6; untested on a board)                                                                          | P2  | S      |
+| G-code    | 书写 G-code                       | initial/body/end, signed coords                                          | Done (`penkaku-output`)                                                                                 | P0  | —      |
+| G-code    | 路径规划 之/弓                    | row order                                                                | Done (M6; matches capture)                                                                              | P1  | S      |
+| G-code    | 起点模式                          | 纸张/框线/自定义 origin                                                  | Done (M6)                                                                                               | P1  | S      |
+| G-code    | 写完位置                          | 原点 / 原点左2cm / 任务结束点                                            | Partial (always X0 Y0)                                                                                  | P1  | S      |
+| G-code    | 抬落笔 per device type            | stepper / servo / magnet / laser / 3D / custom                           | Partial (Z + custom)                                                                                    | P1  | S      |
+| G-code    | 导出 G-code                       | one file per page                                                        | Done (`file_ops.rs`)                                                                                    | P0  | —      |
+| G-code    | 笔锋测试                          | Z lift along stroke tail                                                 | Done (M6, experimental)                                                                                 | P3  | S      |
+| G-code    | 路径优化插件                      | user Python RouteOptimizer                                               | Not planned (replace)                                                                                   | P3  | M      |
+| Plot      | 绘图画布                          | rulers, grid, snap, zoom, select/pan                                     | Missing                                                                                                 | P2  | L      |
+| Plot      | 纸型设置                          | standard / custom paper, presets                                         | Missing                                                                                                 | P2  | S      |
+| Plot      | 基本图形                          | point line rect circle/ellipse polyline curve polygon arc                | Missing                                                                                                 | P2  | M      |
+| Plot      | 图形属性 / 线型                   | numeric edit, CAD linetypes                                              | Missing                                                                                                 | P2  | M      |
+| Plot      | 图层                              | add / delete / merge / order / visible / lock                            | Missing                                                                                                 | P3  | M      |
+| Plot      | 导入 CAD (DXF)                    | ezdxf entities, units, fit                                               | Missing                                                                                                 | P2  | M      |
+| Plot      | 导入 SVG                          | svgelements paths                                                        | Missing                                                                                                 | P2  | M      |
+| Plot      | 导入图片                          | binarise, scan-line hatch                                                | Missing                                                                                                 | P2  | M      |
+| Plot      | 文本 / 文本框 / 表格              | handwriting text fields on canvas                                        | Missing                                                                                                 | P2  | L      |
+| Plot      | 酷玩: 印章 / 迷宫                 | seal and maze generators                                                 | Missing                                                                                                 | P3  | M      |
+| Plot      | 酷玩: 分形 / 立体字               | stubs                                                                    | Not planned                                                                                             | P3  | —      |
+| Plot      | 拟人 / AI绘图                     | buttons only                                                             | Not planned                                                                                             | P3  | —      |
+| Plot      | 模板库 (绘图)                     | online drawing templates                                                 | Missing                                                                                                 | P3  | M      |
+| Plot      | 激光模式                          | `DrawOrLaser` switch, no laser options                                   | Missing                                                                                                 | P3  | M      |
+| Toolbox   | 拓竹写字助手                      | Bambu Lab FTPS upload                                                    | Missing                                                                                                 | P3  | M      |
+| Toolbox   | Gcode预览执行器                   | preview / run G-code (web page)                                          | Missing                                                                                                 | P1  | M      |
+| Toolbox   | 插件管理                          | in-process Python                                                        | Not planned                                                                                             | P3  | —      |
+| Toolbox   | 任务编程                          | placeholder in ChiXie3 (no handler)                                      | Not planned                                                                                             | P3  | —      |
+| Toolbox   | 自动换纸控制                      | see Jobs                                                                 | Missing                                                                                                 | P3  | M      |
+| Toolbox   | 固件烧录                          | placeholder in ChiXie3 (no handler)                                      | Not planned                                                                                             | P3  | —      |
+| Toolbox   | 一笔画【简易】                    | coordinate list → one path                                               | Missing                                                                                                 | P3  | S      |
+| Toolbox   | 多设备群控                        | placeholder in ChiXie3 (no handler)                                      | Not planned                                                                                             | P3  | —      |
+| Toolbox   | 远程文件                          | TF card browser                                                          | Partial (core)                                                                                          | P2  | M      |
+| Toolbox   | 字体优化                          | unify glyph sizes, clean routes                                          | Missing                                                                                                 | P2  | S      |
+| AI        | 炽写AI (小炽)                     | Spark LLM edit/draft menus                                               | Missing                                                                                                 | P3  | M      |
+| Account   | 登录 / 自动登录                   | account + password                                                       | Done (optional, keyring)                                                                                | P0  | —      |
+| Account   | 心跳 / 在线检测                   | heartbeat; revoke on failure                                             | Done (`session.rs`)                                                                                     | P1  | —      |
+| Account   | 用户信息                          | role, VIP, expiry                                                        | Partial (account page)                                                                                  | P2  | S      |
+| Account   | 升级/注册码/邀请码                | pay, license, invitation                                                 | Not planned                                                                                             | P3  | M      |
+| Cloud     | 参数同步                          | `config/font_config`                                                     | Missing                                                                                                 | P3  | S      |
+| Cloud     | 专属配置                          | license-bound config.ini                                                 | Not planned                                                                                             | P3  | —      |
+| Cloud     | 自动升级                          | MD5 diff download                                                        | Missing (replace)                                                                                       | P2  | M      |
+| Cloud     | 缺字上报 / 退出信息               | `user/collect_*`                                                         | Not planned                                                                                             | P3  | S      |
+| Settings  | 设置 dialog (7 pages)             | 常规 写字偏好 多色 绘图 变形 主题 页面旋转                               | Partial (`style_dialog.rs`, options)                                                                    | P1  | M      |
+| Files     | `.cdoc`                           | ChiXie document                                                          | Missing (`.chx` instead)                                                                                | P2  | M      |
+| Files     | 导入 txt/docx/pdf/xlsx            | parsers + overwrite/append                                               | Done (M8: 覆盖 / 追加 / 在光标处插入; GB18030; PDF text via lopdf)                                      | P1  | M      |
+| Files     | 批量导入 (批量建页)               | one page per list line                                                   | Done (M7a: list and xlsx)                                                                               | P2  | S      |
+| Files     | 打印文字/打印背景图               | QPrinter                                                                 | Done (M8: vector PDF, OS viewer prints)                                                                 | P3  | M      |
+| Files     | 草稿自动保存                      | ChiXie3 has none                                                         | Done (better)                                                                                           | P1  | —      |
+| Shell     | ribbon / QAT / status bar         | Word-like chrome                                                         | Done (`ribbon.rs`, `app.rs`)                                                                            | P0  | —      |
+| Shell     | 主页 backstage                    | fonts, templates, tutorial, account, settings, feedback                  | Partial (`backstage.rs`)                                                                                | P1  | S      |
+| Shell     | 托盘 / 关闭确认 / 窗口记忆        | tray, close confirm, geometry                                            | Partial (M6 planned)                                                                                    | P2  | S      |
+| Shell     | 屏幕分辨率检测                    | restart prompt                                                           | Not needed                                                                                              | P3  | —      |
+| Shell     | 教程与售后 / 反馈 / 在线客服      | web links                                                                | Missing                                                                                                 | P3  | S      |
+| Shell     | 更新日志                          | after upgrade                                                            | Missing                                                                                                 | P3  | S      |
+| Shell     | 异常提示                          | global exception dialog + log                                            | Partial (logging)                                                                                       | P1  | S      |
+| Shell     | 多语言                            | CN / EN `.qm`                                                            | Missing (M6)                                                                                            | P2  | M      |
 
 ## 3. Features by area
 
@@ -696,7 +696,7 @@ populated, so it is server-driven (conflict; live wins).
 **PenKaku today:** Partial (M7c), local only (ChiXie3 has no template backend):
 - library folder `Documents/penkaku/Templates` (movable, 选项 › 模板) plus read-only extra folders,
   watched; one SVG per template: the paper drawn at real size (opens in any image viewer), the
-  template as TOML in `<metadata id="chixie-template">` (TOML rather than `data-*` attributes:
+  template as TOML in `<metadata id="penkaku-template">` (TOML rather than `data-*` attributes:
   nested table data stays readable), page backgrounds embedded as PNG;
 - 文件 › 新建 is the gallery: 在线模板 (shows that it needs a server) / 我的模板 / 我的收藏, ChiXie3's
   标签, 排序 (时间最新 / 收藏优先 / 名称), search, live previews, ☆ 收藏;
@@ -1692,18 +1692,18 @@ and the exact titles / subtitles of all ten cards [ui-form], but the controller
 `TreasureBoxDialog` has only seven `on_*_clicked` handlers, and clicking them opens nothing, also
 in an elevated session (UI, 2026-11-07).
 
-| Tool (UI) | Subtitle (UI) | Static class |
-|---|---|---|
-| 拓竹写字助手 | 输出Gcode至拓竹设备 | `BambuLabAssistantDialog` |
-| Gcode预览执行器 | 导入Gcode，预览/执行 | `GcodeToolDialog` (web page) |
-| 插件管理 | 目前仅用于开发者使用 | `PluginEditDialog` |
-| 任务编程 | 手动灵活编排任务 | — |
-| 自动换纸控制 | 目前仅适配部分换纸机器 | `AutomaticPaperDeviceDialog` (§3.7) |
-| 固件烧录 | 常用控制板烧录固件 | — |
-| 一笔画【简易】 | 输入坐标集，一笔绘制 | `OneStrokeDrawingDialog` |
-| 多设备群控 | 设备群控与任务分配 | — |
-| 远程文件 | 管理远程TF卡文件 | `SDCardFileManagementDialog` |
-| 字体优化 | 优化部分字体问题 | font data optimise (§3.3) |
+| Tool (UI)       | Subtitle (UI)          | Static class                        |
+| --------------- | ---------------------- | ----------------------------------- |
+| 拓竹写字助手    | 输出Gcode至拓竹设备    | `BambuLabAssistantDialog`           |
+| Gcode预览执行器 | 导入Gcode，预览/执行   | `GcodeToolDialog` (web page)        |
+| 插件管理        | 目前仅用于开发者使用   | `PluginEditDialog`                  |
+| 任务编程        | 手动灵活编排任务       | —                                   |
+| 自动换纸控制    | 目前仅适配部分换纸机器 | `AutomaticPaperDeviceDialog` (§3.7) |
+| 固件烧录        | 常用控制板烧录固件     | —                                   |
+| 一笔画【简易】  | 输入坐标集，一笔绘制   | `OneStrokeDrawingDialog`            |
+| 多设备群控      | 设备群控与任务分配     | —                                   |
+| 远程文件        | 管理远程TF卡文件       | `SDCardFileManagementDialog`        |
+| 字体优化        | 优化部分字体问题       | font data optimise (§3.3)           |
 
 #### Bambu Lab writing assistant (拓竹写字助手)
 **ChiXie3:** dialog 拓竹助手 [UI][ui-form `UI_BambuLabAssistantDialog`; field order 打印机IP：(自动搜索), 访问码：(连接设备),
@@ -1908,15 +1908,15 @@ promo tip ("本周店铺所有配件8折！", "前往购买") likely server-driv
 **ChiXie3:** singleton dialog 设置 with seven pages [UI m-settings, c-12…c-17]; saved on close
 (`saveData` on `QEvent.Close`); "?" opens the website (B §C) [high].
 
-| Page | Controls (UI, defaults) | Config keys |
-|---|---|---|
-| 常规设置 | 默认功能 写字功能; 参数同步 开启; 语言 简体中文; 设备管理 默认收起 | `[GeneralConfig] Default_Function=0, Synchronization_Parameters=0, Language=0, DeviceManagerStatus=0` |
-| 写字偏好 | 字符间隔 中 0.6–1.1 / 英 0.5–1.0; 空格宽度 中 5.0–7.0 / 英 2.0–3.0; 首行缩进 15.5–17.0; 垂直偏移 0.0–0.3, ☐启用智能偏移(同向偏移); 路径规划 ○之字型(默认) ○弓字型; ☑首字不对齐 幅度 2.0 | `[WriteConfig]` (Appendix A) |
-| 多色绘制 | ☐多色绘制; 换笔模式 手动(弹窗提示) / 自动(需设备支持); 自动换笔配置 共1支笔 [设置] | `[MulticolorDrawing] EnableMulticolorDrawing, PenChangingMode` |
-| 绘图与激光 | CAD导入 拆分导入(根据源文件属性) ▾ | `[DrawConfig] CAD_Import_Mode=1` |
-| 字符变形 | ☑基础变形 (胖瘦 96–104%, 高矮 98–102%, 旋转 −2–2°, 笔画变形幅度 1, ☑随机删除小尾巴); ☑字形变形 (幅度 7); [使用推荐参数] | `[CharacterDeformation]` |
-| 主题与样式 | 界面风格 Office风格 ▾; 笔记线条 实线 ▾ | not in the sample ini (defaults) |
-| 页面旋转 | 页面旋转模式 不旋转 ▾ | `[ParityPageConfig] ParityPageDirectionMode=0` |
+| Page       | Controls (UI, defaults)                                                                                                                                                                 | Config keys                                                                                           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 常规设置   | 默认功能 写字功能; 参数同步 开启; 语言 简体中文; 设备管理 默认收起                                                                                                                      | `[GeneralConfig] Default_Function=0, Synchronization_Parameters=0, Language=0, DeviceManagerStatus=0` |
+| 写字偏好   | 字符间隔 中 0.6–1.1 / 英 0.5–1.0; 空格宽度 中 5.0–7.0 / 英 2.0–3.0; 首行缩进 15.5–17.0; 垂直偏移 0.0–0.3, ☐启用智能偏移(同向偏移); 路径规划 ○之字型(默认) ○弓字型; ☑首字不对齐 幅度 2.0 | `[WriteConfig]` (Appendix A)                                                                          |
+| 多色绘制   | ☐多色绘制; 换笔模式 手动(弹窗提示) / 自动(需设备支持); 自动换笔配置 共1支笔 [设置]                                                                                                      | `[MulticolorDrawing] EnableMulticolorDrawing, PenChangingMode`                                        |
+| 绘图与激光 | CAD导入 拆分导入(根据源文件属性) ▾                                                                                                                                                      | `[DrawConfig] CAD_Import_Mode=1`                                                                      |
+| 字符变形   | ☑基础变形 (胖瘦 96–104%, 高矮 98–102%, 旋转 −2–2°, 笔画变形幅度 1, ☑随机删除小尾巴); ☑字形变形 (幅度 7); [使用推荐参数]                                                                 | `[CharacterDeformation]`                                                                              |
+| 主题与样式 | 界面风格 Office风格 ▾; 笔记线条 实线 ▾                                                                                                                                                  | not in the sample ini (defaults)                                                                      |
+| 页面旋转   | 页面旋转模式 不旋转 ▾                                                                                                                                                                   | `[ParityPageConfig] ParityPageDirectionMode=0`                                                        |
 
 Language files: `appLang_CN.qm` / `appLang_EN.qm` (C §其他工具) while `core.ChiXie` lists six
 languages (zh-Hans, zh-Hant, en, ja, ko, ru) (A) — only two are shipped [med]. The settings form
@@ -2038,7 +2038,7 @@ the form), a 单页视图 / 双页视图，适用于写本子预览 pair, status
 新建模板 / 新建文档 / 新建表格 / 新建作文, 炽写AI, 插件平台 / 插件广场 (plugin platform ribbon text, no handler known).
 Contextual categories: table and
 composition panels appear by selection; the template manager category (A §Main window) [high].
-**PenKaku today:** Word 365-style chrome: custom blue title bar with QAT, centred "文档名 - 赤写",
+**PenKaku today:** Word 365-style chrome: custom blue title bar with QAT, centred "文档名 - 炽写",
 登录/account, tab strip (文件 backstage, 开始 / 布局 / 手写 / 设备 / 视图), ribbon card with large/small
 buttons and ↘ launchers, status bar (`ribbon.rs`, `app.rs`, `app/ribbon_tabs.rs`).
 **Recommended implementation:** keep the Word mapping (users know Word better than ChiXie3's
@@ -2157,20 +2157,20 @@ the source language and en as the first translation.
 Each milestone ends with `cargo test`, clippy clean, AUTOTEST green, and the listed acceptance
 checks. Hardware checks are run by BOSS.
 
-| # | Milestone | Scope | Acceptance |
-|---|---|---|---|
-| R1 | Reliable job loop | auto connect; Alarm toast + 解锁; Grbl error texts; per-page list + "write from page N"; patrol (巡边); write-done position; stall detection | fake link: drop an `ok` → resync, no hang; unplug mid-job → reconnect by auto-scan; patrol traces the written bounds; 20-page job on hardware without intervention except sheet changes |
-| R2 | Resume | line-exact resume after stop/disconnect; resume from a clicked character; "re-zero then resume" | fake link killed at line k: resumed stream = pen up + travel + identical tail; hardware: pull USB mid-page, resume, no duplicated or missing stroke |
-| R3 | Paragraph and character attributes | `CharAttrs` runs, alignment, first-line indent (Tab/button), font/size per selection, colour, half space, find/replace, context menu | goldens for right-aligned and indented paragraphs; replace keeps untouched ids; `.chx` v2 round-trip |
-| R4 | Font set | font roles (主线/英文/符号/数字), fallback lists, weighted mixing per char id, missing-glyph badge, collect/uncollect, tag filters/sort, 我的录制 | 1,000-char mix ratio within ±3%; missing char falls through; collect request captured and matched |
-| R5 | Output options | path planning 之/弓, origin modes (纸张/框线/自定义 marker), page rotation, route simplify, multicolour with pen-change pauses | captures from ChiXie3 for 弓 and rotation match ours (glyph order, mirrored coordinates); two-colour page pauses once |
-| R6 | Kinsoku and grid polish | 避头尾 with hanging punctuation, two-digit cells, full/half-width fallback, rationality badge | no line starts with a closing mark in a 1,000-char fuzz; 作文格 capture still matches |
-| R7 | Tables | `table.rs` model, template editor (insert table, merge/split, cell attrs, rows, padding), cell layout with overflow policy, data sources, xlsx import (`calamine`), batch import / mail merge | capture of a 2×2 form matches within 0.3 mm; overflow shrink fits; xlsx with merges maps correctly |
-| R8 | Effects fidelity | TPS shape deformation, tail removal, smart vertical offset, 字符微调 panel, glyph clean-ups (`glyph_fix.rs`) | deformation captures (levels 3/7/10) reproduce magnitudes; < 50 µs per glyph |
-| R9 | G-code tools | G-code previewer/executor, SD card browser + upload-and-run, one-stroke tool, test pattern job | parse + preview of the protocol.md capture; SD upload against a mock server; hardware run from SD |
-| R10 | Plotting editor | `PlotDoc`, shapes, properties, grid/snap, SVG (`usvg`), DXF (`dxf`), image hatch, text boxes, stroke ordering | goldens for circle tolerance, DXF fixture, SVG fixture; travel reduction ≥ 30% on an imported drawing |
-| R11 | Platform | i18n (en), window geometry, icon, release build, self-update with signed manifest, rotating logs + panic dialog | clean install on a fresh Windows VM; update from N to N+1 verified by signature |
-| R12 | Optional | Bambu export/FTPS, ESP32 配网, firmware `$` editor, auto paper feeder macros, multi-device queue, AI assistant (user's own endpoint), cloud template library, PDF export | per feature, on demand |
+| #   | Milestone                          | Scope                                                                                                                                                                                         | Acceptance                                                                                                                                                                              |
+| --- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Reliable job loop                  | auto connect; Alarm toast + 解锁; Grbl error texts; per-page list + "write from page N"; patrol (巡边); write-done position; stall detection                                                  | fake link: drop an `ok` → resync, no hang; unplug mid-job → reconnect by auto-scan; patrol traces the written bounds; 20-page job on hardware without intervention except sheet changes |
+| R2  | Resume                             | line-exact resume after stop/disconnect; resume from a clicked character; "re-zero then resume"                                                                                               | fake link killed at line k: resumed stream = pen up + travel + identical tail; hardware: pull USB mid-page, resume, no duplicated or missing stroke                                     |
+| R3  | Paragraph and character attributes | `CharAttrs` runs, alignment, first-line indent (Tab/button), font/size per selection, colour, half space, find/replace, context menu                                                          | goldens for right-aligned and indented paragraphs; replace keeps untouched ids; `.chx` v2 round-trip                                                                                    |
+| R4  | Font set                           | font roles (主线/英文/符号/数字), fallback lists, weighted mixing per char id, missing-glyph badge, collect/uncollect, tag filters/sort, 我的录制                                             | 1,000-char mix ratio within ±3%; missing char falls through; collect request captured and matched                                                                                       |
+| R5  | Output options                     | path planning 之/弓, origin modes (纸张/框线/自定义 marker), page rotation, route simplify, multicolour with pen-change pauses                                                                | captures from ChiXie3 for 弓 and rotation match ours (glyph order, mirrored coordinates); two-colour page pauses once                                                                   |
+| R6  | Kinsoku and grid polish            | 避头尾 with hanging punctuation, two-digit cells, full/half-width fallback, rationality badge                                                                                                 | no line starts with a closing mark in a 1,000-char fuzz; 作文格 capture still matches                                                                                                   |
+| R7  | Tables                             | `table.rs` model, template editor (insert table, merge/split, cell attrs, rows, padding), cell layout with overflow policy, data sources, xlsx import (`calamine`), batch import / mail merge | capture of a 2×2 form matches within 0.3 mm; overflow shrink fits; xlsx with merges maps correctly                                                                                      |
+| R8  | Effects fidelity                   | TPS shape deformation, tail removal, smart vertical offset, 字符微调 panel, glyph clean-ups (`glyph_fix.rs`)                                                                                  | deformation captures (levels 3/7/10) reproduce magnitudes; < 50 µs per glyph                                                                                                            |
+| R9  | G-code tools                       | G-code previewer/executor, SD card browser + upload-and-run, one-stroke tool, test pattern job                                                                                                | parse + preview of the protocol.md capture; SD upload against a mock server; hardware run from SD                                                                                       |
+| R10 | Plotting editor                    | `PlotDoc`, shapes, properties, grid/snap, SVG (`usvg`), DXF (`dxf`), image hatch, text boxes, stroke ordering                                                                                 | goldens for circle tolerance, DXF fixture, SVG fixture; travel reduction ≥ 30% on an imported drawing                                                                                   |
+| R11 | Platform                           | i18n (en), window geometry, icon, release build, self-update with signed manifest, rotating logs + panic dialog                                                                               | clean install on a fresh Windows VM; update from N to N+1 verified by signature                                                                                                         |
+| R12 | Optional                           | Bambu export/FTPS, ESP32 配网, firmware `$` editor, auto paper feeder macros, multi-device queue, AI assistant (user's own endpoint), cloud template library, PDF export                      | per feature, on demand                                                                                                                                                                  |
 
 Ordering rationale: R1–R2 make the existing loop trustworthy (the most painful ChiXie3 problems
 are stalls and drops), R3–R6 cover what daily users of notes and 作文格 touch, R7 opens the form use
@@ -2183,99 +2183,99 @@ case, R8 polishes realism, R9–R10 widen the device use, R11–R12 are platform
 Defaults are the values of the sample file unless the live UI shows otherwise. "→" is the
 PenKaku equivalent (`config.rs` `Settings`, `HandwritingStyle`, `DeviceProfile`, `Template`).
 
-| Section / key | Meaning | Default (sample / UI) | PenKaku |
-|---|---|---|---|
-| GeneralConfig/Default_Function | start mode (0 = 写字功能) | 0 | not needed (one mode) |
-| GeneralConfig/Synchronization_Parameters | 参数同步 (0 = 开启 per UI) | 0 | not planned |
-| GeneralConfig/Language | 0 = 简体中文 | 0 | `UiSettings` locale (M6) |
-| GeneralConfig/Window_Size, Window_IsMaximized | window geometry | 1920×1044, true | M6 |
-| GeneralConfig/DeviceManagerStatus | device pane start state (0 = 默认收起, `DefaultHide`) | 0 | `UiSettings` pane visibility |
-| DrawConfig/DrawOrLaser | 绘图 / 激光 mode | Draw | device type (R10/R12) |
-| DrawConfig/PaperType, PaperName, PaperOrientation | plotting paper | StandardPaper, A4, Horizontal | `PageSettings` paper |
-| DrawConfig/CustomPaperSize | named custom sizes (pickled dict) | 4 entries | `PaperPreset` list |
-| DrawConfig/CAD_Import_Mode | 拆分导入(根据源文件属性) | 1 | DXF import mode |
-| FileConfig/DefaultFolderPath | last folder | user folder | last folder in `UiSettings` |
-| FontConfig/Tag_Filter | 字体库 filters (6 tags) | 1, 2, 3, 4, 5, 6 | 字体库 UI state |
-| FontConfig/Sort_Rule | 字体库 sort | 1 | 字体库 UI state |
-| FontConfig/MainFont, MainSymbolFont, MainEnglishFont, MainNumberFont | font roles (ids) | 1 each | `FontRoles` (R4) |
-| FontConfig/FontsDefaultSize, FontsMixRatio | default size, mix weights (not in sample) | — | `PageSettings.font_size`, `FontSet.mix` |
-| WriteConfig/NowWritingTempName, NowWritingTempType | active template (3 = composition, inferred) | 作文格1, 3 | document template |
-| WriteConfig/PreviewMode | single/double page | 1 | view setting |
-| WriteConfig/min/max_char_spacing_zh | CJK spacing (mm) | 0.6 / 1.1 | `char_spacing_zh` |
-| WriteConfig/min/max_char_spacing_en | Latin spacing (mm) | 0.5 / 1.0 | `char_spacing_en` |
-| WriteConfig/min/max_space_width_zh | CJK space (mm) | 5.0 / 7.0 | `space_width_zh` |
-| WriteConfig/min/max_space_width_en | Latin space (mm) | 2.0 / 3.0 | `space_width_en` |
-| WriteConfig/min/max_vertical_offset | glyph offset (mm) | 0.0 / 0.3 | `vertical_offset` |
-| WriteConfig/intelligent_vertical_offset | 智能偏移(同向偏移) | false | `intelligent_vertical_offset` |
-| WriteConfig/row_offset_style | unknown variants | 1 | `RowOffsetStyle` (VERIFY) |
-| WriteConfig/random_correct_offset | unknown | false | `random_correct_offset` (guess) |
-| WriteConfig/path_planning_type | 1 = 之字型 (inferred), 2 = 弓字型 [UI] | 2 | `PathPlan` (R5) |
-| WriteConfig/start_point_mode | origin mode (encoding unknown) | 11 | `Origin` (R5) |
-| WriteConfig/min/max_first_line_indent | indent (mm) | 15.5 / 17.0 | `first_line_indent` |
-| WriteConfig/first_text_not_align, _range | per-line start offset (mm) | true, 2.0 | `line_start_offset` |
-| DeviceConfig/AutoConnect | 自动连接机器 | false | `DeviceSettings.auto_connect` (R1) |
-| DeviceConfig/DeviceParams | `{name: {firmware, deviceType, writeSpeed, pauseTime, penUp, penDown, x_plus, x_reduce, y_plus, y_reduce, WriteDonePos}}` | one device: firmware 3, type 0, 19000, 0, 0, 2, X+/X-/Y+/Y- | `DeviceProfile` (imported by `chixie3_devices.rs`) |
-| DeviceConfig/DefaultDevice | default device name | 默认设备 | profile default |
-| DeviceConfig/CustomCommand | custom buttons `{name: cmd}` | empty | custom commands list |
-| DeviceConfig/show_coordinate_region, show_command_window | pane sections | true, true | UI state |
-| DeviceConfig/CustomNetworkDevices | `{name: {ip, port}}` | one entry | network device list |
-| DeviceConfig/ChiXieDevices, DeviceControlPannelMode | 炽写 card devices and panel mode (not in sample) | — | presets (R12) |
-| MulticolorDrawing/EnableMulticolorDrawing | 多色绘制 | false | multicolour flag (R5) |
-| MulticolorDrawing/PenChangingMode | 手动 / 自动换笔 (1 = manual, inferred) | 1 | pen-change mode |
-| CharacterDeformation/EnableCharacterDeformation | master switch | false | `deform` flag |
-| CharacterDeformation/enable_base_deform, enable_shape_deform | sub-switches | true, true | deformation config |
-| CharacterDeformation/min/max_horizontal_scale | 胖瘦 % | 96 / 104 | base scale x |
-| CharacterDeformation/min/max_vertical_scale | 高矮 % | 98 / 102 | base scale y |
-| CharacterDeformation/min/max_rotation_angle | 旋转 ° | −2 / 2 | base rotation |
-| CharacterDeformation/stroke_deform_degree | 笔画变形幅度 | 1 | stroke amplitude |
-| CharacterDeformation/randomly_delete_trailing | 随机删除小尾巴 | true | tail removal (R8) |
-| CharacterDeformation/shape_deform_degree | 字形变形幅度 | 7 | shape level |
-| ParityPageConfig/ParityPageDirectionMode | 页面旋转模式 (0 = 不旋转) | 0 | `PageRotation` (R5) |
-| BambuLabConfig/DeviceIP, DevicePassword | printer IP, access code (plaintext!) | empty | profile + keyring (R12) |
-| BambuLabConfig/PenUp, PenDown | Z heights | 8, 4 | profile |
-| BambuLabConfig/EnableSound, XOffset, YOffset, OriginMode, DeviceType | options | 1, 0, 0, 0, 0 | profile |
-| LoginConfig/Account, Password, RememberPassword, AutomaticLogin | login (password plaintext) | (removed) | account in settings, password in keyring; never imported |
+| Section / key                                                        | Meaning                                                                                                                   | Default (sample / UI)                                       | PenKaku                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| GeneralConfig/Default_Function                                       | start mode (0 = 写字功能)                                                                                                 | 0                                                           | not needed (one mode)                                    |
+| GeneralConfig/Synchronization_Parameters                             | 参数同步 (0 = 开启 per UI)                                                                                                | 0                                                           | not planned                                              |
+| GeneralConfig/Language                                               | 0 = 简体中文                                                                                                              | 0                                                           | `UiSettings` locale (M6)                                 |
+| GeneralConfig/Window_Size, Window_IsMaximized                        | window geometry                                                                                                           | 1920×1044, true                                             | M6                                                       |
+| GeneralConfig/DeviceManagerStatus                                    | device pane start state (0 = 默认收起, `DefaultHide`)                                                                     | 0                                                           | `UiSettings` pane visibility                             |
+| DrawConfig/DrawOrLaser                                               | 绘图 / 激光 mode                                                                                                          | Draw                                                        | device type (R10/R12)                                    |
+| DrawConfig/PaperType, PaperName, PaperOrientation                    | plotting paper                                                                                                            | StandardPaper, A4, Horizontal                               | `PageSettings` paper                                     |
+| DrawConfig/CustomPaperSize                                           | named custom sizes (pickled dict)                                                                                         | 4 entries                                                   | `PaperPreset` list                                       |
+| DrawConfig/CAD_Import_Mode                                           | 拆分导入(根据源文件属性)                                                                                                  | 1                                                           | DXF import mode                                          |
+| FileConfig/DefaultFolderPath                                         | last folder                                                                                                               | user folder                                                 | last folder in `UiSettings`                              |
+| FontConfig/Tag_Filter                                                | 字体库 filters (6 tags)                                                                                                   | 1, 2, 3, 4, 5, 6                                            | 字体库 UI state                                          |
+| FontConfig/Sort_Rule                                                 | 字体库 sort                                                                                                               | 1                                                           | 字体库 UI state                                          |
+| FontConfig/MainFont, MainSymbolFont, MainEnglishFont, MainNumberFont | font roles (ids)                                                                                                          | 1 each                                                      | `FontRoles` (R4)                                         |
+| FontConfig/FontsDefaultSize, FontsMixRatio                           | default size, mix weights (not in sample)                                                                                 | —                                                           | `PageSettings.font_size`, `FontSet.mix`                  |
+| WriteConfig/NowWritingTempName, NowWritingTempType                   | active template (3 = composition, inferred)                                                                               | 作文格1, 3                                                  | document template                                        |
+| WriteConfig/PreviewMode                                              | single/double page                                                                                                        | 1                                                           | view setting                                             |
+| WriteConfig/min/max_char_spacing_zh                                  | CJK spacing (mm)                                                                                                          | 0.6 / 1.1                                                   | `char_spacing_zh`                                        |
+| WriteConfig/min/max_char_spacing_en                                  | Latin spacing (mm)                                                                                                        | 0.5 / 1.0                                                   | `char_spacing_en`                                        |
+| WriteConfig/min/max_space_width_zh                                   | CJK space (mm)                                                                                                            | 5.0 / 7.0                                                   | `space_width_zh`                                         |
+| WriteConfig/min/max_space_width_en                                   | Latin space (mm)                                                                                                          | 2.0 / 3.0                                                   | `space_width_en`                                         |
+| WriteConfig/min/max_vertical_offset                                  | glyph offset (mm)                                                                                                         | 0.0 / 0.3                                                   | `vertical_offset`                                        |
+| WriteConfig/intelligent_vertical_offset                              | 智能偏移(同向偏移)                                                                                                        | false                                                       | `intelligent_vertical_offset`                            |
+| WriteConfig/row_offset_style                                         | unknown variants                                                                                                          | 1                                                           | `RowOffsetStyle` (VERIFY)                                |
+| WriteConfig/random_correct_offset                                    | unknown                                                                                                                   | false                                                       | `random_correct_offset` (guess)                          |
+| WriteConfig/path_planning_type                                       | 1 = 之字型 (inferred), 2 = 弓字型 [UI]                                                                                    | 2                                                           | `PathPlan` (R5)                                          |
+| WriteConfig/start_point_mode                                         | origin mode (encoding unknown)                                                                                            | 11                                                          | `Origin` (R5)                                            |
+| WriteConfig/min/max_first_line_indent                                | indent (mm)                                                                                                               | 15.5 / 17.0                                                 | `first_line_indent`                                      |
+| WriteConfig/first_text_not_align, _range                             | per-line start offset (mm)                                                                                                | true, 2.0                                                   | `line_start_offset`                                      |
+| DeviceConfig/AutoConnect                                             | 自动连接机器                                                                                                              | false                                                       | `DeviceSettings.auto_connect` (R1)                       |
+| DeviceConfig/DeviceParams                                            | `{name: {firmware, deviceType, writeSpeed, pauseTime, penUp, penDown, x_plus, x_reduce, y_plus, y_reduce, WriteDonePos}}` | one device: firmware 3, type 0, 19000, 0, 0, 2, X+/X-/Y+/Y- | `DeviceProfile` (imported by `chixie3_devices.rs`)       |
+| DeviceConfig/DefaultDevice                                           | default device name                                                                                                       | 默认设备                                                    | profile default                                          |
+| DeviceConfig/CustomCommand                                           | custom buttons `{name: cmd}`                                                                                              | empty                                                       | custom commands list                                     |
+| DeviceConfig/show_coordinate_region, show_command_window             | pane sections                                                                                                             | true, true                                                  | UI state                                                 |
+| DeviceConfig/CustomNetworkDevices                                    | `{name: {ip, port}}`                                                                                                      | one entry                                                   | network device list                                      |
+| DeviceConfig/ChiXieDevices, DeviceControlPannelMode                  | 炽写 card devices and panel mode (not in sample)                                                                          | —                                                           | presets (R12)                                            |
+| MulticolorDrawing/EnableMulticolorDrawing                            | 多色绘制                                                                                                                  | false                                                       | multicolour flag (R5)                                    |
+| MulticolorDrawing/PenChangingMode                                    | 手动 / 自动换笔 (1 = manual, inferred)                                                                                    | 1                                                           | pen-change mode                                          |
+| CharacterDeformation/EnableCharacterDeformation                      | master switch                                                                                                             | false                                                       | `deform` flag                                            |
+| CharacterDeformation/enable_base_deform, enable_shape_deform         | sub-switches                                                                                                              | true, true                                                  | deformation config                                       |
+| CharacterDeformation/min/max_horizontal_scale                        | 胖瘦 %                                                                                                                    | 96 / 104                                                    | base scale x                                             |
+| CharacterDeformation/min/max_vertical_scale                          | 高矮 %                                                                                                                    | 98 / 102                                                    | base scale y                                             |
+| CharacterDeformation/min/max_rotation_angle                          | 旋转 °                                                                                                                    | −2 / 2                                                      | base rotation                                            |
+| CharacterDeformation/stroke_deform_degree                            | 笔画变形幅度                                                                                                              | 1                                                           | stroke amplitude                                         |
+| CharacterDeformation/randomly_delete_trailing                        | 随机删除小尾巴                                                                                                            | true                                                        | tail removal (R8)                                        |
+| CharacterDeformation/shape_deform_degree                             | 字形变形幅度                                                                                                              | 7                                                           | shape level                                              |
+| ParityPageConfig/ParityPageDirectionMode                             | 页面旋转模式 (0 = 不旋转)                                                                                                 | 0                                                           | `PageRotation` (R5)                                      |
+| BambuLabConfig/DeviceIP, DevicePassword                              | printer IP, access code (plaintext!)                                                                                      | empty                                                       | profile + keyring (R12)                                  |
+| BambuLabConfig/PenUp, PenDown                                        | Z heights                                                                                                                 | 8, 4                                                        | profile                                                  |
+| BambuLabConfig/EnableSound, XOffset, YOffset, OriginMode, DeviceType | options                                                                                                                   | 1, 0, 0, 0, 0                                               | profile                                                  |
+| LoginConfig/Account, Password, RememberPassword, AutomaticLogin      | login (password plaintext)                                                                                                | (removed)                                                   | account in settings, password in keyring; never imported |
 
 ### 6.2 Appendix B: server endpoints
 
 Base `https://chixie.com.cn/client_api/`. All POST with JSON and header `token` where verified.
 "Used" = used by PenKaku today.
 
-| Endpoint | Purpose | Known shape | PenKaku |
-|---|---|---|---|
-| `user/login` | login | req `{account, password, platform:"windows"}` → `data {token, access_token, refresh_token, expires_in, backup_token, username, phone, role_code, role, permissions[], expiry_date, period_of_validity, async_operation}` [cap] | used |
-| `user/logout` | logout | body `{}` guessed | used (VERIFY) |
-| `user/heartbeat` | online check | req `{}` → `data:"ok"` [cap] | used |
-| `user/collect_logout_info` | telemetry on exit | unknown | not planned |
-| `user/collect_missing_characters` | report missing glyphs | unknown | not planned |
-| `update/check_update` | version check | req `{major_version, minor_version, fixed_version, alphabet_version, soft_type}` [cap] | not used |
-| `update/compare_file_differences` | MD5 file diff | unknown | not planned |
-| `font/get_online_fonts` | catalog | req `{filter_tags[], sort_rule, page_num (1-based), search_name}` → `FontInfo[]` (9/page) [cap] | used |
-| `font/get_collected_fonts` | collection | req `{page_num}` (0 = all) → `FontInfo[]` [cap] | used |
-| `font/get_recorded_fonts` | user's recorded fonts | unknown (paged) | R4 |
-| `font/get_main_fonts_info` | role font ids | unknown | R4 |
-| `font/collect_a_font` | collect/uncollect | unknown | R4 |
-| `font/get_daily_free_font` | daily trial font | unknown | P3 |
-| `font/get_font_access` | whole font (Fernet token) | req `{font_id, token}` → `data` token string [cap] | used |
-| `font/get_character_access` | per-character strokes | HTTP 404 now [cap] | dead |
-| `font/download_font` | whole-font download | unknown | not used |
-| `font/get_standard_br` | standard glyph bboxes | unknown | not needed (local) |
-| `font/admin_tune_fonts` | admin glyph upload | unknown | not planned |
-| `config/font_config` | get/set font + deformation config | unknown | P3 |
-| `config/query_exclusive_config_file`, `config/query_config_download_url`, `config/download_exclusive_config_file` | license-bound config | unknown | not planned |
-| `pay/get_packages`, `pay/upgrade_payment`, `pay/check_upgrade`, `pay/bind_license` | purchase / license | fields `package_name, package_price, available_duration`; `license_code`; `pay_url` [high] | not planned |
-| `invitation/get_invitation_code`, `invitation/bind_invitation_code`, `invitation/query_binding_of_invitation_code` | invitation codes | unknown | not planned |
-| `file_parsing/dxf` | server DXF parse | unknown | not needed (local) |
-| `file_parsing/image-to-table-template`, `-2` | table frame recognition | base64 image → cell corner points [med] | R7 (optional) |
-| `text_processing/text_block` | word blocks for 作文格 | unknown | not needed (local) |
-| `ai/get_ai_account` | Spark API keys | req `{ai_type}` → keys [cap] | not planned |
-| `gcode_page/gcode_tool_page` | G-code tool web page | HTML | replaced natively |
-| `font_page/font_library_home_page?token=` | font library web page | HTML, token in URL | replaced natively |
-| `user_guide_service/user-guide-and-service-page` | help page | HTML | link only |
-| `page/register`, `page/forget-password`, `page/update-log` | website pages | HTML | links |
-| OSS `font_preview/font_<id>.png` | public preview image | PNG, no auth [cap] | used |
-| `default_res/driver/windows/CH341SER.EXE` | driver download | EXE | not planned |
-| (unlisted) template library listing | 模板库 online templates | unknown | capture first |
+| Endpoint                                                                                                           | Purpose                           | Known shape                                                                                                                                                                                                                    | PenKaku            |
+| ------------------------------------------------------------------------------------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| `user/login`                                                                                                       | login                             | req `{account, password, platform:"windows"}` → `data {token, access_token, refresh_token, expires_in, backup_token, username, phone, role_code, role, permissions[], expiry_date, period_of_validity, async_operation}` [cap] | used               |
+| `user/logout`                                                                                                      | logout                            | body `{}` guessed                                                                                                                                                                                                              | used (VERIFY)      |
+| `user/heartbeat`                                                                                                   | online check                      | req `{}` → `data:"ok"` [cap]                                                                                                                                                                                                   | used               |
+| `user/collect_logout_info`                                                                                         | telemetry on exit                 | unknown                                                                                                                                                                                                                        | not planned        |
+| `user/collect_missing_characters`                                                                                  | report missing glyphs             | unknown                                                                                                                                                                                                                        | not planned        |
+| `update/check_update`                                                                                              | version check                     | req `{major_version, minor_version, fixed_version, alphabet_version, soft_type}` [cap]                                                                                                                                         | not used           |
+| `update/compare_file_differences`                                                                                  | MD5 file diff                     | unknown                                                                                                                                                                                                                        | not planned        |
+| `font/get_online_fonts`                                                                                            | catalog                           | req `{filter_tags[], sort_rule, page_num (1-based), search_name}` → `FontInfo[]` (9/page) [cap]                                                                                                                                | used               |
+| `font/get_collected_fonts`                                                                                         | collection                        | req `{page_num}` (0 = all) → `FontInfo[]` [cap]                                                                                                                                                                                | used               |
+| `font/get_recorded_fonts`                                                                                          | user's recorded fonts             | unknown (paged)                                                                                                                                                                                                                | R4                 |
+| `font/get_main_fonts_info`                                                                                         | role font ids                     | unknown                                                                                                                                                                                                                        | R4                 |
+| `font/collect_a_font`                                                                                              | collect/uncollect                 | unknown                                                                                                                                                                                                                        | R4                 |
+| `font/get_daily_free_font`                                                                                         | daily trial font                  | unknown                                                                                                                                                                                                                        | P3                 |
+| `font/get_font_access`                                                                                             | whole font (Fernet token)         | req `{font_id, token}` → `data` token string [cap]                                                                                                                                                                             | used               |
+| `font/get_character_access`                                                                                        | per-character strokes             | HTTP 404 now [cap]                                                                                                                                                                                                             | dead               |
+| `font/download_font`                                                                                               | whole-font download               | unknown                                                                                                                                                                                                                        | not used           |
+| `font/get_standard_br`                                                                                             | standard glyph bboxes             | unknown                                                                                                                                                                                                                        | not needed (local) |
+| `font/admin_tune_fonts`                                                                                            | admin glyph upload                | unknown                                                                                                                                                                                                                        | not planned        |
+| `config/font_config`                                                                                               | get/set font + deformation config | unknown                                                                                                                                                                                                                        | P3                 |
+| `config/query_exclusive_config_file`, `config/query_config_download_url`, `config/download_exclusive_config_file`  | license-bound config              | unknown                                                                                                                                                                                                                        | not planned        |
+| `pay/get_packages`, `pay/upgrade_payment`, `pay/check_upgrade`, `pay/bind_license`                                 | purchase / license                | fields `package_name, package_price, available_duration`; `license_code`; `pay_url` [high]                                                                                                                                     | not planned        |
+| `invitation/get_invitation_code`, `invitation/bind_invitation_code`, `invitation/query_binding_of_invitation_code` | invitation codes                  | unknown                                                                                                                                                                                                                        | not planned        |
+| `file_parsing/dxf`                                                                                                 | server DXF parse                  | unknown                                                                                                                                                                                                                        | not needed (local) |
+| `file_parsing/image-to-table-template`, `-2`                                                                       | table frame recognition           | base64 image → cell corner points [med]                                                                                                                                                                                        | R7 (optional)      |
+| `text_processing/text_block`                                                                                       | word blocks for 作文格            | unknown                                                                                                                                                                                                                        | not needed (local) |
+| `ai/get_ai_account`                                                                                                | Spark API keys                    | req `{ai_type}` → keys [cap]                                                                                                                                                                                                   | not planned        |
+| `gcode_page/gcode_tool_page`                                                                                       | G-code tool web page              | HTML                                                                                                                                                                                                                           | replaced natively  |
+| `font_page/font_library_home_page?token=`                                                                          | font library web page             | HTML, token in URL                                                                                                                                                                                                             | replaced natively  |
+| `user_guide_service/user-guide-and-service-page`                                                                   | help page                         | HTML                                                                                                                                                                                                                           | link only          |
+| `page/register`, `page/forget-password`, `page/update-log`                                                         | website pages                     | HTML                                                                                                                                                                                                                           | links              |
+| OSS `font_preview/font_<id>.png`                                                                                   | public preview image              | PNG, no auth [cap]                                                                                                                                                                                                             | used               |
+| `default_res/driver/windows/CH341SER.EXE`                                                                          | driver download                   | EXE                                                                                                                                                                                                                            | not planned        |
+| (unlisted) template library listing                                                                                | 模板库 online templates           | unknown                                                                                                                                                                                                                        | capture first      |
 
 Device-side HTTP (ESP3D / Grbl_ESP32): `/command?commandText=…&PAGEID=0`, `/upload` (list,
 delete, deletedir, createdir, multipart upload), `/description.xml` (UPnP), websocket (purpose
@@ -2283,72 +2283,72 @@ VERIFY); see protocol.md.
 
 ### 6.3 Appendix C: file formats
 
-| File | Owner | Format | Notes | PenKaku handling |
-|---|---|---|---|---|
-| `config.ini` | ChiXie3 | QSettings INI, `@Variant(...)` QDataStream values, some `PyQt_PyObject` pickles | password in plaintext under `[LoginConfig]` | `config::import_chixie3` (WriteConfig, CharacterDeformation), `chixie3_devices.rs` (DeviceParams); LoginConfig never read |
-| `note_template.cx`, `composition_template.cx` | ChiXie3 | pickle protocol 4 of `{name: NoteTemplate/CompositionTemplate}` | fields in protocol.md | `chixie3_templates.rs` (safe reader) |
-| `table_template.cx`, `composition_temp.cx` | ChiXie3 | table templates: pickle + Fernet (hard-coded key); V1/V2 layouts | background images as base64 | not yet (R7, optional) |
-| `*.cset` | ChiXie3 | pickle of `DeviceParams` dict | executes code in ChiXie3 | planned via safe reader |
-| `*.cdoc` | ChiXie3 | ChiXie document items + template, Fernet-encrypted (pickle likely) | MIME `application/chixie-doc-items` for clipboard | not planned unless requested |
-| `jieba_dict.txt` | ChiXie3 | jieba dictionary | 作文格 segmentation | not needed |
-| `update_log.txt` | ChiXie3 | text | shown once after update | — |
-| `plugin/test.py` | ChiXie3 | Python | run in-process | not supported |
-| `one_stroke_test.txt` | ChiXie3 | `X,Y` lines + `pen_up`/`pen_down` | one-stroke tool | readable by our one-stroke tool |
-| `<n>页.gcode`, `page_<n>.gcode` | ChiXie3 | G-code per page | export / SD upload | our export: one file per page |
-| `ChiXie-Log.log` | ChiXie3 | rotating text log | `%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s` | — |
-| `settings.toml` | PenKaku | TOML | `%APPDATA%\penkaku\config` | `config.rs` |
-| `templates.toml` | PenKaku | TOML | user templates | `template.rs` |
-| `*.chx` | PenKaku | JSON: text, char ids, seed (v2 adds runs, template, origin, tweaks) | reproducible handwriting | `file_ops.rs` |
-| `draft.chx` | PenKaku | as `.chx` | autosave, restored at start | `file_ops.rs` |
-| `fonts/<id>.json`, `fonts/index.json`, `fonts/previews/<id>.png` | PenKaku | decrypted glyph map; id → name; ink mask | offline fonts | `font_store.rs`, `cloud_preview.rs` |
-| font payload | server | Fernet token (+2 junk chars) → JSON `{char: [advance, X, Y]}` | key = `backup_token` with the last two chars swapped | `font.rs` |
+| File                                                             | Owner   | Format                                                                          | Notes                                                                      | PenKaku handling                                                                                                          |
+| ---------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `config.ini`                                                     | ChiXie3 | QSettings INI, `@Variant(...)` QDataStream values, some `PyQt_PyObject` pickles | password in plaintext under `[LoginConfig]`                                | `config::import_chixie3` (WriteConfig, CharacterDeformation), `chixie3_devices.rs` (DeviceParams); LoginConfig never read |
+| `note_template.cx`, `composition_template.cx`                    | ChiXie3 | pickle protocol 4 of `{name: NoteTemplate/CompositionTemplate}`                 | fields in protocol.md                                                      | `chixie3_templates.rs` (safe reader)                                                                                      |
+| `table_template.cx`, `composition_temp.cx`                       | ChiXie3 | table templates: pickle + Fernet (hard-coded key); V1/V2 layouts                | background images as base64                                                | not yet (R7, optional)                                                                                                    |
+| `*.cset`                                                         | ChiXie3 | pickle of `DeviceParams` dict                                                   | executes code in ChiXie3                                                   | planned via safe reader                                                                                                   |
+| `*.cdoc`                                                         | ChiXie3 | ChiXie document items + template, Fernet-encrypted (pickle likely)              | MIME `application/chixie-doc-items` for clipboard                          | not planned unless requested                                                                                              |
+| `jieba_dict.txt`                                                 | ChiXie3 | jieba dictionary                                                                | 作文格 segmentation                                                        | not needed                                                                                                                |
+| `update_log.txt`                                                 | ChiXie3 | text                                                                            | shown once after update                                                    | —                                                                                                                         |
+| `plugin/test.py`                                                 | ChiXie3 | Python                                                                          | run in-process                                                             | not supported                                                                                                             |
+| `one_stroke_test.txt`                                            | ChiXie3 | `X,Y` lines + `pen_up`/`pen_down`                                               | one-stroke tool                                                            | readable by our one-stroke tool                                                                                           |
+| `<n>页.gcode`, `page_<n>.gcode`                                  | ChiXie3 | G-code per page                                                                 | export / SD upload                                                         | our export: one file per page                                                                                             |
+| `ChiXie-Log.log`                                                 | ChiXie3 | rotating text log                                                               | `%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s` | —                                                                                                                         |
+| `settings.toml`                                                  | PenKaku | TOML                                                                            | `%APPDATA%\penkaku\config`                                                 | `config.rs`                                                                                                               |
+| `templates.toml`                                                 | PenKaku | TOML                                                                            | user templates                                                             | `template.rs`                                                                                                             |
+| `*.chx`                                                          | PenKaku | JSON: text, char ids, seed (v2 adds runs, template, origin, tweaks)             | reproducible handwriting                                                   | `file_ops.rs`                                                                                                             |
+| `draft.chx`                                                      | PenKaku | as `.chx`                                                                       | autosave, restored at start                                                | `file_ops.rs`                                                                                                             |
+| `fonts/<id>.json`, `fonts/index.json`, `fonts/previews/<id>.png` | PenKaku | decrypted glyph map; id → name; ink mask                                        | offline fonts                                                              | `font_store.rs`, `cloud_preview.rs`                                                                                       |
+| font payload                                                     | server  | Fernet token (+2 junk chars) → JSON `{char: [advance, X, Y]}`                   | key = `backup_token` with the last two chars swapped                       | `font.rs`                                                                                                                 |
 
 ### 6.4 Appendix D: glossary
 
-| Term | Meaning |
-|---|---|
-| 炽写 / 赤写 | ChiXie3's UI name / PenKaku's UI name |
-| 写字机 | handwriting robot: a pen plotter with a pen-lift (Z stepper, servo or solenoid) |
-| 书写 / 绘图与激光 / 主页 | writing mode / plotting mode / backstage |
-| 笔记 / 信纸 / 文档模板 | ruled letter paper template |
-| 双线 | dual-line rows (an upper band above each writing line) |
-| 分栏 | columns on a note page |
-| 作文格 | composition grid paper: one character per square cell |
-| 表格模板 / 母单元格 / 内部行数 | form template / parent cell / writing rows inside a cell |
-| 同型标记 | linking equivalent cells across pages |
-| 数据源 | generated cell content (fixed, random number, random choice, imported) |
-| 溢出 | text that does not fit a table cell |
-| 字体库 / 收藏 / 录制 | font library / collected fonts / user-recorded fonts |
-| 主线字体 / 主英文字体 / 主符号字体 / 主数字字体 | font roles by character class |
-| 混用 | mixing several fonts with weights |
-| 缺字 | a glyph missing from the chosen font |
+| Term                                                   | Meaning                                                                                   |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| 炽写 / 炽写                                            | ChiXie3's UI name / PenKaku's UI name                                                     |
+| 写字机                                                 | handwriting robot: a pen plotter with a pen-lift (Z stepper, servo or solenoid)           |
+| 书写 / 绘图与激光 / 主页                               | writing mode / plotting mode / backstage                                                  |
+| 笔记 / 信纸 / 文档模板                                 | ruled letter paper template                                                               |
+| 双线                                                   | dual-line rows (an upper band above each writing line)                                    |
+| 分栏                                                   | columns on a note page                                                                    |
+| 作文格                                                 | composition grid paper: one character per square cell                                     |
+| 表格模板 / 母单元格 / 内部行数                         | form template / parent cell / writing rows inside a cell                                  |
+| 同型标记                                               | linking equivalent cells across pages                                                     |
+| 数据源                                                 | generated cell content (fixed, random number, random choice, imported)                    |
+| 溢出                                                   | text that does not fit a table cell                                                       |
+| 字体库 / 收藏 / 录制                                   | font library / collected fonts / user-recorded fonts                                      |
+| 主线字体 / 主英文字体 / 主符号字体 / 主数字字体        | font roles by character class                                                             |
+| 混用                                                   | mixing several fonts with weights                                                         |
+| 缺字                                                   | a glyph missing from the chosen font                                                      |
 | 字符间隔 / 空格宽度 / 垂直偏移 / 首字不对齐 / 首行缩进 | spacing jitter / space width / vertical jitter / per-line start offset / paragraph indent |
-| 基础变形 / 字形变形 | per-glyph affine jitter (+ stroke jitter) / thin-plate-spline warp |
-| 随机删除小尾巴 | randomly removing small stroke tails |
-| 字符微调 | per-character manual adjustment |
-| 书写优化 / 路径优化 | path simplification or resampling |
-| 避头尾 | kinsoku: no closing punctuation at line start, no opening at line end |
-| 抬笔 / 落笔 | pen up / pen down |
-| 落笔高度 / 落笔角度 / 落笔指令 | pen-down Z (stepper) / servo angle / raw command (custom device) |
-| 落笔后暂停 | dwell after pen down |
-| 写字速度 | feed rate (mm/min) |
-| 书写原点 / 设置原点 / 回到原点 | job origin marker / `G92 X0 Y0` / move to X0 Y0 |
-| 纸张起点 / 框线起点 / 自定义原点 | origin modes |
-| 之字型 / 弓字型 | path planning: raster vs serpentine row order (captured) |
-| 写完位置 | where the pen parks after a job (原点 / 原点左2cm / 任务结束点) |
-| 换纸 | sheet change between pages |
-| 断点续写 | resume an interrupted page from a chosen character |
-| 换笔 / 多色绘制 | pen change / multicolour drawing |
-| 页面旋转 / 奇偶页方向 | 180° output rotation for odd/even pages |
-| 巡边 / 绘制框架线 | trace the bounds pen-up / draw the template lines |
-| 百宝箱 | toolbox dialog |
-| 拓竹 | Bambu Lab (3D printers used as plotters) |
-| 远程TF卡 / SD卡 | the ESP32 board's SD card |
-| 配网 | Wi-Fi provisioning of the board |
-| 固件参数 | Grbl `$` settings |
-| 报警 / 解锁 | Grbl Alarm state / `$X` |
-| 酷玩 | "fun" generators (seal, maze, fractal, 3-D text) |
-| 小炽 | the AI assistant's persona |
+| 基础变形 / 字形变形                                    | per-glyph affine jitter (+ stroke jitter) / thin-plate-spline warp                        |
+| 随机删除小尾巴                                         | randomly removing small stroke tails                                                      |
+| 字符微调                                               | per-character manual adjustment                                                           |
+| 书写优化 / 路径优化                                    | path simplification or resampling                                                         |
+| 避头尾                                                 | kinsoku: no closing punctuation at line start, no opening at line end                     |
+| 抬笔 / 落笔                                            | pen up / pen down                                                                         |
+| 落笔高度 / 落笔角度 / 落笔指令                         | pen-down Z (stepper) / servo angle / raw command (custom device)                          |
+| 落笔后暂停                                             | dwell after pen down                                                                      |
+| 写字速度                                               | feed rate (mm/min)                                                                        |
+| 书写原点 / 设置原点 / 回到原点                         | job origin marker / `G92 X0 Y0` / move to X0 Y0                                           |
+| 纸张起点 / 框线起点 / 自定义原点                       | origin modes                                                                              |
+| 之字型 / 弓字型                                        | path planning: raster vs serpentine row order (captured)                                  |
+| 写完位置                                               | where the pen parks after a job (原点 / 原点左2cm / 任务结束点)                           |
+| 换纸                                                   | sheet change between pages                                                                |
+| 断点续写                                               | resume an interrupted page from a chosen character                                        |
+| 换笔 / 多色绘制                                        | pen change / multicolour drawing                                                          |
+| 页面旋转 / 奇偶页方向                                  | 180° output rotation for odd/even pages                                                   |
+| 巡边 / 绘制框架线                                      | trace the bounds pen-up / draw the template lines                                         |
+| 百宝箱                                                 | toolbox dialog                                                                            |
+| 拓竹                                                   | Bambu Lab (3D printers used as plotters)                                                  |
+| 远程TF卡 / SD卡                                        | the ESP32 board's SD card                                                                 |
+| 配网                                                   | Wi-Fi provisioning of the board                                                           |
+| 固件参数                                               | Grbl `$` settings                                                                         |
+| 报警 / 解锁                                            | Grbl Alarm state / `$X`                                                                   |
+| 酷玩                                                   | "fun" generators (seal, maze, fractal, 3-D text)                                          |
+| 小炽                                                   | the AI assistant's persona                                                                |
 
 ### 6.5 Appendix E: source conflicts and unresolved questions
 

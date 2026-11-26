@@ -189,8 +189,7 @@ engineer-weeks for one full-time engineer working with agent help; treat them as
 - Commit the current work, then set up the CI matrix (§2.5) and make macOS and Linux build and
   pass the autotest.
 - **Naming:** window title and about box `PenKaku`, binaries `penkaku` and `penkaku-cli`,
-  crates `penkaku-*`, env vars `PENKAKU_*`, data directory `penkaku` (renamed from `chixie-rs`; old folders, saved passwords and
-  `CHIXIE_RS_*` variables are still picked up).
+  crates `penkaku-*`, env vars `PENKAKU_*`, data directory `penkaku`.
 - **Capture harness:** a scripted ChiXie3 run (`__COMPAT_LAYER=RunAsInvoker` with fake Grbl
   Telnet, see `docs/chixie3-analysis/README.md`). It takes a `.cx` / text / settings case and
   stores ChiXie3's G-code as a golden. Keep jobs under ~200 lines (Telnet stalls). This harness
