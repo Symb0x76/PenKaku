@@ -4,6 +4,8 @@ description = "PenKaku output pipeline: stroke order, page transforms, pen colou
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 penkaku-core.workspace = true
