@@ -669,7 +669,13 @@ impl ChixieRsApp {
                         let to = path.with_extension("docx");
                         window.push_notification(Notification::info(format!("旧格式 .chx 已打开，保存时将写入 {}", to.display())), cx);
                     }
-                    app.doc.update(cx, |d, cx| d.replace_doc(l.doc, cx));
+                    // On a table form, Word tables are the form's cells, not inline tables.
+                    let form = matches!(cx.global::<AppState>().active_template().map(|t| t.ruling()), Some(chixie_rs_core::layout::Ruling::Table { .. }));
+                    let doc = match l.doc.document().flatten_tables().filter(|_| form) {
+                        Some(flat) => EditDoc::from_document(flat),
+                        None => l.doc,
+                    };
+                    app.doc.update(cx, |d, cx| d.replace_doc(doc, cx));
                     app.close_backstage(window, cx);
                 }
                 Err(e) => window.push_notification(Notification::error(format!("打开失败：{e}")), cx),

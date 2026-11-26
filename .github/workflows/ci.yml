@@ -78,6 +78,8 @@ jobs:
           grep -q 'AUTOTEST_TUNE preview=true font_key=true bigger=true' autotest.log
           grep -q 'AUTOTEST_OUTPUT pens=2 serpentine=true rotated=true' autotest.log
           grep -q 'AUTOTEST_TABLE tab=true cells=4 overflow_fixed=true batch_pages=30 docx=true' autotest.log
+          grep -q 'AUTOTEST_INLINE_TABLE cells=9 frame=8 docx=true restored=true' autotest.log
+          grep -q 'AUTOTEST_DIAGRAM drawn=true errors=0 in_gcode=true docx=true' autotest.log
           grep -qF 'AUTOTEST_DETECT pdf_cells=Some([10]) photo_cells=Some([14]) background=true' autotest.log
           grep -q 'AUTOTEST_LIBRARY roundtrip=true background=true gallery=true' autotest.log
           grep -q 'AUTOTEST_FORMAT underline=true paste=true replace_keeps_ids=true import_txt=true pdf=true restored=true' autotest.log

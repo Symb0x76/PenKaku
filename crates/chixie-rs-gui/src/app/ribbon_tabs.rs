@@ -191,6 +191,8 @@ impl ChixieRsApp {
                 None,
             ))
             .child(self.edit_group(cx))
+            .child(crate::insert_ui::insert_group(self.doc.clone(), cx))
+            .when_some(crate::insert_ui::object_tools(self.doc.clone(), cx), |el, g| el.child(g))
             .when(table, |el| {
                 let view = self.doc.clone();
                 let tint = cx.theme().primary.opacity(0.06);

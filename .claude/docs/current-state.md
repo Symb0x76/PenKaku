@@ -437,3 +437,41 @@
 - Device pane order: status, jog, job (only while running), connection row (port ▾ dropdown), 自定义命令 (foldable), 串口控制台 (folded, last line preview).
 - StyleDialog: no overlay, 关闭 footer, live refresh via observe_global (skips focused input), 同中文 checkboxes renamed.
 - Not done: ListIndentIncrease icon was NOT blank (guide P0 stale); 风格预设 values are my picks (工整/轻微 3,3,0.5/随性 7,7,1.5); 字距/浮动 presets not added (ranges stay in ↘ dialog). Clicked tab shows a grey ghost bg (button focus/press state) — cosmetic.
+
+## 2026-11-26: inline tables + Mermaid flowcharts (uncommitted, branch feat/inline-tables-diagrams, worktree .claude/worktrees/inline-tables)
+
+BOSS picked: inline tables plus a Mermaid flowchart subset; cells typed in the page; lines follow the 手写 switch; tables written to DOCX as real w:tbl.
+
+- Model: an `OBJECT` (U+FFFC) char carries `Attrs.block: Option<Block>`, either `Block::Table { cols }` or `Block::Diagram { source }` (core `layout::Block`).
+  - Table region: `OBJECT` cell `CELL_BREAK` cell … `TABLE_END` (U+001E), in paragraphs of its own. Rows = cells / cols, rounded up.
+  - `Document::new_chars` strips `block` from everything except `OBJECT`.
+- Core: `diagram/` holds the Mermaid parser (flowchart/graph TD|TB|BT|LR|RL, shapes, links, labels, chains, &) and the layered layout (cycle break, longest-path ranks, dummies, barycenter, clipped edges).
+- Layout: `layout/block.rs`.
+  - A table lays out each cell as a sub-document wrapped to its column.
+  - Row height = most lines × pitch. A row that does not fit moves to the next page or column.
+  - The frame is drawn per page part. Borders waver under `SALT_FRAME` when 手写 is on.
+  - Flowcharts scale down to fit the line width and page height. Labels use synthetic ids (top bit set).
+  - All object strokes are tagged to the `OBJECT` char. A parse error goes to `Document::block_errors`.
+  - Only on Free and Rows ruling; on grids and table forms the markers draw nothing.
+- Edit (`edit/objects.rs`):
+  - Insert: insert_table, insert_diagram, set_block.
+  - Navigation: Tab / Shift+Tab move between cells; Tab from the last cell adds a row.
+  - Structure: add/delete row and column, delete_table.
+  - Backspace and Delete stop at table markers and cell breaks.
+- DOCX:
+  - Inline tables are written as w:tbl; a diagram is written as fenced ```mermaid paragraphs.
+  - The reader turns top-level w:tbl into inline tables, unless our extras show a table form (CELL_BREAK without TABLE_END), which keeps the old segment reading.
+  - Opening a file on a table template flattens inline tables (`Document::flatten_tables`).
+- GUI:
+  - 开始 › 插入 group: 表格 (rows, cols, width dialog) and 流程图 (Mermaid textarea, validated).
+  - Contextual 表格工具 / 流程图 groups. Double-click a flowchart to edit it.
+  - New icons: Table, Workflow, Between*End, Grid2x2X, SquarePen.
+- Autotest: AUTOTEST_INLINE_TABLE and AUTOTEST_DIAGRAM lines are in the ci.yml greps. Run locally on 2026-11-26 (AFK): all 18 greps match. AUTOTEST_DIAGRAM counts only font-independent strokes (outlines, links, arrows), because the demo font has 4 glyphs.
+- Verified: cargo test --workspace passes; clippy -D warnings is clean; output and doc goldens are unchanged.
+- Known gaps:
+  - A row taller than a page is not clipped; it runs past the page.
+  - Caret up/down in a table follows line order.
+  - Switching to a table template after inserting inline tables does not flatten them.
+  - Merged Word cells (gridSpan/vMerge) read as ragged rows.
+  - No layout badge for block_errors; the dialog validates instead.
+
