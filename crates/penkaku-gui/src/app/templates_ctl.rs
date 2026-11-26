@@ -18,15 +18,21 @@ use super::PenKakuApp;
 use crate::state::AppState;
 use crate::templates_view::preview;
 
-/// ChiXie3's 标签 for 写字模板.
-pub const TAGS: [&str; 9] = ["全部模板", "人物角色", "教育学习", "艺术结构", "建筑风景", "动物植物", "科技科学", "交通玩具", "其他模板"];
+/// Every 标签 used by a template in the library, sorted. Tags are the user's own: typed in the
+/// template editor, so the gallery offers exactly the ones in use.
+pub fn all_tags(cx: &App) -> Vec<String> {
+    let mut v: Vec<String> = cx.global::<AppState>().templates.templates.iter().flat_map(|t| t.tags.iter().cloned()).collect();
+    v.sort();
+    v.dedup();
+    v
+}
 
 /// Gallery state (文件 › 新建).
 pub struct Gallery {
     /// 0 在线模板, 1 我的模板, 2 我的收藏.
     pub tab: usize,
-    /// Index into [`TAGS`] (0 = all).
-    pub tag: usize,
+    /// Tag filter (None = 全部模板).
+    pub tag: Option<String>,
     /// 0 时间最新, 1 收藏优先, 2 名称.
     pub sort: usize,
     pub search: Entity<InputState>,
@@ -34,7 +40,7 @@ pub struct Gallery {
 
 impl Gallery {
     pub fn new(window: &mut Window, cx: &mut App) -> Self {
-        Self { tab: 1, tag: 0, sort: 0, search: cx.new(|cx| InputState::new(window, cx).placeholder("请输入关键字")) }
+        Self { tab: 1, tag: None, sort: 0, search: cx.new(|cx| InputState::new(window, cx).placeholder("请输入关键字")) }
     }
 }
 
@@ -45,7 +51,7 @@ pub struct TemplateWatch {
 }
 
 /// The templates the gallery shows, in order: tab, tag, search and sort applied.
-pub fn gallery_list(tab: usize, tag: usize, sort: usize, query: &str, cx: &App) -> Vec<Template> {
+pub fn gallery_list(tab: usize, tag: Option<&str>, sort: usize, query: &str, cx: &App) -> Vec<Template> {
     let st = cx.global::<AppState>();
     let entries = st.template_lib.scan();
     let mut v: Vec<(Template, std::time::SystemTime)> = st
@@ -54,7 +60,7 @@ pub fn gallery_list(tab: usize, tag: usize, sort: usize, query: &str, cx: &App) 
         .iter()
         .map(|t| (t.clone(), entries.iter().find(|e| e.template.name == t.name).map_or(std::time::SystemTime::UNIX_EPOCH, |e| e.modified)))
         .filter(|(t, _)| tab != 2 || t.favourite)
-        .filter(|(t, _)| tag == 0 || t.tags.iter().any(|x| x == TAGS[tag]))
+        .filter(|(t, _)| tag.is_none_or(|g| t.tags.iter().any(|x| x == g)))
         .filter(|(t, _)| query.is_empty() || t.name.contains(query) || t.tags.iter().any(|x| x.contains(query)))
         .collect();
     match sort {
@@ -204,13 +210,21 @@ impl PenKakuApp {
                 .child(div().p_6().text_sm().text_color(muted).child("在线模板需要服务器支持，暂不可用。可以用「我的模板」里的模板，或在「模板管理」中导入别人分享的模板文件（.svg / .zip / .xlsx）。"))
                 .into_any_element();
         }
-        let chip = |i: usize, label: &'static str, on: bool, cx: &mut Context<Self>| {
+        // A filter on a tag no template carries any more falls back to 全部模板.
+        let in_use = all_tags(cx);
+        let current = g.tag.clone().filter(|t| in_use.contains(t));
+        let chip = |i: usize, label: String, tag: Option<String>, cx: &mut Context<Self>| {
+            let on = tag == current;
             Button::new(("gal-tag", i)).xsmall().label(label).when(on, |b| b.primary()).when(!on, |b| b.ghost()).on_click(cx.listener(move |a, _: &ClickEvent, _w, cx| {
-                a.gallery.tag = i;
+                a.gallery.tag = tag.clone();
                 cx.notify();
             }))
         };
-        let tags = h_flex().gap_1().flex_wrap().child(div().text_sm().text_color(muted).child("标签：")).children(TAGS.iter().enumerate().map(|(i, t)| chip(i, t, i == g.tag, cx)));
+        let mut chips = vec![chip(0, "全部模板".into(), None, cx)];
+        for (i, t) in in_use.into_iter().enumerate() {
+            chips.push(chip(i + 1, t.clone(), Some(t), cx));
+        }
+        let tags = h_flex().gap_1().flex_wrap().child(div().text_sm().text_color(muted).child("标签：")).children(chips);
         let sort = h_flex().gap_1().child(div().text_sm().text_color(muted).child("排序：")).children(["时间最新", "收藏优先", "名称"].iter().enumerate().map(|(i, s)| {
             Button::new(("gal-sort", i)).xsmall().label(*s).when(i == g.sort, |b| b.outline()).when(i != g.sort, |b| b.ghost()).on_click(cx.listener(move |a, _: &ClickEvent, _w, cx| {
                 a.gallery.sort = i;
@@ -230,10 +244,10 @@ impl PenKakuApp {
                 .child(div().text_sm().text_center().truncate().child(name))
                 .child(div().text_xs().text_center().text_color(muted).child(kind))
         };
-        let list = gallery_list(g.tab, g.tag, g.sort, &query, cx);
+        let list = gallery_list(g.tab, current.as_deref(), g.sort, &query, cx);
         let empty = list.is_empty();
         let mut row = h_flex().gap_4().flex_wrap();
-        if g.tab == 1 && g.tag == 0 && query.is_empty() {
+        if g.tab == 1 && current.is_none() && query.is_empty() {
             row = row.child(card(0, "空白文档".into(), "", None).on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.new_doc(Some(None), w, cx))));
         }
         for (i, t) in list.into_iter().enumerate() {

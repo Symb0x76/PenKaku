@@ -1069,7 +1069,7 @@ impl PenKakuApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child("写"),
+                    .child("書"),
             ))
             .when(!in_backstage, |el| {
                 el.child(

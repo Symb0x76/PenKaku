@@ -27,7 +27,7 @@ pub struct Template {
     /// follow from the grid size (`Template::grid_margins`).
     pub margins: (f32, f32, f32, f32),
     pub kind: TemplateKind,
-    /// 标签 in the template gallery (全部模板 / 人物角色 / 教育学习 / …).
+    /// 标签 in the template gallery, chosen by the user; the gallery lists those in use.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// 我的收藏.

@@ -986,8 +986,10 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<PenKakuApp>, cx: &mut App) 
                     TemplateKind::Table(tt) => tt.pages[0].background.clone(),
                     _ => None,
                 }).is_some_and(|bg| std::fs::read(assets.join(bg.file)).ok() == Some(png.clone()));
-                let names = |tag: usize, cx: &App| crate::app::templates_ctl::gallery_list(1, tag, 0, "", cx).into_iter().map(|t| t.name).collect::<Vec<_>>();
-                let gallery = names(2, cx).contains(&"自测库".to_string()) && !names(1, cx).contains(&"自测库".to_string());
+                let names = |tag: &str, cx: &App| crate::app::templates_ctl::gallery_list(1, Some(tag), 0, "", cx).into_iter().map(|t| t.name).collect::<Vec<_>>();
+                let gallery = names("教育学习", cx).contains(&"自测库".to_string())
+                    && !names("人物角色", cx).contains(&"自测库".to_string())
+                    && crate::app::templates_ctl::all_tags(cx).contains(&"教育学习".to_string());
                 let st = cx.global_mut::<AppState>();
                 st.templates.remove("自测库");
                 st.save_templates();

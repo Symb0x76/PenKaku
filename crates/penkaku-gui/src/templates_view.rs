@@ -77,6 +77,8 @@ pub struct TemplatesView {
     /// Name the draft was loaded under (renames replace it).
     original: String,
     name: Entity<InputState>,
+    /// New 标签 to add (Enter or 添加).
+    tag_input: Entity<InputState>,
     nums: Vec<(F, Entity<InputState>)>,
     /// Per-column widths (栏宽相等 off), one input per possible column.
     col_widths: Vec<Entity<InputState>>,
@@ -98,6 +100,12 @@ impl TemplatesView {
                 this.read_form(cx);
             }
         })];
+        let tag_input = cx.new(|cx| InputState::new(window, cx).placeholder("新标签，回车添加"));
+        subs.push(cx.subscribe_in(&tag_input, window, |this, _s, ev: &InputEvent, w, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.add_typed_tag(w, cx);
+            }
+        }));
         let mut nums = Vec::new();
         for f in FIELDS {
             let st = cx.new(|cx| InputState::new(window, cx).min(0.0).step(if is_count(f) { 1.0 } else { 0.5 }));
@@ -118,7 +126,7 @@ impl TemplatesView {
             }));
             col_widths.push(st);
         }
-        let mut this = Self { selected: 0, draft: None, original: String::new(), name, nums, col_widths, tbl: Default::default(), loading: false, dirty: false, _subs: subs };
+        let mut this = Self { selected: 0, draft: None, original: String::new(), name, tag_input, nums, col_widths, tbl: Default::default(), loading: false, dirty: false, _subs: subs };
         let active = cx.global::<AppState>().settings.page.template.clone();
         let ix = active.and_then(|n| cx.global::<AppState>().templates.templates.iter().position(|t| t.name == n)).unwrap_or(0);
         this.select(ix, window, cx);
@@ -467,9 +475,16 @@ impl TemplatesView {
                     .gap_1()
                     .flex_wrap()
                     .child(div().w(px(72.)).text_sm().text_color(muted).child("标签"))
-                    .children(crate::app::templates_ctl::TAGS.iter().skip(1).enumerate().map(|(i, tag)| {
-                        let on = t.tags.iter().any(|x| x == tag);
-                        Button::new(("tpl-tag", i)).xsmall().label(*tag).when(on, |b| b.primary()).when(!on, |b| b.ghost()).on_click(cx.listener(move |v, _: &ClickEvent, _w, cx| v.toggle_tag(tag, cx)))
+                    // This template's tags (click to remove), then the box for a new one, then
+                    // tags other templates use (click to add).
+                    .children(t.tags.iter().enumerate().map(|(i, tag)| {
+                        let tag = tag.clone();
+                        Button::new(("tpl-tag", i)).xsmall().primary().label(format!("{tag} ×")).tooltip("移除标签").on_click(cx.listener(move |v, _: &ClickEvent, _w, cx| v.toggle_tag(&tag, cx)))
+                    }))
+                    .child(div().w(px(132.)).child(Input::new(&self.tag_input).small()))
+                    .child(Button::new("tpl-tag-add").xsmall().outline().label("添加").on_click(cx.listener(|v, _: &ClickEvent, w, cx| v.add_typed_tag(w, cx))))
+                    .children(crate::app::templates_ctl::all_tags(cx).into_iter().filter(|x| !t.tags.contains(x)).enumerate().map(|(i, tag)| {
+                        Button::new(("tpl-tag-more", i)).xsmall().ghost().label(format!("+ {tag}")).on_click(cx.listener(move |v, _: &ClickEvent, _w, cx| v.toggle_tag(&tag, cx)))
                     }))
                     .child(Checkbox::new("tpl-fav").small().label("收藏").checked(t.favourite).on_click(cx.listener(|v, on: &bool, _w, cx| {
                         let on = *on;
@@ -627,6 +642,15 @@ impl TemplatesView {
             self.dirty = true;
             cx.notify();
         }
+    }
+
+    /// Add the tag typed in the box (trimmed; nothing if empty or already there) and clear it.
+    fn add_typed_tag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tag = self.tag_input.read(cx).value().trim().to_string();
+        if !tag.is_empty() && self.draft.as_ref().is_some_and(|t| !t.tags.contains(&tag)) {
+            self.toggle_tag(&tag, cx);
+        }
+        self.tag_input.update(cx, |s, cx| s.set_value("", window, cx));
     }
 
     fn set_paper(&mut self, w: f32, h: f32, window: &mut Window, cx: &mut Context<Self>) {
