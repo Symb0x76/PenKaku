@@ -1134,6 +1134,11 @@ impl Render for DocView {
                                 window.paint_quad(outline(rect, missing_color, BorderStyle::Dashed));
                             }
                         }
+                        // Picture spaces: dashed boxes (screen only; the pen writes just 「图k」).
+                        for s in layout_doc.pictures.iter().filter(|s| on_screen(s.page)) {
+                            let rect = Bounds::from_corners(g.screen(s.page, s.x, s.top), g.screen(s.page, s.x + s.w, s.top - s.h));
+                            window.paint_quad(outline(rect, GUIDE_COLOUR, BorderStyle::Dashed));
+                        }
                         // Ink.
                         for &k in &visible {
                             let o = g.page_origin(k);

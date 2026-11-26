@@ -677,6 +677,7 @@ impl PenKakuApp {
                     };
                     app.doc.update(cx, |d, cx| d.replace_doc(doc, cx));
                     app.close_backstage(window, cx);
+                    crate::picture_ui::offer_sheet(app.doc.clone(), Some(path.clone()), window, cx);
                 }
                 Err(e) => window.push_notification(Notification::error(format!("打开失败：{e}")), cx),
             });

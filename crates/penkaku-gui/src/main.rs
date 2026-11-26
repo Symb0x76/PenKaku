@@ -21,6 +21,7 @@ mod file_ops;
 mod firmware;
 mod find_bar;
 mod nav_pane;
+mod picture_ui;
 mod import_ui;
 mod insert_ui;
 mod cloud_preview;
@@ -903,6 +904,41 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<PenKakuApp>, cx: &mut App) 
             // The sample has 4 nodes and 4 links: 4 outlines + 4 links + 4 arrowheads, plus label
             // glyphs when the font has them (the demo font has almost none).
             println!("AUTOTEST_DIAGRAM drawn={} errors={errors} in_gcode={in_gcode} docx={docx}", drawn >= 12);
+        }
+        // 图片: a document with two pictures (a 60 × 40 mm PNG and a 30 × 30 mm one) saved as DOCX,
+        // 导入 back: two 图k spaces at those sizes, and a one-sheet picture PDF with both images.
+        {
+            use penkaku_core::layout::{Block, ImageData, OBJECT};
+            let p = std::env::temp_dir().join("penkaku-autotest-pictures.docx");
+            let view = cx.update(|cx| app.read(cx).doc.clone());
+            let saved_doc = cx.update(|cx| view.read(cx).doc().clone());
+            let mut png = Vec::new();
+            let _ = image::RgbaImage::from_pixel(4, 3, image::Rgba([200, 30, 30, 255])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png);
+            let mut d = EditDoc::from_text(&format!("图如下\n{OBJECT}\n{OBJECT}\n完"));
+            for (k, (w, h)) in [(4usize, (60.0, 40.0)), (6, (30.0, 30.0))] {
+                d.set_block(k, Block::Picture { w_mm: w, h_mm: h, number: (k as u32 - 2) / 2, media: "a.png".into(), data: ImageData::new(png.clone()) });
+            }
+            let saved = file_ops::save(&p, &d, 7, &[]).is_ok();
+            let chars = match crate::import_ui::read_import(&p, false) {
+                Ok(crate::import_ui::ImportSource::Chars(c)) => c,
+                _ => Vec::new(),
+            };
+            cx.update(|cx| view.update(cx, |v, cx| v.import_chars(chars, penkaku_doc::import::ImportMode::Overwrite, cx)));
+            cx.background_executor().timer(pause(300)).await;
+            let (spaces, sheets, images) = cx.update(|cx| {
+                let v = view.read(cx);
+                let doc = v.doc().document();
+                let slots: Vec<(u32, f32, f32)> = v.layout_doc().pictures.iter().map(|s| (s.number, s.w.round(), s.h.round())).collect();
+                let items: Vec<penkaku_output::picture_sheet::SheetItem> = v.layout_doc().pictures.iter().map(|s| penkaku_output::picture_sheet::SheetItem { number: s.number, w: s.w, h: s.h, data: penkaku_doc::picture_data(doc, s.char_ix) }).collect();
+                let font = cx.global::<AppState>().font_set.clone();
+                let pdf = penkaku_output::picture_sheet::picture_pdf(&items, &*font, &Default::default());
+                let images = String::from_utf8_lossy(&pdf).matches("/Subtype /Image").count() + String::from_utf8_lossy(&pdf).matches("/Subtype/Image").count();
+                let sheets = penkaku_output::picture_sheet::pack(&items, &Default::default()).iter().map(|q| q.sheet + 1).max().unwrap_or(0);
+                (slots, sheets, images)
+            });
+            let _ = std::fs::remove_file(&p);
+            cx.update(|cx| view.update(cx, |v, cx| v.replace_doc(saved_doc, cx)));
+            println!("AUTOTEST_PICTURES saved={saved} spaces={:?} sheets={sheets} images={images}", spaces);
         }
         // 导入 PDF/图片: a generated PDF form (exact, in mm) and a tilted photo of another form
         // become pages of a new table template; the photo also leaves a background image.

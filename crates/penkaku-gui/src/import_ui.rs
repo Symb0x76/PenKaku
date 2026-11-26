@@ -80,14 +80,16 @@ pub fn import_path(view: Entity<DocView>, path: PathBuf, window: &mut Window, cx
     }
     if view.read(cx).doc().is_empty() {
         view.update(cx, |v, cx| v.import_chars(chars, ImportMode::Overwrite, cx));
+        crate::picture_ui::offer_sheet(view, Some(path), window, cx);
         return;
     }
     window.open_dialog(cx, move |d, _w, _cx| {
         let pick = |mode: ImportMode| {
-            let (view, chars) = (view.clone(), chars.clone());
+            let (view, chars, path) = (view.clone(), chars.clone(), path.clone());
             move |_: &ClickEvent, w: &mut Window, cx: &mut App| {
                 w.close_dialog(cx);
                 view.update(cx, |v, cx| v.import_chars(chars.clone(), mode, cx));
+                crate::picture_ui::offer_sheet(view.clone(), Some(path.clone()), w, cx);
             }
         };
         d.title("导入")

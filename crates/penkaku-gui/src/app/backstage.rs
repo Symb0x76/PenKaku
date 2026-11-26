@@ -178,6 +178,11 @@ impl PenKakuApp {
                     .child(Button::new("bs-pdf").large().icon(Icon::new(IconName::FileDown)).label("导出 PDF…").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.export_pdf(w, cx))))
                     .child(Button::new("bs-print").large().icon(Icon::new(IconName::Printer)).label("打印…").on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.print_doc(w, cx)))),
             )
+            .child(div().pt_4().text_sm().text_color(muted).child("图片文档：文中的图片按预留空位的大小排在 A4 纸上，带编号和裁剪线，打印后剪下贴进报告。"))
+            .child(Button::new("bs-pictures").large().icon(Icon::new(IconName::FileDown)).label("导出图片文档 (PDF)…").on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
+                let source = t.file.clone();
+                crate::picture_ui::export_sheet(t.doc.clone(), source.as_deref(), w, cx);
+            })))
             .into_any_element()
     }
 

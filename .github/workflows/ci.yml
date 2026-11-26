@@ -91,6 +91,7 @@ jobs:
         grep -q 'AUTOTEST_SCRIPT english_scaled=true' autotest.log
         grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
         grep -q 'AUTOTEST_PERF pages=' autotest.log
+        grep -qF 'AUTOTEST_PICTURES saved=true spaces=[(1, 60.0, 40.0), (2, 30.0, 30.0)] sheets=1 images=2' autotest.log
 
     # Debug package (checked on every run, uploaded only for tags).
     # Windows: the exes (icon embedded by build.rs). macOS: penkaku.app with its .icns.
