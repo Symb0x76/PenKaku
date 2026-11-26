@@ -39,6 +39,9 @@ pub struct Deformation {
     pub tail_pct: f32,
     /// A hook is at most this long, mm (小尾巴长度).
     pub tail_max_mm: f32,
+    /// 数字和英文也变形: 字形扭曲 and 字形倾斜 reach letters and digits too, so a repeated digit
+    /// is not drawn the same every time. Off = ChiXie3, which warps only Chinese.
+    pub shape_latin: bool,
 }
 
 impl Default for Deformation {
@@ -57,6 +60,7 @@ impl Default for Deformation {
             remove_tails: true,
             tail_pct: TAIL_PCT,
             tail_max_mm: TAIL_MAX_MM,
+            shape_latin: true,
         }
     }
 }
@@ -84,8 +88,9 @@ impl Deformation {
         self.slant_degree.unwrap_or(self.shape_degree)
     }
 
-    /// Deform one glyph's strokes (glyph units, y down). `mm_per_unit` converts the mm-valued
-    /// stroke shift and noise into glyph units. Draws from `rng` in a fixed order.
+    /// Deform one glyph's strokes (glyph units, y down). `cjk`: a Chinese glyph, which always
+    /// gets the shape warp; others get it with `shape_latin`. `mm_per_unit` converts the
+    /// mm-valued stroke shift and noise into glyph units. Draws from `rng` in a fixed order.
     pub fn apply(&self, strokes: &[Stroke], cjk: bool, mm_per_unit: f32, rng: &mut Rng) -> Vec<Stroke> {
         let mut out: Vec<Stroke> = strokes.to_vec();
         if !self.is_active() || out.iter().all(|s| s.is_empty()) {
@@ -116,7 +121,7 @@ impl Deformation {
             }
         }
 
-        if self.shape && (self.shape_degree > 0.0 || self.slant() > 0.0) && cjk {
+        if self.shape && (self.shape_degree > 0.0 || self.slant() > 0.0) && (cjk || self.shape_latin) {
             // Slant: on paper x shifts right as y goes up; glyph y is down, so use (cy - y).
             let k = SHAPE_SHEAR.sample(rng) * self.slant();
             let amp = unit(SHAPE_NOISE_MM * self.shape_degree);
@@ -333,14 +338,17 @@ mod tests {
     }
 
     #[test]
-    fn shape_slants_cjk_only() {
+    fn shape_slants_cjk_and_latin_with_the_switch() {
         let d = Deformation { enabled: true, shape: true, ..Default::default() };
         let vertical = vec![vec![(0.0, 0.0), (0.0, 10.0)]]; // top then bottom (y down)
         let cjk = d.apply(&vertical, true, 1.0, &mut Rng::new(9));
         // Top point moves right relative to the bottom point: shear ~0.11–0.14 * 10 units.
         let lean = (cjk[0][0].0 - cjk[0][1].0) / 10.0;
         assert!((0.10..=0.15).contains(&lean), "lean {lean}");
-        assert_eq!(d.apply(&vertical, false, 1.0, &mut Rng::new(9)), vertical);
+        // 数字和英文也变形 (default on): a digit gets the same treatment; off, it is untouched.
+        assert_eq!(d.apply(&vertical, false, 1.0, &mut Rng::new(9)), cjk);
+        let off = Deformation { shape_latin: false, ..d };
+        assert_eq!(off.apply(&vertical, false, 1.0, &mut Rng::new(9)), vertical);
     }
 
     #[test]

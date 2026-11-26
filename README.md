@@ -75,7 +75,7 @@ In the open-source **CH340 + Arduino/ESP32 + GRBL** plotter ecosystem (such as `
 
 ## Extra Features Beyond Traditional Clients
 
-- **Per-Script Styles (中英文 / 数字分开设置):** Independent size scaling, baseline offset, vertical float, and deformation for English letters and digits separate from Chinese characters.
+- **Per-Script Styles (中英文 / 数字分开设置):** Independent size scaling, baseline offset, vertical float, and deformation for English letters and digits separate from Chinese characters. Shape warp and slant reach letters and digits too (on by default, switchable back to ChiXie3's Chinese-only behaviour), so repeated digits are never drawn identically.
 - **Cursive Stroke Joining (连笔):** Bridges close stroke endpoints within a glyph using short pen-down curves for natural fast-writing flow.
 - **Per-Character Pen Pressure & Jitter (字符轻重与随机轻重):** Five per-character Z-depth pressure tiers (`更轻Ⅱ` to `更重Ⅱ`) plus configurable random pressure variation (`press_jitter`).
 - **Independent Slant & Tail Controls:** Separates glyph slant (`slant_degree`) from shape warp and exposes tail-removal probability and max length settings.

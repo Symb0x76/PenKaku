@@ -526,7 +526,9 @@ impl PageParams {
     /// glyph unit.
     pub fn reshape(&self, strokes: &[Stroke], c: char, sy: f32, id: u64) -> Vec<Stroke> {
         let d = self.deformation_for(c);
-        let out = if d.is_active() { d.apply(strokes, is_cjk(c), sy, &mut rng_for(self.style.seed, SALT_DEFORM, id)) } else { strokes.to_vec() };
+        // A script's own deformation (英文 / 数字) warps its chars like Chinese ones.
+        let own = self.style.script_of(c).is_some_and(|s| s.deformation.is_some());
+        let out = if d.is_active() { d.apply(strokes, is_cjk(c) || own, sy, &mut rng_for(self.style.seed, SALT_DEFORM, id)) } else { strokes.to_vec() };
         if self.style.cursive.enabled {
             self.style.cursive.join(&out, EM_UNITS, &mut rng_for(self.style.seed, crate::handwriting::SALT_CURSIVE, id))
         } else {

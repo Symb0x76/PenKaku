@@ -44,7 +44,8 @@ fn styled_output_is_stable() {
         mm_per_unit: 1.0,
         origin: (0.0, 0.0),
         style: HandwritingStyle { enabled: true, seed: 1, ..Default::default() },
-        deformation: Deformation { enabled: true, base: true, shape: true, ..Default::default() },
+        // ChiXie3's deformation: the shape warp on Chinese only (数字和英文也变形 off).
+        deformation: Deformation { enabled: true, base: true, shape: true, shape_latin: false, ..Default::default() },
         ..Default::default()
     };
     let out = emit_document(&layout(TEXT, &font, &p), &DeviceProfile::default());

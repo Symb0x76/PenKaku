@@ -379,8 +379,17 @@ const LEVELS: [f32; 11] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.
 /// 笔画变形 / 字形扭曲 / 字形倾斜 / 小尾巴: how strong each kind of deformation is (0 = off).
 fn degree_rows(d: &Deformation, which: Option<usize>) -> Div {
     let tails = d.remove_tails;
+    // 数字和英文也变形: on the shared (中文) deformation only; a script's own one always warps.
+    let latin = which.is_none().then_some(d.shape_latin);
     v_flex()
         .gap_1p5()
+        .when_some(latin, |el, on| {
+            el.child(Checkbox::new("shape-latin").small().label("数字和英文也做字形扭曲和倾斜（关闭则同 ChiXie3，只变形中文）").checked(on).on_click(|v: &bool, _w, cx| {
+                let st = cx.global_mut::<AppState>();
+                st.settings.style.deformation.shape_latin = *v;
+                st.save_settings();
+            }))
+        })
         .child(
             h_flex()
                 .gap_2()
