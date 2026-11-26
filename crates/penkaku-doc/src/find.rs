@@ -89,9 +89,65 @@ pub fn punct_spaces(hay: &[char], within: Range<usize>) -> Vec<Range<usize>> {
     })
 }
 
+/// Arrows and the operators a hand writes without spaces around them.
+fn is_operator(c: char) -> bool {
+    matches!(c, '=' | '+' | '<' | '>' | '→' | '←' | '↔' | '⇒' | '⇐' | '⇔')
+}
+
+/// Every run of spaces inside `within` (on one line) next to an operator or arrow: `21H -> 20H`,
+/// `a = b + c`. A lone `-` stays spaced (it may be a minus or a dash); `->` counts as an arrow.
+pub fn operator_spaces(hay: &[char], within: Range<usize>) -> Vec<Range<usize>> {
+    // `-` belongs to an arrow when it follows `<` or precedes `>`.
+    gap_runs_at(hay, within, |before, rest| {
+        let (l, r) = (before[before.len() - 1], rest[0]);
+        let arrow_dash = |c: char, other: Option<&char>, end: char| c == '-' && other == Some(&end);
+        is_operator(l) || is_operator(r) || arrow_dash(r, rest.get(1), '>') || arrow_dash(l, before.len().checked_sub(2).map(|k| &before[k]), '<')
+    })
+}
+
+/// ASCII arrows a hand writes as one arrow, longest first.
+const ARROWS: [(&str, char); 5] = [("<->", '↔'), ("<=>", '⇔'), ("->", '→'), ("<-", '←'), ("=>", '⇒')];
+
+/// Every ASCII arrow (`->`, `<-`, `=>`, `<->`, `<=>`) inside `within`, with the arrow it becomes.
+pub fn ascii_arrows(hay: &[char], within: Range<usize>) -> Vec<(Range<usize>, char)> {
+    let end = within.end.min(hay.len());
+    let mut out = Vec::new();
+    let mut i = within.start;
+    while i < end {
+        let hit = ARROWS.iter().find(|(pat, _)| {
+            let n = pat.chars().count();
+            i + n <= end && hay[i..i + n].iter().copied().eq(pat.chars())
+        });
+        match hit {
+            Some((pat, arrow)) => {
+                let n = pat.chars().count();
+                out.push((i..i + n, *arrow));
+                i += n;
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
+/// Fullwidth punctuation a hand writes half-width.
+const HALF_WIDTH: [(char, char); 7] = [('，', ','), ('；', ';'), ('：', ':'), ('！', '!'), ('？', '?'), ('（', '('), ('）', ')')];
+
+/// Every `，；：！？（）` inside `within`, with its half-width form.
+pub fn fullwidth_punct(hay: &[char], within: Range<usize>) -> Vec<(Range<usize>, char)> {
+    let end = within.end.min(hay.len());
+    (within.start..end).filter_map(|i| HALF_WIDTH.iter().find(|(f, _)| *f == hay[i]).map(|&(_, h)| (i..i + 1, h))).collect()
+}
+
 /// Every run of spaces inside `within` (on one line) whose neighbours `hit(left, right)` accepts,
 /// left to right.
 fn gap_runs(hay: &[char], within: Range<usize>, hit: impl Fn(char, char) -> bool) -> Vec<Range<usize>> {
+    gap_runs_at(hay, within, |before, rest| hit(before[before.len() - 1], rest[0]))
+}
+
+/// [`gap_runs`] whose test sees the text up to the run (`before`, its last char the left
+/// neighbour) and from it on (`rest`, its first char the right neighbour).
+fn gap_runs_at(hay: &[char], within: Range<usize>, hit: impl Fn(&[char], &[char]) -> bool) -> Vec<Range<usize>> {
     let end = within.end.min(hay.len());
     let mut out = Vec::new();
     let mut i = within.start;
@@ -104,8 +160,10 @@ fn gap_runs(hay: &[char], within: Range<usize>, hit: impl Fn(char, char) -> bool
         while i < hay.len() && is_gap(hay[i]) {
             i += 1;
         }
-        let (Some(&l), Some(&r)) = (start.checked_sub(1).and_then(|k| hay.get(k)), hay.get(i)) else { continue };
-        if hit(l, r) {
+        if start == 0 || i >= hay.len() {
+            continue;
+        }
+        if hit(&hay[..start], &hay[i..]) {
             out.push(start..i.min(end));
         }
     }
@@ -136,6 +194,74 @@ impl EditDoc {
         if n > 0 {
             self.replace_many(hits.into_iter().map(|r| (r, String::new())).collect());
         }
+        n
+    }
+
+    /// The selection, or the whole text when nothing is selected: what a 文本清理 works on.
+    fn clean_range(&self) -> Range<usize> {
+        let sel = self.selection();
+        if sel.is_empty() { 0..self.len() } else { sel }
+    }
+
+    /// Apply `edits` (one undo step) and return `within` grown or shrunk by the length change,
+    /// so the next clean-up in a chain still covers the same text.
+    fn apply_clean(&mut self, within: Range<usize>, edits: Vec<(Range<usize>, String)>) -> Range<usize> {
+        let removed: usize = edits.iter().map(|e| e.0.len()).sum();
+        let added: usize = edits.iter().map(|e| e.1.chars().count()).sum();
+        self.replace_many(edits);
+        within.start..(within.end + added).saturating_sub(removed)
+    }
+
+    /// 符号两侧空格: spaces around arrows and `= + < >` in the selection or the whole text (one
+    /// undo step); returns how many runs were removed.
+    pub fn remove_operator_spaces(&mut self) -> usize {
+        let hits = operator_spaces(self.chars(), self.clean_range());
+        let n = hits.len();
+        let within = self.clean_range();
+        self.apply_clean(within, hits.into_iter().map(|r| (r, String::new())).collect());
+        n
+    }
+
+    /// 箭头: `->` `<-` `=>` `<->` `<=>` become `→ ← ⇒ ↔ ⇔` in the selection or the whole text (one
+    /// undo step); returns how many were replaced.
+    pub fn join_arrows(&mut self) -> usize {
+        let within = self.clean_range();
+        let hits = ascii_arrows(self.chars(), within.clone());
+        let n = hits.len();
+        self.apply_clean(within, hits.into_iter().map(|(r, c)| (r, c.to_string())).collect());
+        n
+    }
+
+    /// 标点半角: `，；：！？（）` become `,;:!?()` in the selection or the whole text (one undo
+    /// step); returns how many were replaced.
+    pub fn halve_punct(&mut self) -> usize {
+        let within = self.clean_range();
+        let hits = fullwidth_punct(self.chars(), within.clone());
+        let n = hits.len();
+        self.apply_clean(within, hits.into_iter().map(|(r, c)| (r, c.to_string())).collect());
+        n
+    }
+
+    /// 一键手写化: every clean-up in turn (箭头, 标点半角, then the 符号 / 标点 / 中英 spaces) on
+    /// the selection or the whole text, as one undo step; returns how many changes were made.
+    pub fn clean_for_handwriting(&mut self) -> usize {
+        let mark = self.undo_mark();
+        let mut within = self.clean_range();
+        let mut n = 0;
+        type Pass = fn(&[char], Range<usize>) -> Vec<(Range<usize>, String)>;
+        let passes: [Pass; 5] = [
+            |h, w| ascii_arrows(h, w).into_iter().map(|(r, c)| (r, c.to_string())).collect(),
+            |h, w| fullwidth_punct(h, w).into_iter().map(|(r, c)| (r, c.to_string())).collect(),
+            |h, w| operator_spaces(h, w).into_iter().map(|r| (r, String::new())).collect(),
+            |h, w| punct_spaces(h, w).into_iter().map(|r| (r, String::new())).collect(),
+            |h, w| cjk_latin_spaces(h, w).into_iter().map(|r| (r, String::new())).collect(),
+        ];
+        for pass in passes {
+            let edits = pass(self.chars(), within.clone());
+            n += edits.len();
+            within = self.apply_clean(within, edits);
+        }
+        self.fold_undo_since(mark);
         n
     }
 
@@ -206,6 +332,55 @@ mod tests {
         // Between two words, or across a newline, nothing goes.
         let mut d = EditDoc::from_text("中 文 a b ok. \n，x");
         assert_eq!(d.remove_punct_spaces(), 0);
+    }
+
+    #[test]
+    fn operator_spaces_go_minus_spaces_stay() {
+        let mut d = EditDoc::from_text("SP:21H -> 20H;A = b + c, 5 - 3, x <- y, p => q\nend");
+        assert_eq!(d.remove_operator_spaces(), 10);
+        assert_eq!(d.text(), "SP:21H->20H;A=b+c, 5 - 3, x<-y, p=>q\nend");
+        assert!(d.undo());
+        // A space at the start of a line (after the newline) stays.
+        let mut d = EditDoc::from_text("a=\n b");
+        assert_eq!(d.remove_operator_spaces(), 0);
+    }
+
+    #[test]
+    fn ascii_arrows_become_one_arrow() {
+        let mut d = EditDoc::from_text("a->b<-c=>d<->e<=>f, 5 - 3 > 2");
+        assert_eq!(d.join_arrows(), 5);
+        assert_eq!(d.text(), "a→b←c⇒d↔e⇔f, 5 - 3 > 2");
+    }
+
+    #[test]
+    fn fullwidth_punct_goes_half() {
+        let mut d = EditDoc::from_text("甲：乙；丙，丁！（戊）？。、");
+        assert_eq!(d.halve_punct(), 7);
+        assert_eq!(d.text(), "甲:乙;丙,丁!(戊)?。、");
+    }
+
+    #[test]
+    fn handwriting_cleanup_is_one_undo_step_and_respects_the_selection() {
+        let src = "SP：21H -> 20H；A：1FH -> 21H。 用 Rust 写";
+        let mut d = EditDoc::from_text(src);
+        assert!(d.clean_for_handwriting() > 0);
+        assert_eq!(d.text(), "SP:21H→20H;A:1FH→21H。用Rust写");
+        assert!(d.undo());
+        assert_eq!(d.text(), src);
+        assert!(!d.undo());
+        // Only the selection: the first line.
+        let mut d = EditDoc::from_text("a -> b ， c\nd -> e");
+        d.select_range(0..10);
+        d.clean_for_handwriting();
+        // `，` turns into `,`, which keeps English spacing before a Latin word.
+        assert_eq!(d.text(), "a→b, c\nd -> e");
+    }
+
+    #[test]
+    fn handwriting_cleanup_of_register_notes() {
+        let mut d = EditDoc::from_text("SP:21H -> 20H；A:1FH -> 21H；\n30H:24H -> 20H；PSW：01H -> 24H。");
+        d.clean_for_handwriting();
+        assert_eq!(d.text(), "SP:21H→20H;A:1FH→21H;\n30H:24H→20H;PSW:01H→24H。");
     }
 
     #[test]

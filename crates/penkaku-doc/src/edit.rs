@@ -233,6 +233,24 @@ impl EditDoc {
         self.last = kind;
     }
 
+    /// How many undo steps there are, to pass to [`Self::fold_undo_since`] later.
+    pub(crate) fn undo_mark(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Fold the undo steps opened since `mark` into one, so several edits undo at once.
+    pub(crate) fn fold_undo_since(&mut self, mark: usize) {
+        if mark >= self.undo.len() {
+            return;
+        }
+        let mut steps = self.undo.split_off(mark);
+        let mut first = steps.remove(0);
+        for s in steps {
+            first.cmds.extend(s.cmds);
+        }
+        self.undo.push(first);
+    }
+
     /// Apply `cmd` and record its inverse in the current undo step.
     fn exec(&mut self, cmd: Command) {
         let inv = self.doc.apply(cmd);

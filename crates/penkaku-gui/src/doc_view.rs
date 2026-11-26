@@ -657,17 +657,9 @@ impl DocView {
         self.doc.import_chars(chars, mode);
         self.edited(cx);
     }
-    /// 消除中英空格 in the selection (or everywhere); returns how many gaps went.
-    pub fn remove_cjk_latin_spaces(&mut self, cx: &mut Context<Self>) -> usize {
-        let n = self.doc.remove_cjk_latin_spaces();
-        if n > 0 {
-            self.edited(cx);
-        }
-        n
-    }
-    /// 消除标点空格 in the selection (or everywhere); returns how many gaps went.
-    pub fn remove_punct_spaces(&mut self, cx: &mut Context<Self>) -> usize {
-        let n = self.doc.remove_punct_spaces();
+    /// Run a 文本清理 on the selection (or everywhere); returns how many changes it made.
+    pub fn clean(&mut self, f: impl FnOnce(&mut EditDoc) -> usize, cx: &mut Context<Self>) -> usize {
+        let n = f(&mut self.doc);
         if n > 0 {
             self.edited(cx);
         }

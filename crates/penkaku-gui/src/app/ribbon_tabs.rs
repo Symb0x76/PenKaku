@@ -254,19 +254,27 @@ impl PenKakuApp {
                     .into_any_element(),
                 small("text-clean", "文本清理", IconName::RemoveFormatting)
                     .dropdown_caret(true)
-                    .tooltip("全选、消除多余空格（有选中时只处理选中部分）")
+                    .tooltip("按手写习惯整理文字：空格、标点、箭头（有选中时只处理选中部分）")
                     .dropdown_menu(move |m, _w, _cx| {
-                        let (d1, d2) = (doc.clone(), doc.clone());
+                        // Each item runs one clean-up on the document and reports the count.
+                        let item = |label: &'static str, f: fn(&mut penkaku_doc::EditDoc) -> usize, msg: fn(usize) -> String| {
+                            let d = doc.clone();
+                            PopupMenuItem::new(label).on_click(move |_, w, cx| {
+                                let n = d.update(cx, |d, cx| d.clean(f, cx));
+                                w.push_notification(gpui_kit::component::notification::Notification::info(msg(n)), cx);
+                            })
+                        };
+                        let changed = |n: usize| if n == 0 { "已经符合手写习惯，没有改动".to_string() } else { format!("已整理 {n} 处") };
+                        let replaced = |n: usize| if n == 0 { "没有需要替换的符号".to_string() } else { format!("已替换 {n} 处") };
                         m.item(PopupMenuItem::new("全选").on_click(editor_action(doc.clone(), Box::new(doc_view::SelectAll))))
                             .separator()
-                            .item(PopupMenuItem::new("消除中英空格（中文与英文、数字之间）").on_click(move |_, w, cx| {
-                                let n = d1.update(cx, |d, cx| d.remove_cjk_latin_spaces(cx));
-                                w.push_notification(gpui_kit::component::notification::Notification::info(done(n)), cx);
-                            }))
-                            .item(PopupMenuItem::new("消除标点空格（英文标点后的正常空格保留）").on_click(move |_, w, cx| {
-                                let n = d2.update(cx, |d, cx| d.remove_punct_spaces(cx));
-                                w.push_notification(gpui_kit::component::notification::Notification::info(done(n)), cx);
-                            }))
+                            .item(item("一键按手写整理（下面全部）", |d| d.clean_for_handwriting(), changed))
+                            .separator()
+                            .item(item("箭头写成一笔（-> 改成 →）", |d| d.join_arrows(), replaced))
+                            .item(item("标点改半角（，；：！？（） 改成 ,;:!?()）", |d| d.halve_punct(), replaced))
+                            .item(item("消除符号两侧空格（-> = + < > 等）", |d| d.remove_operator_spaces(), done))
+                            .item(item("消除中英空格（中文与英文、数字之间）", |d| d.remove_cjk_latin_spaces(), done))
+                            .item(item("消除标点空格（英文标点后的正常空格保留）", |d| d.remove_punct_spaces(), done))
                     })
                     .into_any_element(),
             ]),
