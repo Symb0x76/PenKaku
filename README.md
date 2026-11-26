@@ -1,6 +1,22 @@
-**English** | [简体中文](README.zh-CN.md)
+<div align="center">
+
+<img src="crates/penkaku-gui/resources/icon/png/256.png" width="180" alt="PenKaku icon">
 
 # PenKaku
+
+**Type it, lay it out, let the pen plotter write it by hand.**
+
+[![CI](https://github.com/Symb0x76/PenKaku/actions/workflows/ci.yml/badge.svg)](https://github.com/Symb0x76/PenKaku/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Symb0x76/PenKaku?include_prereleases&sort=semver)](https://github.com/Symb0x76/PenKaku/releases)
+[![Rust](https://img.shields.io/badge/rust-1.98%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#download)
+[![GRBL](https://img.shields.io/badge/firmware-GRBL%20%7C%20Grbl__ESP32-green)](#position-in-the-open-source-plotter-ecosystem)
+[![Offline](https://img.shields.io/badge/offline-100%25-brightgreen)](#)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
+
+**English** | [简体中文](README.zh-CN.md)
+
+</div>
 
 *Formerly `chixie-rs` — see [Rename Proposal](docs/rename-proposal.md).*
 
@@ -11,6 +27,25 @@ Unlike traditional G-code senders built for CNC milling or raw vector art, this 
 > Runs natively on **Windows, macOS, and Linux**. Uses standard single-line SVG fonts (compatible with Inkscape Hershey Text) and works **100% offline**, while keeping backward compatibility with ChiXie cloud fonts and ChiXie3 import formats.
 >
 > **ChiXie account login is supported:** sign in with your existing ChiXie (炽写) account to browse the cloud font catalog and download your fonts into the local library. Login is optional — once downloaded, fonts stay on disk and everything works offline.
+
+---
+
+## Screenshots
+
+![Editor: rich text laid out on ruled paper in a handwriting font](docs/screenshots/editor.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/writing.png" alt="Writing a page on the plotter (simulated device) with live progress"></td>
+    <td width="50%"><img src="docs/screenshots/templates.png" alt="Template editor: composition grid with user-defined tags"></td>
+  </tr>
+  <tr>
+    <td align="center">Writing a page, with live progress (simulated device)</td>
+    <td align="center">Template editor with your own tags</td>
+  </tr>
+</table>
+
+![New document gallery filtered by your own tags](docs/screenshots/gallery.png)
 
 ---
 
@@ -201,3 +236,7 @@ Run `penkaku-cli --help` to list every command and option:
 - [docs/reimplementation-plan.md](docs/reimplementation-plan.md): Architecture and milestones
 - [docs/protocol.md](docs/protocol.md): Device protocol and G-code captures
 - [docs/hardware-checklist.md](docs/hardware-checklist.md): Hardware verification checklist
+
+## License
+
+PenKaku is licensed under the [GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`).

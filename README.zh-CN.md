@@ -1,6 +1,22 @@
-[English](README.md) | **简体中文**
+<div align="center">
+
+<img src="crates/penkaku-gui/resources/icon/png/256.png" width="180" alt="PenKaku 图标">
 
 # PenKaku
+
+**输入、排版，交给写字机一笔一画写出来。**
+
+[![CI](https://github.com/Symb0x76/PenKaku/actions/workflows/ci.yml/badge.svg)](https://github.com/Symb0x76/PenKaku/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Symb0x76/PenKaku?include_prereleases&sort=semver)](https://github.com/Symb0x76/PenKaku/releases)
+[![Rust](https://img.shields.io/badge/rust-1.98%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#下载安装)
+[![GRBL](https://img.shields.io/badge/firmware-GRBL%20%7C%20Grbl__ESP32-green)](#)
+[![Offline](https://img.shields.io/badge/offline-100%25-brightgreen)](#)
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
+
+[English](README.md) | **简体中文**
+
+</div>
 
 *原名 `chixie-rs`，改名缘由见[重命名提案](docs/rename-proposal.md)。*
 
@@ -11,6 +27,25 @@
 > 原生支持 **Windows、macOS 和 Linux**。支持任意标准单线 SVG 字体（含 Inkscape Hershey Text 生态），**完全离线可用**；同时保留对炽写云端字库与 ChiXie3 旧格式的向后兼容。
 >
 > **支持炽写（ChiXie）账号登录：** 用已有的炽写账号登录后，即可浏览云端字库、获取已收藏的字体并下载到本地字体库。登录是可选的——字体下载后保存在本地，之后完全离线可用。
+
+---
+
+## 界面截图
+
+![编辑器：富文本按手写字体排进信纸](docs/screenshots/editor.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/writing.png" alt="书写中，实时显示进度（模拟设备）"></td>
+    <td width="50%"><img src="docs/screenshots/templates.png" alt="模板管理：作文格与自定义标签"></td>
+  </tr>
+  <tr>
+    <td align="center">书写中，实时显示进度（模拟设备）</td>
+    <td align="center">模板管理：标签由你自己定</td>
+  </tr>
+</table>
+
+![新建：按自定义标签筛选模板](docs/screenshots/gallery.png)
 
 ---
 
@@ -206,3 +241,7 @@ PENKAKU_FAKE=1 cargo run -p penkaku-gui
 - [docs/reimplementation-plan.md](docs/reimplementation-plan.md)：架构演进与里程碑记录
 - [docs/protocol.md](docs/protocol.md)：GRBL / ESP32 设备通信协议与 G-code 规范
 - [docs/hardware-checklist.md](docs/hardware-checklist.md)：真机硬件联调检查清单
+
+## 许可证
+
+PenKaku 以 [GNU 通用公共许可证第 3 版（仅限该版本）](LICENSE)（`GPL-3.0-only`）发布。

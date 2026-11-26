@@ -483,4 +483,24 @@ BOSS picked: inline tables plus a Mermaid flowchart subset; cells typed in the p
 
 - Added `release` job (`needs: check`, `if: startsWith(github.ref, 'refs/tags/')`, `permissions: contents: write`) to `.github/workflows/ci.yml`.
 - Downloads `penkaku-*-portable` artifacts (`penkaku-portable-Windows.zip`, `penkaku-portable-macOS.tar.gz`, `penkaku-portable-Linux.tar.gz`), verifies all 3 files exist, and creates an empty-notes GitHub Draft Release via `gh release create --draft --verify-tag --notes ""` (or `gh release upload --clobber` on re-run).
+
+## 2026-11-26: user tags, 書 mark, new icon, README hero (uncommitted, on master)
+
+- Template 标签 are the user's own: `templates_ctl::all_tags` = sorted union of tags in use;
+  `Gallery.tag: Option<String>` (a stale filter falls back to 全部模板). Editor: tag chips
+  (click to remove), a 新标签 box (Enter / 添加), `+ tag` chips for tags other templates use.
+  `TAGS` const removed. AUTOTEST_LIBRARY gallery check now filters by tag name.
+- Title-bar mark 写 → 書 (`app.rs`).
+- New icon: `gpt-image-2.6-flare` (third-party OpenAI-compatible endpoint BOSS supplied), candidate B;
+  white outside the tile made transparent; `docs/OriginIcon.png` replaced and all icon files
+  regenerated with `make_icons.py`.
+- README (en/zh): centred 256 px icon, tagline, badges (CI, release, Rust 1.98+, platforms,
+  GRBL, offline, license).
+- License GPL-3.0-only: canonical `LICENSE` (GitHub's gpl-3.0 text), `license` and `repository`
+  in `[workspace.package]` and `.workspace = true` in every crate; README License sections.
+- README screenshots in `docs/screenshots/` (editor, writing on the sim, template editor with tags,
+  gallery filtered by tag), 1600 px wide. Taken in FAKE mode with a temp copy of BOSS's
+  settings and the 田英章 font so the handwriting looks real; the temp demo dir was wiped after.
+- Verified: full GUI autotest green (AUTOTEST_LIBRARY gallery=true); by hand: adding tags by
+  Enter, `+ tag` suggestions, gallery chips and tag filter.
 - Validated YAML structure via PyYAML; live tag-push execution on GitHub Actions pending.
