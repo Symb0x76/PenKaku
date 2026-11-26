@@ -129,7 +129,7 @@ impl FontLibrary {
         let mut last = Error::Font(format!("font {key}: no readable copy"));
         for p in std::iter::once(&e.path).chain(&e.copies) {
             match std::fs::read(p).map_err(Error::from).and_then(|b| svg::read(&b)) {
-                Ok((font, meta)) => return Ok((font.with_composed_arrows(), meta)),
+                Ok(f) => return Ok(f),
                 Err(err) => last = err,
             }
         }

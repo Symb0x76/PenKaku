@@ -60,11 +60,19 @@ impl Font {
         out
     }
 
-    /// Arrows the font lacks, drawn with its own strokes: `→` is its `-` stretched to an arrow's
-    /// length with its `>` moved onto the right end, `⇒` uses `=`, `←` / `⇐` put `<` on the left,
-    /// `↔` / `⇔` both. Text cleaned for handwriting (`->` → `→`) then writes in the font's hand
-    /// instead of a missing box. Arrows the font has, or whose parts it lacks, are left alone.
+    /// [`Self::compose_arrows`], for callers that do not need to know which arrows were made.
     pub fn with_composed_arrows(mut self) -> Self {
+        self.compose_arrows();
+        self
+    }
+
+    /// Arrows the font lacks, drawn with its own strokes so text cleaned for handwriting
+    /// (`->` → `→`) writes in the font's hand instead of a missing box: `→` is its `-` stretched
+    /// to an arrow's length with its `>` on the right end, `⇒` uses `=`, `←` / `⇐` put `<` on the
+    /// left, `↔` / `⇔` both. A one-stroke shaft runs on into the head without lifting the pen
+    /// (连笔), as a hand writes an arrow. Arrows the font has, or whose parts it lacks, are left
+    /// alone. Returns the arrows it made.
+    pub fn compose_arrows(&mut self) -> Vec<char> {
         // Shaft length: at least this many times the head's width (a `-` alone is often short).
         const SHAFT_PER_HEAD: f32 = 2.0;
         // Room on each side of a stretched arrow, in head widths, so it does not touch its
@@ -72,11 +80,12 @@ impl Font {
         const SIDE_PER_HEAD: f32 = 0.25;
         const ARROWS: [(char, char, bool, bool); 6] =
             [('→', '-', false, true), ('←', '-', true, false), ('↔', '-', true, true), ('⇒', '=', false, true), ('⇐', '=', true, false), ('⇔', '=', true, true)];
+        let mut made = Vec::new();
         for (arrow, shaft, left, right) in ARROWS {
             if self.glyphs.contains_key(&arrow) {
                 continue;
             }
-            let get = |c: char| crate::layout::glyph_for(&self, c);
+            let get = |c: char| crate::layout::glyph_for(self, c);
             let (Some(s), Some(lt), Some(gt)) = (get(shaft), get('<'), get('>')) else { continue };
             let Some((x0, sy0, x1, sy1)) = bounds(&s.strokes) else { continue };
             let head_w = [lt, gt].iter().filter_map(|g| bounds(&g.strokes)).map(|b| b.2 - b.0).fold(0.0, f32::max);
@@ -87,23 +96,33 @@ impl Font {
             let k = if x1 > x0 { len / (x1 - x0) } else { 1.0 };
             let (a, b) = (x0 + side, x0 + side + len);
             let mid = (sy0 + sy1) / 2.0;
-            let mut strokes: Vec<Vec<Point>> = s.strokes.iter().map(|st| st.iter().map(|&(x, y)| (a + (x - x0) * k, y)).collect()).collect();
-            let mut head = |g: &Glyph, at_left: bool| {
-                let Some((hx0, hy0, hx1, hy1)) = bounds(&g.strokes) else { return };
+            let mut shafts: Vec<Vec<Point>> = s.strokes.iter().map(|st| st.iter().map(|&(x, y)| (a + (x - x0) * k, y)).collect()).collect();
+            // 连笔 needs a single shaft stroke, drawn left to right.
+            let joined = shafts.len() == 1;
+            if joined && shafts[0].first().map(|p| p.0) > shafts[0].last().map(|p| p.0) {
+                shafts[0].reverse();
+            }
+            let place = |g: &Glyph, at_left: bool| -> Vec<Vec<Point>> {
+                let Some((hx0, hy0, hx1, hy1)) = bounds(&g.strokes) else { return Vec::new() };
                 let dx = if at_left { a - hx0 } else { b - hx1 };
                 let dy = mid - (hy0 + hy1) / 2.0;
-                strokes.extend(g.strokes.iter().map(|st| st.iter().map(|&(x, y)| (x + dx, y + dy)).collect()));
+                g.strokes.iter().map(|st| st.iter().map(|&(x, y)| (x + dx, y + dy)).collect()).collect()
             };
-            if left {
-                head(lt, true);
-            }
+            let mut heads = Vec::new();
             if right {
-                head(gt, false);
+                let h = place(gt, false);
+                heads.extend(if joined { join_head(&mut shafts[0], h, false) } else { h });
+            }
+            if left {
+                let h = place(lt, true);
+                heads.extend(if joined { join_head(&mut shafts[0], h, true) } else { h });
             }
             let advance = s.advance + (len - (x1 - x0)) + 2.0 * side;
-            self.glyphs.insert(arrow, Glyph { advance, strokes });
+            shafts.extend(heads);
+            self.glyphs.insert(arrow, Glyph { advance, strokes: shafts });
+            made.push(arrow);
         }
-        self
+        made
     }
 
     /// Back-compat: the first (most likely) key candidate.
@@ -158,6 +177,47 @@ impl Font {
         }
         Ok(Font { glyphs })
     }
+}
+
+/// Run the left-to-right `shaft` on into an arrow `head` (连笔): the head stroke through its tip
+/// (its rightmost point for a right head, leftmost for a left one) is cut there, one arm is
+/// drawn with the shaft in one pen-down stroke, and the other arm stays its own stroke. Returns
+/// the head strokes still drawn apart.
+fn join_head(shaft: &mut Vec<Point>, head: Vec<Vec<Point>>, at_left: bool) -> Vec<Vec<Point>> {
+    let tip_of = |st: &Vec<Point>| -> Option<(usize, f32)> {
+        st.iter().enumerate().map(|(i, p)| (i, p.0)).reduce(|m, c| if (c.1 > m.1) != at_left && c.1 != m.1 { c } else { m })
+    };
+    // The stroke holding the tip (the extreme x over the whole head).
+    let Some((s, k)) = head
+        .iter()
+        .enumerate()
+        .filter_map(|(s, st)| tip_of(st).map(|(k, x)| (s, k, x)))
+        .reduce(|m, c| if (c.2 > m.2) != at_left && c.2 != m.2 { c } else { m })
+        .map(|(s, k, _)| (s, k))
+    else {
+        return head;
+    };
+    let mut rest: Vec<Vec<Point>> = head.iter().enumerate().filter(|&(i, _)| i != s).map(|(_, st)| st.clone()).collect();
+    let st = &head[s];
+    let last = st.len() - 1;
+    if at_left {
+        // Arm into the tip, then the shaft: [.. tip] + shaft.
+        let (lead, other): (Vec<Point>, Option<Vec<Point>>) =
+            if k == 0 { (st.iter().rev().copied().collect(), None) } else { (st[..=k].to_vec(), (k < last).then(|| st[k..].to_vec())) };
+        let mut joined = lead;
+        let skip = usize::from(joined.last() == shaft.first());
+        joined.extend(shaft.iter().skip(skip).copied());
+        *shaft = joined;
+        rest.extend(other);
+    } else {
+        // The shaft, then from the tip out along one arm: shaft + [tip ..].
+        let (arm, other): (Vec<Point>, Option<Vec<Point>>) =
+            if k == last { (st.iter().rev().copied().collect(), None) } else { (st[k..].to_vec(), (k > 0).then(|| st[..=k].to_vec())) };
+        let skip = usize::from(shaft.last() == arm.first());
+        shaft.extend(arm.into_iter().skip(skip));
+        rest.extend(other);
+    }
+    rest
 }
 
 /// Bounding box `(x0, y0, x1, y1)` of every point of `strokes`, if there are any.
@@ -272,22 +332,24 @@ mod tests {
     #[test]
     fn missing_arrows_are_drawn_from_the_fonts_own_strokes() {
         let g = |advance: f32, strokes: Vec<Vec<Point>>| Glyph { advance, strokes };
-        let font = Font {
+        let mut font = Font {
             glyphs: HashMap::from([
                 ('-', g(4.0, vec![vec![(0.0, 4.0), (3.0, 4.0)]])),
                 ('>', g(2.0, vec![vec![(0.0, 2.0), (2.0, 3.0), (0.0, 4.0)]])),
                 ('<', g(2.0, vec![vec![(2.0, 2.0), (0.0, 3.0), (2.0, 4.0)]])),
                 ('⇒', g(9.0, vec![])),
             ]),
-        }
-        .with_composed_arrows();
-        // `→`: the 3-long shaft stretched to two head widths (4) and moved 0.5 right, then `>`
-        // with its tip on the shaft's right end, centred on it; the advance grows by 1 + 2 × 0.5.
+        };
+        assert_eq!(font.compose_arrows(), vec!['→', '←', '↔']);
+        // `→`: the 3-long shaft stretched to two head widths (4) and moved 0.5 right; `>` sits
+        // with its tip on the shaft's right end, centred on it, and the shaft runs on into its
+        // lower arm in one stroke (连笔). The advance grows by 1 + 2 × 0.5.
         let r = font.get('→').unwrap();
         assert_eq!(r.advance, 6.0);
-        assert_eq!(r.strokes, vec![vec![(0.5, 4.0), (4.5, 4.0)], vec![(2.5, 3.0), (4.5, 4.0), (2.5, 5.0)]]);
-        // `←` puts `<` on the left end; `↔` has both heads.
-        assert_eq!(font.get('←').unwrap().strokes[1], vec![(2.5, 3.0), (0.5, 4.0), (2.5, 5.0)]);
+        assert_eq!(r.strokes, vec![vec![(0.5, 4.0), (4.5, 4.0), (2.5, 5.0)], vec![(2.5, 3.0), (4.5, 4.0)]]);
+        // `←`: the upper arm of `<` runs into the tip and on along the shaft.
+        assert_eq!(font.get('←').unwrap().strokes, vec![vec![(2.5, 3.0), (0.5, 4.0), (4.5, 4.0)], vec![(0.5, 4.0), (2.5, 5.0)]]);
+        // `↔`: one stroke from the left arm through the shaft into the right arm, plus two arms.
         assert_eq!(font.get('↔').unwrap().strokes.len(), 3);
         // The font's own `⇒` stays; `=` is missing, so no `⇐` / `⇔`.
         assert_eq!(font.get('⇒').unwrap().advance, 9.0);
