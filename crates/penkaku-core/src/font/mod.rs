@@ -60,6 +60,52 @@ impl Font {
         out
     }
 
+    /// Arrows the font lacks, drawn with its own strokes: `→` is its `-` stretched to an arrow's
+    /// length with its `>` moved onto the right end, `⇒` uses `=`, `←` / `⇐` put `<` on the left,
+    /// `↔` / `⇔` both. Text cleaned for handwriting (`->` → `→`) then writes in the font's hand
+    /// instead of a missing box. Arrows the font has, or whose parts it lacks, are left alone.
+    pub fn with_composed_arrows(mut self) -> Self {
+        // Shaft length: at least this many times the head's width (a `-` alone is often short).
+        const SHAFT_PER_HEAD: f32 = 2.0;
+        // Room on each side of a stretched arrow, in head widths, so it does not touch its
+        // neighbours.
+        const SIDE_PER_HEAD: f32 = 0.25;
+        const ARROWS: [(char, char, bool, bool); 6] =
+            [('→', '-', false, true), ('←', '-', true, false), ('↔', '-', true, true), ('⇒', '=', false, true), ('⇐', '=', true, false), ('⇔', '=', true, true)];
+        for (arrow, shaft, left, right) in ARROWS {
+            if self.glyphs.contains_key(&arrow) {
+                continue;
+            }
+            let get = |c: char| crate::layout::glyph_for(&self, c);
+            let (Some(s), Some(lt), Some(gt)) = (get(shaft), get('<'), get('>')) else { continue };
+            let Some((x0, sy0, x1, sy1)) = bounds(&s.strokes) else { continue };
+            let head_w = [lt, gt].iter().filter_map(|g| bounds(&g.strokes)).map(|b| b.2 - b.0).fold(0.0, f32::max);
+            // A short shaft is stretched to `len` and moved right by `side`; the arrow then runs
+            // `a..b` and the advance grows by the stretch plus room on both sides.
+            let len = (x1 - x0).max(head_w * SHAFT_PER_HEAD);
+            let side = if len > x1 - x0 { head_w * SIDE_PER_HEAD } else { 0.0 };
+            let k = if x1 > x0 { len / (x1 - x0) } else { 1.0 };
+            let (a, b) = (x0 + side, x0 + side + len);
+            let mid = (sy0 + sy1) / 2.0;
+            let mut strokes: Vec<Vec<Point>> = s.strokes.iter().map(|st| st.iter().map(|&(x, y)| (a + (x - x0) * k, y)).collect()).collect();
+            let mut head = |g: &Glyph, at_left: bool| {
+                let Some((hx0, hy0, hx1, hy1)) = bounds(&g.strokes) else { return };
+                let dx = if at_left { a - hx0 } else { b - hx1 };
+                let dy = mid - (hy0 + hy1) / 2.0;
+                strokes.extend(g.strokes.iter().map(|st| st.iter().map(|&(x, y)| (x + dx, y + dy)).collect()));
+            };
+            if left {
+                head(lt, true);
+            }
+            if right {
+                head(gt, false);
+            }
+            let advance = s.advance + (len - (x1 - x0)) + 2.0 * side;
+            self.glyphs.insert(arrow, Glyph { advance, strokes });
+        }
+        self
+    }
+
     /// Back-compat: the first (most likely) key candidate.
     pub fn key_from_backup_token(backup_token: &str) -> String {
         Self::key_candidates(backup_token).into_iter().next().unwrap_or_default()
@@ -112,6 +158,13 @@ impl Font {
         }
         Ok(Font { glyphs })
     }
+}
+
+/// Bounding box `(x0, y0, x1, y1)` of every point of `strokes`, if there are any.
+fn bounds(strokes: &[Vec<Point>]) -> Option<(f32, f32, f32, f32)> {
+    let mut pts = strokes.iter().flatten();
+    let &(x, y) = pts.next()?;
+    Some(pts.fold((x, y, x, y), |(a, b, c, d), &(x, y)| (a.min(x), b.min(y), c.max(x), d.max(y))))
 }
 
 fn one_char(s: &str) -> Option<char> {
@@ -214,5 +267,30 @@ mod tests {
         assert_eq!(a.strokes.len(), 2);
         assert_eq!(a.strokes[0], vec![(0.0, 7.0), (1.0, 0.0)]);
         assert_eq!(a.strokes[1], vec![(2.0, 3.0)]);
+    }
+
+    #[test]
+    fn missing_arrows_are_drawn_from_the_fonts_own_strokes() {
+        let g = |advance: f32, strokes: Vec<Vec<Point>>| Glyph { advance, strokes };
+        let font = Font {
+            glyphs: HashMap::from([
+                ('-', g(4.0, vec![vec![(0.0, 4.0), (3.0, 4.0)]])),
+                ('>', g(2.0, vec![vec![(0.0, 2.0), (2.0, 3.0), (0.0, 4.0)]])),
+                ('<', g(2.0, vec![vec![(2.0, 2.0), (0.0, 3.0), (2.0, 4.0)]])),
+                ('⇒', g(9.0, vec![])),
+            ]),
+        }
+        .with_composed_arrows();
+        // `→`: the 3-long shaft stretched to two head widths (4) and moved 0.5 right, then `>`
+        // with its tip on the shaft's right end, centred on it; the advance grows by 1 + 2 × 0.5.
+        let r = font.get('→').unwrap();
+        assert_eq!(r.advance, 6.0);
+        assert_eq!(r.strokes, vec![vec![(0.5, 4.0), (4.5, 4.0)], vec![(2.5, 3.0), (4.5, 4.0), (2.5, 5.0)]]);
+        // `←` puts `<` on the left end; `↔` has both heads.
+        assert_eq!(font.get('←').unwrap().strokes[1], vec![(2.5, 3.0), (0.5, 4.0), (2.5, 5.0)]);
+        assert_eq!(font.get('↔').unwrap().strokes.len(), 3);
+        // The font's own `⇒` stays; `=` is missing, so no `⇐` / `⇔`.
+        assert_eq!(font.get('⇒').unwrap().advance, 9.0);
+        assert!(font.get('⇐').is_none() && font.get('⇔').is_none());
     }
 }
