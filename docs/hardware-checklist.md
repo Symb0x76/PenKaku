@@ -4,12 +4,12 @@ Run on the real machine before a milestone that touches devices is called done (
 the table into the milestone's notes, fill in the result and date, and file anything that fails.
 
 **Setup:** Grbl_ESP32 ChiXie board (CH340), USB to the PC, 300 × 300 mm travel, pen holder with
-a pen, A4 paper taped at the origin. Start `chixie-rs`, log in only if fonts must download.
+a pen, A4 paper taped at the origin. Start `PenKaku`, log in only if fonts must download.
 Keep a hand near the power switch for the first run after any device-code change.
 
 | # | Check | How | Expected | Result |
 |---|---|---|---|---|
-| 1 | Auto-connect | start `chixie-rs` with the board plugged in; then 断开, unplug, replug, 连接 | connects by itself within ~2 s of start; after 断开 it stays disconnected until 连接 | |
+| 1 | Auto-connect | start `PenKaku` with the board plugged in; then 断开, unplug, replug, 连接 | connects by itself within ~2 s of start; after 断开 it stays disconnected until 连接 | |
 | 2 | Jog | jog pad: 1 mm and 10 mm in all four directions | head moves the stated distance and direction | |
 | 3 | Pen up / down | 抬笔 / 落笔 | pen lifts clear of the paper / touches it | |
 | 4 | Set origin | jog to a corner, 设为原点 | position reads X0 Y0 | |

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PenKaku
+Comment=Client for pen-plotter handwriting machines
+Comment[zh_CN]=笔式写字机上位机
+Exec=penkaku
+Icon=penkaku
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=penkaku

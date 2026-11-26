@@ -1019,124 +1019,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chixie-rs-cli"
-version = "0.1.0"
-dependencies = [
- "chixie-rs-core",
- "chixie-rs-device",
- "chixie-rs-import",
- "chixie-rs-output",
- "clap",
- "env_logger",
-]
-
-[[package]]
-name = "chixie-rs-core"
-version = "0.1.0"
-dependencies = [
- "aes 0.8.4",
- "async-channel",
- "base64 0.23.1",
- "cbc 0.1.2",
- "directories",
- "hmac 0.12.1",
- "jieba-rs",
- "keyring",
- "log",
- "notify",
- "proptest",
- "quick-xml 0.41.0",
- "reqwest",
- "serde",
- "serde_json",
- "serialport",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "toml 1.2.0+spec-1.1.0",
- "zip",
-]
-
-[[package]]
-name = "chixie-rs-device"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "chixie-rs-core",
- "chixie-rs-output",
- "log",
- "reqwest",
- "serialport",
-]
-
-[[package]]
-name = "chixie-rs-doc"
-version = "0.1.0"
-dependencies = [
- "chixie-rs-core",
- "chixie-rs-output",
- "encoding_rs",
- "proptest",
- "quick-xml 0.41.0",
- "serde",
- "serde_json",
- "zip",
-]
-
-[[package]]
-name = "chixie-rs-gui"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "chixie-rs-core",
- "chixie-rs-device",
- "chixie-rs-doc",
- "chixie-rs-import",
- "chixie-rs-output",
- "chixie-rs-template",
- "embed-resource",
- "env_logger",
- "gpui-kit",
- "image",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "chixie-rs-import"
-version = "0.1.0"
-dependencies = [
- "image",
- "lopdf",
-]
-
-[[package]]
-name = "chixie-rs-output"
-version = "0.1.0"
-dependencies = [
- "chixie-rs-core",
- "lopdf",
- "serde",
-]
-
-[[package]]
-name = "chixie-rs-template"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "calamine",
- "chixie-rs-core",
- "directories",
- "image",
- "quick-xml 0.41.0",
- "rust_xlsxwriter",
- "serde",
- "thiserror 2.0.21",
- "toml 1.2.0+spec-1.1.0",
- "zip",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5345,6 +5227,124 @@ checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest 0.10.7",
  "hmac 0.12.1",
+]
+
+[[package]]
+name = "penkaku-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "penkaku-core",
+ "penkaku-device",
+ "penkaku-import",
+ "penkaku-output",
+]
+
+[[package]]
+name = "penkaku-core"
+version = "0.1.0"
+dependencies = [
+ "aes 0.8.4",
+ "async-channel",
+ "base64 0.23.1",
+ "cbc 0.1.2",
+ "directories",
+ "hmac 0.12.1",
+ "jieba-rs",
+ "keyring",
+ "log",
+ "notify",
+ "proptest",
+ "quick-xml 0.41.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serialport",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "toml 1.2.0+spec-1.1.0",
+ "zip",
+]
+
+[[package]]
+name = "penkaku-device"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "log",
+ "penkaku-core",
+ "penkaku-output",
+ "reqwest",
+ "serialport",
+]
+
+[[package]]
+name = "penkaku-doc"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "penkaku-core",
+ "penkaku-output",
+ "proptest",
+ "quick-xml 0.41.0",
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
+name = "penkaku-gui"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "embed-resource",
+ "env_logger",
+ "gpui-kit",
+ "image",
+ "log",
+ "penkaku-core",
+ "penkaku-device",
+ "penkaku-doc",
+ "penkaku-import",
+ "penkaku-output",
+ "penkaku-template",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "penkaku-import"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "lopdf",
+]
+
+[[package]]
+name = "penkaku-output"
+version = "0.1.0"
+dependencies = [
+ "lopdf",
+ "penkaku-core",
+ "serde",
+]
+
+[[package]]
+name = "penkaku-template"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "calamine",
+ "directories",
+ "image",
+ "penkaku-core",
+ "quick-xml 0.41.0",
+ "rust_xlsxwriter",
+ "serde",
+ "thiserror 2.0.21",
+ "toml 1.2.0+spec-1.1.0",
+ "zip",
 ]
 
 [[package]]

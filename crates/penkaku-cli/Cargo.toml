@@ -1,0 +1,18 @@
+[package]
+name = "penkaku-cli"
+description = "PenKaku command line"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "penkaku-cli"
+path = "src/main.rs"
+
+[dependencies]
+penkaku-core.workspace = true
+penkaku-output.workspace = true
+penkaku-device.workspace = true
+penkaku-import.workspace = true
+clap.workspace = true
+env_logger.workspace = true

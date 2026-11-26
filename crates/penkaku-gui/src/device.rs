@@ -1,0 +1,986 @@
+//! 设备: controller state mirrored from the device actor, plus the right-hand task pane
+//! (port choice, jog pad, pen/unlock/zero, live position, console, job progress).
+//! Job start / sheet change / stop prompts live in `app.rs` because they need the document.
+
+use std::cell::Cell;
+use std::collections::VecDeque;
+use std::rc::Rc;
+use std::time::Duration;
+
+use penkaku_core::config::{CONSOLE_HISTORY_MAX, CustomCommand};
+use penkaku_device::device::{Command, DeviceHandle, Dir, Event, Job, JobOutcome, Pen, Target};
+use penkaku_device::grbl::{self, GrblStatus};
+use penkaku_device::transport::{self, PortInfo};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
+
+use crate::device_params::DeviceParams;
+use crate::state::AppState;
+
+const LOG_KEEP: usize = 300;
+const LOG_SHOW: usize = 10;
+const STEPS: [f32; 3] = [0.1, 1.0, 10.0];
+const JOG_FEED: f32 = 1500.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JobState {
+    pub page: usize,
+    pub pages: usize,
+    pub done: usize,
+    pub total: usize,
+    pub paused: bool,
+    /// 多色绘制: waiting for the user to put in this pen.
+    pub pen: Option<penkaku_core::profile::Rgb>,
+    /// The link dropped; the actor is on reconnect attempt `n`.
+    pub reconnecting: Option<u32>,
+    /// Back after a drop, waiting for 继续书写: resume line, and whether the board rebooted.
+    pub recovered: Option<(usize, bool)>,
+    /// A 落笔校准 test, not the document: its end touches no 书写 / 断点续写 state.
+    pub calibration: bool,
+}
+
+impl JobState {
+    pub fn percent(&self) -> f32 {
+        if self.total == 0 { 0.0 } else { self.done as f32 * 100.0 / self.total as f32 }
+    }
+}
+
+/// What the app should tell the user about a device event (toasts / dialogs).
+pub enum Notice {
+    None,
+    Info(String),
+    Warn(String),
+    Error(String),
+    /// 换笔提示: put in this pen.
+    AwaitingPen(penkaku_core::profile::Rgb),
+    /// The board entered an alarm: toast with a 解锁 action.
+    Alarm(String),
+}
+
+pub struct DevicePanel {
+    handle: DeviceHandle,
+    pub connected: Option<String>,
+    connecting: bool,
+    pub status: Option<GrblStatus>,
+    log: VecDeque<(Dir, String)>,
+    ports: Vec<PortInfo>,
+    /// `None` = auto-detect the ChiXie board (survives the USB-drop COM renumbering).
+    port: Option<String>,
+    step: usize,
+    pub job: Option<JobState>,
+    /// Outcome of the last finished job (status bar / autotest).
+    pub last_end: Option<JobOutcome>,
+    console: Entity<InputState>,
+    /// Console ↑/↓ recall: index into `console_history` (newest first); `None` = the live line.
+    history_pos: Option<usize>,
+    /// The live line, kept while ↑ recalls older commands.
+    history_draft: String,
+    /// 0 = 连接与控制, 1 = 参数设置.
+    pub tab: usize,
+    /// 串口控制台 expanded (folded by default: it is a troubleshooting tool).
+    console_open: bool,
+    /// 自定义命令 expanded.
+    custom_open: bool,
+    pub params: Entity<DeviceParams>,
+    /// In an alarm episode (toast already shown), and the last `ALARM:n` text seen.
+    alarm: bool,
+    last_alarm: Option<String>,
+    /// Auto-connect is off until the user connects again (they pressed 断开).
+    auto_paused: bool,
+    /// Candidate ports at the last auto-connect attempt: retry only when this set changes, so
+    /// a port held by another program doesn't raise an error every few seconds.
+    auto_tried: Vec<String>,
+    _subs: Vec<Subscription>,
+}
+
+/// How often auto-connect looks for a board while disconnected.
+const AUTO_CONNECT_EVERY: Duration = Duration::from_secs(2);
+
+impl DevicePanel {
+    pub fn new(handle: DeviceHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let st = cx.global::<AppState>();
+        handle.send(Command::SetProfile(st.settings.device.profile.clone()));
+        let port = st.settings.device.last_port.clone();
+        let console = cx.new(|cx| InputState::new(window, cx).placeholder("发送 G-code / $ 命令，回车发送"));
+        let sub = cx.subscribe_in(&console, window, |this, s, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                let line = s.read(cx).value().trim().to_string();
+                if !line.is_empty() {
+                    this.handle.send(Command::Send(line.clone()));
+                    remember_console_line(&line, cx);
+                    this.history_pos = None;
+                    this.history_draft.clear();
+                    s.update(cx, |s, cx| s.set_value("", window, cx));
+                }
+            }
+        });
+        let params = cx.new(|cx| DeviceParams::new(handle.clone(), window, cx));
+        let obs = cx.observe(&params, |_, _, cx| cx.notify());
+        let mut this = Self {
+            handle,
+            connected: None,
+            connecting: false,
+            status: None,
+            log: VecDeque::new(),
+            ports: Vec::new(),
+            port,
+            step: 1,
+            job: None,
+            last_end: None,
+            console,
+            history_pos: None,
+            history_draft: String::new(),
+            tab: 0,
+            console_open: false,
+            custom_open: true,
+            params,
+            alarm: false,
+            last_alarm: None,
+            auto_paused: false,
+            auto_tried: Vec::new(),
+            _subs: vec![sub, obs],
+        };
+        this.refresh_ports(cx);
+        this.auto_connect_loop(cx);
+        this
+    }
+
+    /// While idle and disconnected, connect when a ChiXie USB board (or the chosen port) shows up.
+    fn auto_connect_loop(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(AUTO_CONNECT_EVERY).await;
+                let Ok(wanted) = this.update(cx, |p, cx| {
+                    let on = cx.global::<AppState>().settings.device.auto_connect;
+                    on && !p.auto_paused && !p.is_connected() && !p.connecting && !p.busy()
+                }) else {
+                    return; // panel dropped
+                };
+                if !wanted {
+                    continue;
+                }
+                let ports = cx.background_executor().spawn(async { transport::list_ports().unwrap_or_default() }).await;
+                let _ = this.update(cx, |p, cx| {
+                    let found: Vec<String> =
+                        ports.iter().filter(|q| q.known_device || p.port.as_ref() == Some(&q.name)).map(|q| q.name.clone()).collect();
+                    let changed = found != p.auto_tried;
+                    p.auto_tried.clone_from(&found);
+                    p.ports = ports;
+                    if changed && !found.is_empty() {
+                        p.push_log(Dir::Tx, format!("（自动连接 {}）", found.join(", ")));
+                        p.connect(cx);
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected.is_some()
+    }
+    pub fn busy(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// The console and 自定义命令 buttons work only while connected with no job running: the
+    /// device actor does not service `Send` mid-job.
+    pub fn console_enabled(&self) -> bool {
+        self.is_connected() && !self.busy()
+    }
+
+    /// ↑/↓ in the console recall earlier lines; ↓ past the newest restores the live line.
+    fn console_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let up = match ev.keystroke.key.as_str() {
+            "up" => true,
+            "down" => false,
+            _ => return,
+        };
+        if !self.console_enabled() || (self.history_pos.is_none() && !up) {
+            return;
+        }
+        let history = cx.global::<AppState>().settings.device.console_history.clone();
+        if history.is_empty() {
+            return; // nothing to recall: leave the key to the input
+        }
+        let next = history_step(history.len(), self.history_pos, up);
+        if self.history_pos.is_none() {
+            self.history_draft = self.console.read(cx).value().to_string();
+        }
+        let text = match next {
+            Some(i) => history[i].clone(),
+            None => std::mem::take(&mut self.history_draft),
+        };
+        self.history_pos = next;
+        self.console.update(cx, |s, cx| s.set_value(text, window, cx));
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    pub fn refresh_ports(&mut self, cx: &mut Context<Self>) {
+        let task = cx.background_executor().spawn(async { transport::list_ports().unwrap_or_default() });
+        cx.spawn(async move |this, cx| {
+            let ports = task.await;
+            let _ = this.update(cx, |p, cx| {
+                p.ports = ports;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn connect(&mut self, cx: &mut Context<Self>) {
+        let baud = cx.global::<AppState>().settings.device.baud;
+        self.connecting = true;
+        self.auto_paused = false;
+        self.handle.send(Command::Connect(Target::Serial { port: self.port.clone(), baud }));
+        cx.notify();
+    }
+    pub fn disconnect(&mut self, cx: &mut Context<Self>) {
+        self.auto_paused = true;
+        self.handle.send(Command::Disconnect);
+        cx.notify();
+    }
+    pub fn send(&self, c: Command) {
+        self.handle.send(c);
+    }
+    pub fn run(&mut self, job: Job, cx: &mut Context<Self>) {
+        let (page, pages) = (job.first_page, job.first_page + job.pages.len());
+        self.job = Some(JobState { page, pages, done: 0, total: 0, paused: false, pen: None, reconnecting: None, recovered: None, calibration: false });
+        self.handle.send(Command::Run(job));
+        cx.notify();
+    }
+
+    /// 落笔校准: write one line per depth in `zs` from the current origin.
+    fn run_ladder(&mut self, zs: &[f32], cx: &mut Context<Self>) {
+        let profile = cx.global::<AppState>().settings.device.profile.clone();
+        let code = penkaku_output::depth_ladder(zs, &profile);
+        self.job = Some(JobState { page: 0, pages: 1, done: 0, total: 0, paused: false, pen: None, reconnecting: None, recovered: None, calibration: true });
+        self.handle.send(Command::Run(Job { pages: vec![code.text], maps: vec![code.stroke_lines], ..Default::default() }));
+        cx.notify();
+    }
+
+    /// The picked 落笔校准 line becomes the 落笔高度.
+    fn set_pen_down(&mut self, z: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let st = cx.global_mut::<AppState>();
+        st.settings.device.profile.pen_down_z = z;
+        let p = st.settings.device.profile.clone();
+        st.save_settings();
+        self.handle.send(Command::SetProfile(p));
+        window.push_notification(Notification::success(format!("落笔高度已设为 {}", penkaku_core::profile::num(z))), cx);
+        cx.notify();
+    }
+
+    /// 落笔校准: 开始测试 writes a row of short lines, each a little deeper than the last; the user
+    /// clicks the best one and its depth becomes the 落笔高度.
+    pub(crate) fn open_pen_calibration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use penkaku_core::profile::{DeviceType, num};
+        let p = cx.global::<AppState>().settings.device.profile.clone();
+        if !matches!(p.device_type, DeviceType::StepperPenUp | DeviceType::ServoPenUp) {
+            window.push_notification(Notification::warning("落笔校准只适用于步进或舵机抬笔的设备"), cx);
+            return;
+        }
+        let zs = p.ladder_levels();
+        let unit = if p.device_type == DeviceType::ServoPenUp { "°" } else { " mm" };
+        let panel = cx.entity();
+        window.open_dialog(cx, move |d, _w, cx| {
+            let muted = cx.theme().muted_foreground;
+            let cur = cx.global::<AppState>().settings.device.profile.pen_down_z;
+            let ready = panel.read(cx).is_connected() && !panel.read(cx).busy();
+            let (pt, zt) = (panel.clone(), zs.clone());
+            let start = Button::new("ladder-start").small().primary().label("开始测试").disabled(!ready).on_click(move |_: &ClickEvent, _w, cx| pt.update(cx, |v, cx| v.run_ladder(&zt, cx)));
+            let picks = zs.iter().enumerate().fold(h_flex().flex_wrap().gap_1(), |row, (i, &z)| {
+                let pp = panel.clone();
+                let b = Button::new(("ladder-pick", i)).small().label(format!("{} · {}{unit}", i + 1, num(z)));
+                let b = if (z - cur).abs() < 1e-4 { b.primary() } else { b.outline() };
+                row.child(b.on_click(move |_: &ClickEvent, w, cx| pp.update(cx, |v, cx| v.set_pen_down(z, w, cx))))
+            });
+            d.title("落笔校准").w(px(480.)).child(
+                v_flex()
+                    .gap_2()
+                    .child(div().text_sm().child(format!(
+                        "1. 放好纸，把笔移到空白处并「设为原点」。\n2. 点「开始测试」：从原点向右画 {} 条竖线（间距 {} mm），从浅到深。\n3. 选出线条最清楚、又不划纸的那一条，点下面对应的编号，它的深度就成为落笔高度。",
+                        zs.len(),
+                        num(penkaku_output::LADDER_GAP_MM)
+                    )))
+                    .child(div().text_xs().text_color(muted).child("第 1、6、11 条更长，方便数。当前落笔高度高亮显示。"))
+                    .child(h_flex().child(start).when(!ready, |el| el.child(div().pl_2().text_xs().text_color(muted).child("请先连接设备，并等当前任务结束"))))
+                    .child(picks),
+            )
+        });
+    }
+    /// 继续书写 after a drop.
+    pub fn resume_job(&mut self, cx: &mut Context<Self>) {
+        if let Some(j) = &mut self.job {
+            j.recovered = None;
+            j.paused = false;
+        }
+        self.handle.send(Command::ResumeJob);
+        cx.notify();
+    }
+    pub fn toggle_pause(&mut self, cx: &mut Context<Self>) {
+        if let Some(j) = &mut self.job {
+            if j.paused {
+                self.handle.resume();
+            } else {
+                self.handle.pause();
+            }
+            j.paused = !j.paused;
+            cx.notify();
+        }
+    }
+    pub fn stop(&mut self, cx: &mut Context<Self>) {
+        self.handle.stop();
+        cx.notify();
+    }
+    pub fn next_sheet(&mut self, cx: &mut Context<Self>) {
+        if let Some(j) = &mut self.job {
+            j.pen = None;
+        }
+        self.handle.send(Command::NextSheet);
+        cx.notify();
+    }
+
+    fn push_log(&mut self, dir: Dir, line: String) {
+        if self.log.len() == LOG_KEEP {
+            self.log.pop_front();
+        }
+        self.log.push_back((dir, line));
+    }
+
+    pub fn on_event(&mut self, ev: Event, cx: &mut Context<Self>) -> Notice {
+        let notice = match ev {
+            Event::Connected { port, info } => {
+                self.connecting = false;
+                let ver = info.iter().find(|l| l.starts_with("[VER")).cloned().unwrap_or_default();
+                self.connected = Some(port.clone());
+                // Read the machine's own specs ($$) for the 参数设置 tab and the warnings.
+                self.handle.send(Command::QueryMachine);
+                self.params.update(cx, |p, cx| {
+                    p.connected = true;
+                    cx.notify();
+                });
+                let st = cx.global_mut::<AppState>();
+                if self.port.is_some() {
+                    st.settings.device.last_port = self.port.clone();
+                    st.save_settings();
+                }
+                Notice::Info(format!("已连接 {port} {ver}"))
+            }
+            Event::Disconnected { reason, page, last_line } => {
+                self.connecting = false;
+                self.connected = None;
+                self.status = None;
+                self.params.update(cx, |p, cx| {
+                    p.connected = false;
+                    cx.notify();
+                });
+                // Mid-job drops keep the job: the actor is reconnecting and will resume it.
+                match (self.job.as_mut(), page, last_line) {
+                    (Some(j), Some(p), Some(l)) => {
+                        j.reconnecting = Some(0);
+                        j.recovered = None;
+                        Notice::Warn(format!("设备断开（{reason}）：第 {} 页停在第 {l} 行。正在自动重连，请检查 USB 线和电源", p + 1))
+                    }
+                    _ if reason == "closed" => Notice::Info("已断开设备".into()),
+                    _ => Notice::Warn(format!("设备断开：{reason}")),
+                }
+            }
+            Event::Reconnecting { attempt } => {
+                if let Some(j) = &mut self.job {
+                    j.reconnecting = Some(attempt);
+                }
+                Notice::None
+            }
+            Event::Recovered { page, line, rebooted } => {
+                if let Some(j) = &mut self.job {
+                    (j.reconnecting, j.recovered, j.page, j.done) = (None, Some((line, rebooted)), page, line);
+                }
+                Notice::Warn(if rebooted {
+                    "设备已重新连接，但控制板重启过、坐标已丢失：请把笔移回纸张原点，点「设为原点」，再点「继续书写」".into()
+                } else {
+                    format!("设备已重新连接，可从第 {} 页第 {line} 行附近继续书写", page + 1)
+                })
+            }
+            Event::Status(s) => {
+                let alarm = s.state.starts_with("Alarm");
+                self.status = Some(s);
+                if alarm == self.alarm {
+                    Notice::None
+                } else {
+                    self.alarm = alarm;
+                    let why = self.last_alarm.take();
+                    match why {
+                        _ if !alarm => Notice::None,
+                        Some(w) => Notice::Alarm(format!("设备报警：{w}")),
+                        None => Notice::Alarm("设备处于报警状态，需要解锁后才能运动".into()),
+                    }
+                }
+            }
+            Event::Log { dir, line } => {
+                if dir == Dir::Rx && grbl::alarm_code(&line).is_some() {
+                    self.last_alarm = Some(grbl::explain(&line));
+                }
+                self.push_log(dir, line);
+                Notice::None
+            }
+            Event::Progress { page, pages, done, total } => {
+                if let Some(j) = &mut self.job {
+                    (j.page, j.pages, j.done, j.total) = (page, pages, done, total);
+                }
+                Notice::None
+            }
+            // The app sends one page per job (选页书写), so the actor never waits for a sheet.
+            Event::AwaitingSheet { .. } => Notice::None,
+            Event::AwaitingPen { colour, .. } => {
+                if let Some(j) = &mut self.job {
+                    j.pen = Some(colour);
+                }
+                Notice::AwaitingPen(colour)
+            }
+            Event::JobEnded { outcome, page, line } => {
+                self.job = None;
+                self.last_end = Some(outcome.clone());
+                match outcome {
+                    JobOutcome::Done => Notice::Info("书写完成".into()),
+                    JobOutcome::Stopped => Notice::Warn(format!("已停止（第 {} 页，第 {line} 行），笔已抬起", page + 1)),
+                    JobOutcome::Failed(e) => Notice::Error(format!("书写出错（第 {} 页，第 {line} 行）：{e}", page + 1)),
+                }
+            }
+            Event::Machine(m) => {
+                self.params.update(cx, |p, cx| {
+                    p.machine = Some(m);
+                    cx.notify();
+                });
+                Notice::None
+            }
+            Event::Error(e) => {
+                self.connecting = false;
+                Notice::Error(e)
+            }
+            Event::Resynced { page, lost } => {
+                self.push_log(Dir::Rx, format!("（第 {} 页：{lost} 个应答丢失，已自动同步）", page + 1));
+                Notice::Warn(format!("检测到设备应答丢失（{lost} 行），已自动同步，书写继续"))
+            }
+        };
+        cx.notify();
+        notice
+    }
+
+    /// One-line summary for the status bar.
+    pub fn summary(&self) -> String {
+        match (&self.connected, &self.status) {
+            (None, _) if self.connecting => "设备：连接中…".into(),
+            (None, _) => "设备：未连接".into(),
+            (Some(p), Some(s)) => {
+                let pos = s.wpos.or(s.mpos).map(|m| format!(" X{:.1} Y{:.1}", m[0], m[1])).unwrap_or_default();
+                format!("设备：{p} · {}{pos}", state_zh(&s.state))
+            }
+            (Some(p), None) => format!("设备：{p}"),
+        }
+    }
+
+    fn jog(&self, dx: f32, dy: f32) {
+        let s = STEPS[self.step];
+        self.handle.send(Command::Jog { dx: dx * s, dy: dy * s, feed: JOG_FEED });
+    }
+
+    #[inline(never)]
+    fn connection_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let connected = self.is_connected();
+        let mut choices: Vec<(Option<String>, String)> = vec![(None, "自动".into())];
+        for p in &self.ports {
+            let mark = if p.known_device { " ★" } else { "" };
+            choices.push((Some(p.name.clone()), format!("{}{mark}", p.name)));
+        }
+        let current = choices.iter().find(|(n, _)| *n == self.port).map_or_else(|| "自动".to_string(), |(_, l)| l.clone());
+        let panel = cx.entity();
+        // One compact row: port ▾, refresh, connect / disconnect (a segmented bar overflowed
+        // with several ports).
+        let port_pick = Button::new("port-pick")
+            .small()
+            .outline()
+            .flex_1()
+            .justify_between()
+            .accessibility_label(format!("串口：{current}"))
+            .child(div().flex_1().min_w_0().truncate().child(current))
+            .dropdown_caret(true)
+            .disabled(connected)
+            .dropdown_menu(move |m, _w, _cx| {
+                choices.iter().fold(m, |m, (name, label)| {
+                    let (panel, name) = (panel.clone(), name.clone());
+                    m.item(PopupMenuItem::new(label.clone()).on_click(move |_, _w, cx| {
+                        panel.update(cx, |t, cx| {
+                            t.port = name.clone();
+                            cx.notify();
+                        })
+                    }))
+                })
+            });
+        v_flex()
+            .gap_1()
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("连接"))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(port_pick)
+                    .child(Button::new("ports-refresh").small().ghost().icon(IconName::Redo).tooltip("刷新端口").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.refresh_ports(cx))))
+                    .child(if connected {
+                        Button::new("disconnect").small().label("断开").disabled(self.busy()).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.disconnect(cx)))
+                    } else {
+                        Button::new("connect").small().primary().label("连接").loading(self.connecting).on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.connect(cx)))
+                    }),
+            )
+            .child(div().text_xs().text_color(muted).child("★ = 识别为赤写主板；「自动」在 USB 重新插拔后也能找到"))
+            .into_any_element()
+    }
+
+    #[inline(never)]
+    fn control_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Also usable while a recovered job waits: the user jogs back to the origin and zeros.
+        let recovering = self.job.is_some_and(|j| j.recovered.is_some());
+        let enabled = self.is_connected() && (!self.busy() || recovering);
+        let jog = |id: &'static str, icon: IconName, dx: f32, dy: f32| {
+            Button::new(id).small().icon(icon).disabled(!enabled).on_click(cx.listener(move |t, _: &ClickEvent, _w, _cx| t.jog(dx, dy)))
+        };
+        let cell = || div().size(px(32.));
+        let pad = v_flex()
+            .gap_1()
+            .child(h_flex().gap_1().child(cell()).child(jog("jy+", IconName::ArrowUp, 0.0, 1.0)).child(cell()))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(jog("jx-", IconName::ArrowLeft, -1.0, 0.0))
+                    .child(cell())
+                    .child(jog("jx+", IconName::ArrowRight, 1.0, 0.0)),
+            )
+            .child(h_flex().gap_1().child(cell()).child(jog("jy-", IconName::ArrowDown, 0.0, -1.0)).child(cell()));
+        let cmd = |id: &'static str, label: &'static str, c: fn() -> Command| {
+            Button::new(id).small().label(label).disabled(!enabled).on_click(cx.listener(move |t, _: &ClickEvent, _w, _cx| t.send(c())))
+        };
+        v_flex()
+            .gap_2()
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("点动与笔（步长 mm）"))
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_start()
+                    .child(pad)
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                TabBar::new("step")
+                                    .small()
+                                    .segmented()
+                                    .selected_index(self.step)
+                                    .children(STEPS.iter().map(|s| Tab::new().label(format!("{s}"))))
+                                    .on_click(cx.listener(|t, ix: &usize, _w, cx| {
+                                        t.step = *ix;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(h_flex().gap_1().child(cmd("pen-up", "抬笔", || Command::Pen(Pen::Up))).child(cmd("pen-down", "落笔", || Command::Pen(Pen::Down))))
+                            .child(h_flex().gap_1().child(cmd("zero", "设为原点", || Command::Zero)).child(cmd("origin", "回原点", || Command::BackOrigin)))
+                            .child(
+                                h_flex().gap_1().child(cmd("unlock", "解锁 $X", || Command::Unlock)).child(
+                                    Button::new("pen-calib")
+                                        .small()
+                                        .label("落笔校准…")
+                                        .tooltip("画一排深浅不同的线，点选最合适的一条来设定落笔高度")
+                                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_pen_calibration(w, cx))),
+                                ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    #[inline(never)]
+    fn job_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let (muted, primary, track) = (theme.muted_foreground, theme.primary, theme.border);
+        let Some(j) = self.job else {
+            return div().text_sm().text_color(muted).child("在「设备 › 书写」选页，点「书写」").into_any_element();
+        };
+        let pct = j.percent();
+        let label = match (j.reconnecting, j.recovered) {
+            (Some(n), _) => format!("设备断开，正在自动重连…（第 {n} 次）"),
+            (_, Some((_, true))) => "控制板重启过：请把笔移回纸张原点，点「设为原点」后继续".into(),
+            (_, Some((line, false))) => format!("已重新连接：将从第 {} 页第 {line} 行附近继续", j.page + 1),
+            _ if j.pen.is_some() => format!("等待换笔：{}", j.pen.map(penkaku_core::profile::colour_name).unwrap_or_default()),
+            _ => format!(
+                "{} · {}/{} 行 · {pct:.0}%{}",
+                if j.calibration { "落笔校准".to_string() } else { format!("第 {} 页", j.page + 1) },
+                j.done,
+                j.total,
+                if j.paused { " · 已暂停" } else { "" }
+            ),
+        };
+        let interrupted = j.reconnecting.is_some() || j.recovered.is_some();
+        v_flex()
+            .gap_2()
+            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("书写任务"))
+            .child(div().text_sm().child(label))
+            .child(div().w_full().h(px(6.)).rounded_sm().bg(track).child(div().h_full().rounded_sm().bg(primary).w(relative(pct / 100.0))))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .when_some(j.recovered, |el, (_, rebooted)| {
+                        el.when(rebooted, |el| {
+                            el.child(Button::new("re-zero").small().label("设为原点").on_click(cx.listener(|t, _: &ClickEvent, _w, _cx| t.send(Command::Zero))))
+                        })
+                        .child(Button::new("resume-job").small().primary().label("继续书写").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.resume_job(cx))))
+                    })
+                    .when(j.pen.is_some() && !interrupted, |el| {
+                        el.child(Button::new("next-pen").small().primary().label("换笔完成").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.next_sheet(cx))))
+                    })
+                    .when(j.pen.is_none() && !interrupted, |el| {
+                        el.child(Button::new("pause").small().label(if j.paused { "继续" } else { "暂停" }).on_click(cx.listener(
+                            |t, _: &ClickEvent, _w, cx| t.toggle_pause(cx),
+                        )))
+                    })
+                    .child(Button::new("stop").small().danger().label("停止").on_click(cx.listener(|t, _: &ClickEvent, _w, cx| t.stop(cx)))),
+            )
+            .into_any_element()
+    }
+
+    #[inline(never)]
+    fn console_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let (muted, fg, bg, border) = (theme.muted_foreground, theme.foreground, theme.muted, theme.border);
+        let lines = self.log.iter().rev().take(LOG_SHOW).rev().map(|(d, l)| {
+            let (arrow, color) = if *d == Dir::Tx { ("› ", muted) } else { ("‹ ", fg) };
+            div().text_color(color).child(format!("{arrow}{l}"))
+        });
+        let open = self.console_open;
+        let last = self.log.back().map(|(_, l)| l.clone()).unwrap_or_else(|| "（暂无通信）".into());
+        v_flex()
+            .gap_2()
+            .child(disclosure("console-toggle", "串口控制台", open, cx.listener(|t, _: &ClickEvent, _w, cx| {
+                t.console_open ^= true;
+                cx.notify();
+            })))
+            // Folded: just the newest line, so the pane keeps its height for the jog pad.
+            .when(!open, |el| el.child(div().text_xs().text_color(muted).font_family("Consolas").truncate().child(last)))
+            .when(open, |el| {
+                el.child(
+                    v_flex()
+                        .h(px(LOG_SHOW as f32 * 16.0 + 12.0))
+                        .p_1p5()
+                        .overflow_hidden()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(border)
+                        .bg(bg)
+                        .font_family("Consolas")
+                        .text_xs()
+                        .children(lines),
+                )
+                .child(
+                    // Capture phase, so ↑/↓ reach here before the input's own cursor-up/down handling.
+                    div()
+                        .capture_key_down(cx.listener(|t, ev: &KeyDownEvent, window, cx| t.console_key(ev, window, cx)))
+                        .child(Input::new(&self.console).small().disabled(!self.console_enabled())),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// 自定义命令 buttons under the console; the ⚙ button opens the editor.
+    #[inline(never)]
+    fn custom_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let enabled = self.console_enabled();
+        let commands = cx.global::<AppState>().settings.device.custom_commands.clone();
+        let grid = if commands.is_empty() {
+            div().text_xs().text_color(muted).child("尚未添加，点 ⚙ 新建按钮").into_any_element()
+        } else {
+            h_flex()
+                .flex_wrap()
+                .gap_1()
+                .children(commands.iter().enumerate().map(|(i, c)| {
+                    Button::new(("custom-cmd", i))
+                        .small()
+                        .label(c.name.clone())
+                        .disabled(!enabled)
+                        .on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| t.run_custom_command(i, cx)))
+                }))
+                .into_any_element()
+        };
+        let open = self.custom_open;
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(disclosure("custom-toggle", "自定义命令", open, cx.listener(|t, _: &ClickEvent, _w, cx| {
+                        t.custom_open ^= true;
+                        cx.notify();
+                    })))
+                    .child(
+                        Button::new("custom-edit")
+                            .small()
+                            .ghost()
+                            .label("⚙")
+                            .accessibility_label("编辑自定义命令")
+                            .tooltip("编辑自定义命令")
+                            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.open_command_editor(w, cx))),
+                    ),
+            )
+            .when(open, |el| el.child(grid))
+            .into_any_element()
+    }
+
+    /// Send each non-blank line of a 自定义命令 in order; the actor replies to each before the next.
+    fn run_custom_command(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.console_enabled() {
+            return;
+        }
+        let Some(cmd) = cx.global::<AppState>().settings.device.custom_commands.get(index).cloned() else {
+            return;
+        };
+        for line in command_lines(&cmd.lines) {
+            self.send(Command::Send(line));
+        }
+        cx.notify();
+    }
+
+    /// 自定义命令 editor: pick a button to edit, 添加/保存, 删除 or 新建. Edits go straight to settings.
+    fn open_command_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = cx.entity();
+        let sel: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("例如：归零"));
+        let lines = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 10));
+        window.open_dialog(cx, move |d, _w, cx| {
+            let muted = cx.theme().muted_foreground;
+            let commands = cx.global::<AppState>().settings.device.custom_commands.clone();
+            let cur = sel.get();
+            let picks: Vec<Button> = commands
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let (sel, name, lines) = (sel.clone(), name.clone(), lines.clone());
+                    let b = Button::new(("cmd-pick", i)).small().label(c.name.clone());
+                    let b = if cur == Some(i) { b.primary() } else { b };
+                    b.on_click(move |_: &ClickEvent, w, cx| {
+                        sel.set(Some(i));
+                        let c = cx.global::<AppState>().settings.device.custom_commands.get(i).cloned().unwrap_or_default();
+                        set_editor(&name, &lines, &c.name, &c.lines, w, cx);
+                        cx.refresh_windows();
+                    })
+                })
+                .collect();
+            let (sel_s, name_s, lines_s, panel_s) = (sel.clone(), name.clone(), lines.clone(), panel.clone());
+            let save = Button::new("cmd-save").small().primary().label("添加/保存").on_click(move |_: &ClickEvent, w, cx| {
+                let title = name_s.read(cx).value().trim().to_string();
+                let body = command_lines(&lines_s.read(cx).value());
+                if title.is_empty() {
+                    w.push_notification(Notification::warning("请输入按钮名称"), cx);
+                    return;
+                }
+                if body.is_empty() {
+                    w.push_notification(Notification::warning("请输入按钮命令"), cx);
+                    return;
+                }
+                let mut cmds = cx.global::<AppState>().settings.device.custom_commands.clone();
+                let cmd = CustomCommand { name: title, lines: body.join("\n") };
+                let at = match sel_s.get() {
+                    Some(i) if i < cmds.len() => {
+                        cmds[i] = cmd;
+                        i
+                    }
+                    _ => {
+                        cmds.push(cmd);
+                        cmds.len() - 1
+                    }
+                };
+                sel_s.set(Some(at));
+                store_custom_commands(&panel_s, cmds, cx);
+                w.push_notification(Notification::success("已保存"), cx);
+            });
+            let (sel_d, name_d, lines_d, panel_d) = (sel.clone(), name.clone(), lines.clone(), panel.clone());
+            let del = Button::new("cmd-delete").small().danger().label("删除").disabled(cur.is_none()).on_click(move |_: &ClickEvent, w, cx| {
+                let Some(i) = sel_d.get() else { return };
+                let mut cmds = cx.global::<AppState>().settings.device.custom_commands.clone();
+                if i < cmds.len() {
+                    cmds.remove(i);
+                }
+                sel_d.set(None);
+                set_editor(&name_d, &lines_d, "", "", w, cx);
+                store_custom_commands(&panel_d, cmds, cx);
+            });
+            let (sel_n, name_n, lines_n) = (sel.clone(), name.clone(), lines.clone());
+            let new = Button::new("cmd-new").small().label("新建").on_click(move |_: &ClickEvent, w, cx| {
+                sel_n.set(None);
+                set_editor(&name_n, &lines_n, "", "", w, cx);
+                cx.refresh_windows();
+            });
+            let close = Button::new("cmd-close").small().label("关闭").on_click(|_: &ClickEvent, w, cx| w.close_dialog(cx));
+            d.title("自定义命令").w(px(460.)).child(
+                v_flex()
+                    .gap_3()
+                    .child(div().text_xs().text_color(muted).child("点按钮载入编辑。每行一条 G-code 或 $ 命令，按顺序发送。"))
+                    .child(h_flex().flex_wrap().gap_1().children(picks))
+                    .child(h_flex().gap_2().child(div().text_sm().child("按钮名称")).child(div().flex_1().child(Input::new(&name).small())))
+                    .child(v_flex().gap_1().child(div().text_sm().child("按钮命令")).child(Textarea::new(&lines))),
+            )
+            .footer(h_flex().gap_2().justify_end().child(del).child(new).child(save).child(close))
+        });
+    }
+}
+
+/// Replace the editor fields (name and command lines) with the given text.
+fn set_editor(name: &Entity<InputState>, lines: &Entity<TextareaState>, title: &str, body: &str, w: &mut Window, cx: &mut App) {
+    name.update(cx, |s, cx| s.set_value(title.to_string(), w, cx));
+    lines.update(cx, |s, cx| s.set_value(body.to_string(), w, cx));
+}
+
+/// Write the custom command list to settings, then redraw the panel and open dialogs.
+fn store_custom_commands(panel: &Entity<DevicePanel>, cmds: Vec<CustomCommand>, cx: &mut App) {
+    let st = cx.global_mut::<AppState>();
+    st.settings.device.custom_commands = cmds;
+    st.save_settings();
+    panel.update(cx, |_, cx| cx.notify());
+    cx.refresh_windows();
+}
+
+/// The non-blank lines of a 自定义命令, trimmed, in order.
+pub fn command_lines(text: &str) -> Vec<String> {
+    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
+}
+
+/// Console ↑/↓ over `len` entries, newest first. `pos` is the shown entry (`None` = the live
+/// line); the result is the next one, back to `None` once ↓ passes the newest.
+pub fn history_step(len: usize, pos: Option<usize>, up: bool) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    match (up, pos) {
+        (true, None) => Some(0),
+        (true, Some(i)) => Some((i + 1).min(len - 1)),
+        (false, Some(i)) if i > 0 => Some(i - 1),
+        (false, _) => None,
+    }
+}
+
+/// Move a sent console line to the top of the history (no repeats), capped and saved.
+fn remember_console_line(line: &str, cx: &mut App) {
+    let st = cx.global_mut::<AppState>();
+    let history = &mut st.settings.device.console_history;
+    history.retain(|l| l != line);
+    history.insert(0, line.to_string());
+    history.truncate(CONSOLE_HISTORY_MAX);
+    st.save_settings();
+}
+
+/// A section title that folds its body: ▸/▾ + label.
+fn disclosure(id: &'static str, label: &'static str, open: bool, on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Button {
+    Button::new(id)
+        .xsmall()
+        .ghost()
+        .justify_start()
+        .icon(if open { IconName::ChevronDown } else { IconName::ChevronRight })
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(label))
+        .accessibility_label(label)
+        .on_click(on_click)
+}
+
+pub fn state_zh(s: &str) -> &'static str {
+    match s.split(':').next().unwrap_or(s) {
+        "Idle" => "空闲",
+        "Run" => "运行",
+        "Hold" => "暂停",
+        "Jog" => "点动",
+        "Alarm" => "报警",
+        "Door" => "门开",
+        "Home" => "回零",
+        "Check" => "检查",
+        "Sleep" => "休眠",
+        _ => "未知",
+    }
+}
+
+impl Render for DevicePanel {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let border = theme.border;
+        let pos = self.status.as_ref().and_then(|s| s.wpos.or(s.mpos));
+        let state = self.status.as_ref().map(|s| state_zh(&s.state)).unwrap_or("—");
+        let pos_text = pos.map(|m| format!("X {:.2}   Y {:.2}", m[0], m[1])).unwrap_or_else(|| "X —   Y —".into());
+        let sep = || div().h(px(1.)).w_full().bg(border);
+        v_flex()
+            .id("device-pane")
+            .size_full()
+            .px_3()
+            .pb_3()
+            .gap_3()
+            .overflow_y_scroll()
+            .child(
+                TabBar::new("dev-tabs")
+                    .small()
+                    .underline()
+                    .selected_index(self.tab)
+                    .children([Tab::new().label("连接与控制"), Tab::new().label("参数设置")])
+                    .on_click(cx.listener(|t, ix: &usize, _w, cx| {
+                        t.tab = *ix;
+                        cx.notify();
+                    })),
+            )
+            .when(self.tab == 1, |el| el.child(self.params.clone()))
+            .when(self.tab == 0, |el| {
+                // By frequency: live status, the jog pad, the running job (only while one runs),
+                // then the connection row and the folded tools.
+                el.child(
+                    h_flex()
+                        .gap_3()
+                        .child(div().text_sm().child(format!("状态：{state}")))
+                        .child(div().text_sm().font_family("Consolas").child(pos_text)),
+                )
+                .child(self.control_section(cx))
+                .when(self.job.is_some(), |el| el.child(sep()).child(self.job_section(cx)))
+                .child(sep())
+                .child(self.connection_section(cx))
+                .child(sep())
+                .child(self.custom_section(cx))
+                .child(sep())
+                .child(self.console_section(cx))
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[core::prelude::v1::test]
+    fn history_recall_walks_newest_first_and_restores_the_live_line() {
+        // Empty history: nothing to recall.
+        assert_eq!(history_step(0, None, true), None);
+        // ↑ from the live line lands on the newest entry, then clamps at the oldest.
+        assert_eq!(history_step(3, None, true), Some(0));
+        assert_eq!(history_step(3, Some(0), true), Some(1));
+        assert_eq!(history_step(3, Some(1), true), Some(2));
+        assert_eq!(history_step(3, Some(2), true), Some(2));
+        // ↓ walks back toward newest, and past it returns to the live line.
+        assert_eq!(history_step(3, Some(2), false), Some(1));
+        assert_eq!(history_step(3, Some(0), false), None);
+        // ↓ on the live line stays there.
+        assert_eq!(history_step(3, None, false), None);
+    }
+
+    #[core::prelude::v1::test]
+    fn command_lines_skip_blanks_and_trim_in_order() {
+        assert_eq!(command_lines("  G21 \n\n$H\n   \nG90"), vec!["G21", "$H", "G90"]);
+        assert!(command_lines(" \n\t\n").is_empty());
+    }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "penkaku-device"
+description = "PenKaku device link: transports, Grbl streaming, device actor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+penkaku-core.workspace = true
+penkaku-output.workspace = true
+async-channel.workspace = true
+log.workspace = true
+reqwest.workspace = true
+serialport.workspace = true

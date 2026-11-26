@@ -49,7 +49,7 @@ jobs:
       # 导出 PDF: a ruled sample page per OS, to open and check by eye.
       - name: Sample PDF
         shell: bash
-        run: ./target/debug/chixie-rs-cli pdf "你好你好" --font-json crates/chixie-rs-core/tests/fixtures/font_fixture.json --out sample-${{ runner.os }}.pdf
+        run: ./target/debug/penkaku-cli pdf "你好你好" --font-json crates/penkaku-core/tests/fixtures/font_fixture.json --out sample-${{ runner.os }}.pdf
 
       - name: Upload sample PDF
         uses: actions/upload-artifact@v4
@@ -58,16 +58,16 @@ jobs:
           path: sample-${{ runner.os }}.pdf
           if-no-files-found: error
 
-      # Scripted GUI run against the fake backend and simulated Grbl (see crates/chixie-rs-gui/src/main.rs).
+      # Scripted GUI run against the fake backend and simulated Grbl (see crates/penkaku-gui/src/main.rs).
       # Non-blocking until it has passed on each runner once (GPU/display availability differs).
       - name: GUI autotest
         continue-on-error: true
         shell: bash
         env:
-          CHIXIE_RS_AUTOTEST: "1"
+          PENKAKU_AUTOTEST: "1"
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then run="xvfb-run -a"; else run=""; fi
-          $run ./target/debug/chixie-rs${{ runner.os == 'Windows' && '.exe' || '' }} | tee autotest.log
+          $run ./target/debug/penkaku${{ runner.os == 'Windows' && '.exe' || '' }} | tee autotest.log
           grep -q 'AUTOTEST_DOCX round_trip=true' autotest.log
           grep -q 'AUTOTEST_DEVICE connected=Some("模拟设备") pages_done=2/2 sheet_card=Some(((0, 1), 1)) jog_zero_while_waiting=true card_after_last=None recoveries=0 outcome=Some(Done)' autotest.log
           grep -q 'AUTOTEST_RESUME from=Some(.*) next_page=Some(1) outcome=Some(Done)' autotest.log
@@ -85,79 +85,79 @@ jobs:
           grep -q 'AUTOTEST_FIRMWARE written=true restored=true rows=15' autotest.log
           grep -q 'AUTOTEST_PERF pages=' autotest.log
 
-      # Windows: the exes (icon embedded by build.rs). macOS: chixie-rs.app with its .icns.
+      # Windows: the exes (icon embedded by build.rs). macOS: penkaku.app with its .icns.
       # Linux: binaries, .desktop entry, hicolor icons and install.sh. macOS and Linux are tarred
       # because artifact zips drop the executable bit.
       - name: Package
         shell: bash
         run: |
-          t=target/debug; r=crates/chixie-rs-gui/resources
+          t=target/debug; r=crates/penkaku-gui/resources
           mkdir -p dist
           case "$RUNNER_OS" in
             Windows)
-              cp $t/chixie-rs.exe $t/chixie-rs-cli.exe dist/ ;;
+              cp $t/penkaku.exe $t/penkaku-cli.exe dist/ ;;
             macOS)
-              app=dist/chixie-rs.app/Contents
+              app=dist/penkaku.app/Contents
               mkdir -p $app/MacOS $app/Resources
-              cp $t/chixie-rs $app/MacOS/
+              cp $t/penkaku $app/MacOS/
               cp $r/macos/Info.plist $app/
-              cp $r/icon/chixie-rs.icns $app/Resources/
+              cp $r/icon/penkaku.icns $app/Resources/
               plutil -lint $app/Info.plist
-              codesign --force --deep --sign - dist/chixie-rs.app
-              cp $t/chixie-rs-cli dist/
-              tar -czf chixie-rs-macOS.tar.gz -C dist . ;;
+              codesign --force --deep --sign - dist/penkaku.app
+              cp $t/penkaku-cli dist/
+              tar -czf penkaku-macOS.tar.gz -C dist . ;;
             Linux)
-              p=dist/chixie-rs
+              p=dist/penkaku
               mkdir -p $p/icons
-              cp $t/chixie-rs $t/chixie-rs-cli $r/linux/chixie-rs.desktop $r/linux/install.sh $p/
+              cp $t/penkaku $t/penkaku-cli $r/linux/penkaku.desktop $r/linux/install.sh $p/
               cp $r/icon/png/*.png $p/icons/
               chmod +x $p/install.sh
-              tar -czf chixie-rs-Linux.tar.gz -C dist chixie-rs ;;
+              tar -czf penkaku-Linux.tar.gz -C dist penkaku ;;
           esac
 
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: chixie-rs-${{ runner.os }}-debug
-          path: ${{ runner.os == 'Windows' && 'dist/' || format('chixie-rs-{0}.tar.gz', runner.os) }}
+          name: penkaku-${{ runner.os }}-debug
+          path: ${{ runner.os == 'Windows' && 'dist/' || format('penkaku-{0}.tar.gz', runner.os) }}
           if-no-files-found: error
 
       # Portable release build: optimised binaries plus a `portable` marker, so settings, fonts
-      # and templates go to a `data` folder beside the program (next to chixie-rs.app on macOS).
+      # and templates go to a `data` folder beside the program (next to penkaku.app on macOS).
       # Fat LTO is slow, so only on manual runs and tags.
       - name: Build release
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-        run: cargo build --release -p chixie-rs-gui -p chixie-rs-cli
+        run: cargo build --release -p penkaku-gui -p penkaku-cli
 
       - name: Package portable
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          t=target/release; r=crates/chixie-rs-gui/resources; p=portable/chixie-rs
+          t=target/release; r=crates/penkaku-gui/resources; p=portable/penkaku
           mkdir -p $p
           touch $p/portable
           case "$RUNNER_OS" in
             Windows)
-              cp $t/chixie-rs.exe $t/chixie-rs-cli.exe $p/
-              (cd portable && 7z a -tzip ../chixie-rs-portable-Windows.zip chixie-rs) ;;
+              cp $t/penkaku.exe $t/penkaku-cli.exe $p/
+              (cd portable && 7z a -tzip ../penkaku-portable-Windows.zip penkaku) ;;
             macOS)
-              app=$p/chixie-rs.app/Contents
+              app=$p/penkaku.app/Contents
               mkdir -p $app/MacOS $app/Resources
-              cp $t/chixie-rs $app/MacOS/
+              cp $t/penkaku $app/MacOS/
               cp $r/macos/Info.plist $app/
-              cp $r/icon/chixie-rs.icns $app/Resources/
-              codesign --force --deep --sign - $p/chixie-rs.app
-              cp $t/chixie-rs-cli $p/
-              tar -czf chixie-rs-portable-macOS.tar.gz -C portable chixie-rs ;;
+              cp $r/icon/penkaku.icns $app/Resources/
+              codesign --force --deep --sign - $p/penkaku.app
+              cp $t/penkaku-cli $p/
+              tar -czf penkaku-portable-macOS.tar.gz -C portable penkaku ;;
             Linux)
-              cp $t/chixie-rs $t/chixie-rs-cli $p/
-              tar -czf chixie-rs-portable-Linux.tar.gz -C portable chixie-rs ;;
+              cp $t/penkaku $t/penkaku-cli $p/
+              tar -czf penkaku-portable-Linux.tar.gz -C portable penkaku ;;
           esac
 
       - name: Upload portable
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: chixie-rs-${{ runner.os }}-portable
-          path: ${{ runner.os == 'Windows' && 'chixie-rs-portable-Windows.zip' || format('chixie-rs-portable-{0}.tar.gz', runner.os) }}
+          name: penkaku-${{ runner.os }}-portable
+          path: ${{ runner.os == 'Windows' && 'penkaku-portable-Windows.zip' || format('penkaku-portable-{0}.tar.gz', runner.os) }}
           if-no-files-found: error

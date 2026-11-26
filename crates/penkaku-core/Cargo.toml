@@ -1,0 +1,34 @@
+[package]
+name = "penkaku-core"
+description = "PenKaku core: device link, Grbl streaming, backend API, fonts, layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aes.workspace = true
+base64.workspace = true
+cbc.workspace = true
+hmac.workspace = true
+log.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+quick-xml.workspace = true
+notify.workspace = true
+zip.workspace = true
+jieba-rs = { workspace = true, optional = true }
+serialport.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+async-channel.workspace = true
+toml.workspace = true
+directories.workspace = true
+keyring.workspace = true
+
+[features]
+# 作文格分词: keep words on one grid row (bundles jieba's dictionary).
+segment = ["dep:jieba-rs"]
+
+[dev-dependencies]
+proptest.workspace = true
