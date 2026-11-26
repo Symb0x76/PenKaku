@@ -42,6 +42,8 @@ pub fn offer_sheet(view: Entity<DocView>, source: Option<PathBuf>, window: &mut 
 
 /// Ask where to save the picture sheet (`<name>_图片.pdf` beside `source`) and write it.
 pub fn export_sheet(view: Entity<DocView>, source: Option<&Path>, window: &mut Window, cx: &mut App) {
+    // The spaces as they stand now (an import may not have been laid out yet).
+    view.update(cx, |v, cx| v.relayout_now(cx));
     let v = view.read(cx);
     // Each laid-out space, at its final size, with its image.
     let doc = v.doc().document();
@@ -50,7 +52,6 @@ pub fn export_sheet(view: Entity<DocView>, source: Option<&Path>, window: &mut W
         return window.push_notification(Notification::info("文档里没有图片"), cx);
     }
     let font = cx.global::<AppState>().font_set.clone();
-    let bytes = picture_pdf(&items, &*font, &SheetOptions::default());
     let dir = source.and_then(Path::parent).map_or_else(file_ops::documents_dir, Path::to_path_buf);
     let stem = source.and_then(Path::file_stem).map_or_else(|| "文档".to_string(), |s| s.to_string_lossy().into_owned());
     let rx = cx.prompt_for_new_path(&dir, Some(&format!("{stem}_图片.pdf")));
@@ -61,7 +62,11 @@ pub fn export_sheet(view: Entity<DocView>, source: Option<&Path>, window: &mut W
             if path.extension().is_none() {
                 path.set_extension("pdf");
             }
-            let msg = match std::fs::write(&path, &bytes) {
+            // Decoding, packing and compressing run off the UI thread: the window stays live.
+            let _ = cx.update(|window, cx| window.push_notification(Notification::info(format!("正在生成图片文档（{n} 张）…")), cx));
+            let target = path.clone();
+            let task = cx.background_executor().spawn(async move { std::fs::write(&target, picture_pdf(&items, &*font, &SheetOptions::default())) });
+            let msg = match task.await {
                 Ok(()) => Notification::success(format!("已生成图片文档（{n} 张）：{}", path.display())),
                 Err(e) => Notification::error(format!("生成失败：{e}")),
             };
