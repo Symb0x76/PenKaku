@@ -130,7 +130,7 @@
     (no signing/installers/self-update); Windows/macOS/Linux from day one.
 - **M0 done (2026-11-08), branch `m0-foundations`** (not merged; no git remote yet):
   - Naming: crates `penkaku-{core,cli,gui}`, binaries `penkaku` / `penkaku-cli`, env
-    `PENKAKU_{FAKE,AUTOTEST,SIM_DELAY_MS,ACCOUNT,PASSWORD}`, data dir and keychain service
+    `PENKAKU_{FAKE,AUTOTEST,SIM_DELAY_MS}` (login: `CHIXIE_{ACCOUNT,PASSWORD}`), data dir and keychain service
     `penkaku` (renamed from `chixie-rs` on 2026-11-26; old names no longer read). Hardware/ChiXie3 names unchanged.
   - CI `.github/workflows/ci.yml`: Windows/macOS/Linux build, clippy -D warnings, tests, GUI
     autotest (non-blocking until seen green), debug artifacts. NOT run yet: needs a GitHub remote.

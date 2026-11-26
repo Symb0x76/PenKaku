@@ -51,7 +51,7 @@ enum Cmd {
     },
     /// Download one font and report why decryption fails, without printing secrets. Logs in with
     /// the GUI's saved account and the password from the Windows credential store ("remember
-    /// password" in the GUI), or PENKAKU_ACCOUNT / PENKAKU_PASSWORD.
+    /// password" in the GUI), or CHIXIE_ACCOUNT / CHIXIE_PASSWORD.
     FontCheck {
         /// One font id; omit with --all
         #[arg(long)]
@@ -69,7 +69,7 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         wait: u64,
     },
-    /// List fonts (login via PENKAKU_ACCOUNT / PENKAKU_PASSWORD env)
+    /// List fonts (login via CHIXIE_ACCOUNT / CHIXIE_PASSWORD env)
     Fonts {
         /// Browse the full online catalog instead of just your collected fonts
         #[arg(long)]
@@ -248,10 +248,10 @@ mod tests {
 }
 
 fn api_login() -> penkaku_core::Result<api::Client> {
-    let account = penkaku_core::env_var("ACCOUNT")
-        .ok_or_else(|| penkaku_core::Error::Api("set PENKAKU_ACCOUNT".into()))?;
-    let password = penkaku_core::env_var("PASSWORD")
-        .ok_or_else(|| penkaku_core::Error::Api("set PENKAKU_PASSWORD".into()))?;
+    let account = std::env::var("CHIXIE_ACCOUNT")
+        .map_err(|_| penkaku_core::Error::Api("set CHIXIE_ACCOUNT".into()))?;
+    let password = std::env::var("CHIXIE_PASSWORD")
+        .map_err(|_| penkaku_core::Error::Api("set CHIXIE_PASSWORD".into()))?;
     let mut c = api::Client::new()?;
     let l = c.login(&account, &password)?;
     eprintln!("logged in as {} ({})", l.username, l.role_code);
@@ -331,13 +331,13 @@ fn main() -> penkaku_core::Result<()> {
             let settings = penkaku_core::config::Settings::default_path()
                 .and_then(|p| penkaku_core::config::Settings::load(&p))
                 .unwrap_or_default();
-            let account = penkaku_core::env_var("ACCOUNT").or(settings.account).ok_or_else(|| {
-                penkaku_core::Error::Api("no saved account: log in once in the GUI, or set PENKAKU_ACCOUNT".into())
+            let account = std::env::var("CHIXIE_ACCOUNT").ok().or(settings.account).ok_or_else(|| {
+                penkaku_core::Error::Api("no saved account: log in once in the GUI, or set CHIXIE_ACCOUNT".into())
             })?;
-            let password = match penkaku_core::env_var("PASSWORD") {
+            let password = match std::env::var("CHIXIE_PASSWORD").ok() {
                 Some(p) => p,
                 None => penkaku_core::credentials::load(&account)?.ok_or_else(|| {
-                    penkaku_core::Error::Api("no saved password: tick 记住密码 in the GUI, or set PENKAKU_PASSWORD".into())
+                    penkaku_core::Error::Api("no saved password: tick 记住密码 in the GUI, or set CHIXIE_PASSWORD".into())
                 })?,
             };
             let mut c = api::Client::new()?;

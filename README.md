@@ -52,7 +52,7 @@ In the open-source **CH340 + Arduino/ESP32 + GRBL** plotter ecosystem (such as `
 - **Kinsoku, Grid Segmentation & Space Cleanup:** Automatic line-start/end punctuation rules, optional `jieba-rs` word segmentation in composition grids, and one-click cleanup of CJK–Latin or punctuation spacing.
 - **Navigation Pane & Non-Modal Find/Replace:** Sidebar jump lists for search matches and missing glyphs (`缺字`), plus case-sensitive and full-width/half-width-equivalent find/replace that preserves untouched character IDs.
 - **Format Painter, Mini Toolbar, Autosave & Vector PDF:** Sticky format painter, floating selection bar, `draft.docx` autosave, and vector PDF export with independent ink/background toggles.
-- **ChiXie Account Login & Cloud Fonts (炽写账号登录):** Log in with a ChiXie account in the GUI (or `PENKAKU_ACCOUNT` / `PENKAKU_PASSWORD` for the CLI) to list the online font catalog and your collected fonts, then download them as local SVG fonts. "Remember me" keeps the password only in the OS credential store.
+- **ChiXie Account Login & Cloud Fonts (炽写账号登录):** Log in with a ChiXie account in the GUI (or `CHIXIE_ACCOUNT` / `CHIXIE_PASSWORD` for the CLI) to list the online font catalog and your collected fonts, then download them as local SVG fonts. "Remember me" keeps the password only in the OS credential store.
 - **Full CLI (`penkaku-cli`):** Headless G-code generation, PDF export, serial/Telnet streaming, ESP3D TF card management, table detection, and a `fake-grbl` capture server.
 
 ---
@@ -172,7 +172,7 @@ Environment variables:
 | `PENKAKU_AUTOTEST=1`                  | Scripted GUI test against the demo backend; prints `AUTOTEST_*` lines and quits |
 | `PENKAKU_SIM_DELAY_MS`                | Per-line delay (ms) for the simulated Grbl device (default `3`)                 |
 | `PENKAKU_PERF=1`                      | Logs layout and paint timings                                                   |
-| `PENKAKU_ACCOUNT`, `PENKAKU_PASSWORD` | Login credentials for CLI font commands                                         |
+| `CHIXIE_ACCOUNT`, `CHIXIE_PASSWORD` | Login credentials for CLI font commands                                         |
 
 ---
 
