@@ -10,8 +10,6 @@
 [![Release](https://img.shields.io/github/v/release/Symb0x76/PenKaku?include_prereleases&sort=semver)](https://github.com/Symb0x76/PenKaku/releases)
 [![Rust](https://img.shields.io/badge/rust-1.98%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#download)
-[![GRBL](https://img.shields.io/badge/firmware-GRBL%20%7C%20Grbl__ESP32-green)](#position-in-the-open-source-plotter-ecosystem)
-[![Offline](https://img.shields.io/badge/offline-100%25-brightgreen)](#)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
@@ -157,11 +155,11 @@ penkaku/
 
 Download from the [**Releases**](https://github.com/Symb0x76/PenKaku/releases) page. Each release is built natively by CI on Windows, macOS, and Linux and ships, per OS, the `penkaku` GUI and `penkaku-cli`:
 
-| File                                                 | What it is                                                                                     |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| File                                                      | What it is                                                                                                                                                             |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `penkaku-portable-<OS>.zip` / `.tar.gz` (**recommended**) | Optimised build in a portable `penkaku` folder: settings, drafts, fonts, and templates live in a `data` folder beside the program, so the folder can go on a USB stick |
-| `penkaku-debug-<OS>.zip` / `.tar.gz`                 | Unoptimised debug build with the normal per-user data locations (see [File Locations](#file-locations)); on Linux it includes `install.sh` |
-| `sample-<OS>.pdf`                                    | A ruled sample page exported on that OS, for checking PDF output                               |
+| `penkaku-debug-<OS>.zip` / `.tar.gz`                      | Unoptimised debug build with the normal per-user data locations (see [File Locations](#file-locations)); on Linux it includes `install.sh`                             |
+| `sample-<OS>.pdf`                                         | A ruled sample page exported on that OS, for checking PDF output                                                                                                       |
 
 - **Windows:** unzip and run `penkaku.exe` (install the WCH CH340 driver if your board's COM port does not appear automatically).
 - **macOS:** unpack and open `penkaku/penkaku.app`. The app is not notarized, so the first start requires right-click › Open (or `xattr -dr com.apple.quarantine`). In the portable build, `data` sits next to `penkaku.app`.
@@ -211,12 +209,12 @@ PENKAKU_FAKE=1 cargo run -p penkaku-gui
 
 Environment variables:
 
-| Variable                              | Effect                                                                          |
-| ------------------------------------- | ------------------------------------------------------------------------------- |
-| `PENKAKU_FAKE=1`                      | Offline demo backend + simulated Grbl device in a temp folder                   |
-| `PENKAKU_AUTOTEST=1`                  | Scripted GUI test against the demo backend; prints `AUTOTEST_*` lines and quits |
-| `PENKAKU_SIM_DELAY_MS`                | Per-line delay (ms) for the simulated Grbl device (default `3`)                 |
-| `PENKAKU_PERF=1`                      | Logs layout and paint timings                                                   |
+| Variable                            | Effect                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| `PENKAKU_FAKE=1`                    | Offline demo backend + simulated Grbl device in a temp folder                   |
+| `PENKAKU_AUTOTEST=1`                | Scripted GUI test against the demo backend; prints `AUTOTEST_*` lines and quits |
+| `PENKAKU_SIM_DELAY_MS`              | Per-line delay (ms) for the simulated Grbl device (default `3`)                 |
+| `PENKAKU_PERF=1`                    | Logs layout and paint timings                                                   |
 | `CHIXIE_ACCOUNT`, `CHIXIE_PASSWORD` | Login credentials for CLI font commands                                         |
 
 ---
