@@ -90,5 +90,5 @@ strip = true
 
 [profile.relnative]
 inherits = "release"
-# Pwsh: $env:RUSTFLAGS="-C target-cpu=native" cargo build --release
-# -sh: RUSTFLAGS="-C target-cpu=native" cargo build --profile relnative
+# Pwsh: $env:RUSTFLAGS="-C target-cpu=native"; cargo build --relnative
+# -sh: set RUSTFLAGS=-C target-cpu=native && cargo build --profile relnative
