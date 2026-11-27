@@ -12,7 +12,7 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex
 use gpui_kit::*;
 
 use crate::doc_view::DocView;
-use crate::ribbon::{big, group, small, stack};
+use crate::ribbon::{big, group, small, stack, toggle};
 use crate::state::AppState;
 
 /// What 流程图 starts with: a small example to edit.
@@ -53,7 +53,7 @@ pub fn insert_group(view: Entity<DocView>, cx: &App) -> AnyElement {
 pub fn object_tools(view: Entity<DocView>, cx: &App) -> Option<AnyElement> {
     let tint = cx.theme().primary.opacity(0.06);
     let v = view.read(cx);
-    if v.inline_table().is_some() {
+    if let Some(t) = v.inline_table() {
         let run = |f: fn(&mut penkaku_doc::EditDoc) -> bool| {
             let view = view.clone();
             move |_: &ClickEvent, w: &mut Window, cx: &mut App| {
@@ -76,7 +76,12 @@ pub fn object_tools(view: Entity<DocView>, cx: &App) -> Option<AnyElement> {
                 small("it-add-col", "在右侧插入列", IconName::BetweenVerticalEnd).on_click(run(|d| d.add_col())).into_any_element(),
                 small("it-del-col", "删除列", IconName::Columns2).on_click(run(|d| d.delete_col())).into_any_element(),
             ]))
-            .child(stack([small("it-del", "删除表格", IconName::Grid2x2X).on_click(run(|d| d.delete_table())).into_any_element()]));
+            .child(stack([
+                toggle("it-borders", "框线", IconName::Table, t.framed, "笔是否画出这张表格的格线（手写一般不画框；含图片或只有一格的表格默认不画，纯文字表格默认画）")
+                    .on_click(run(|d| d.toggle_table_borders()))
+                    .into_any_element(),
+                small("it-del", "删除表格", IconName::Grid2x2X).on_click(run(|d| d.delete_table())).into_any_element(),
+            ]));
         return Some(group(cx, "inline-table", "表格工具", body, None).bg(tint).into_any_element());
     }
     let (at, source) = v.diagram_at_caret()?;

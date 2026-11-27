@@ -865,6 +865,18 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<PenKakuApp>, cx: &mut App) 
                 let frame = v.layout_doc().pages.iter().flat_map(|p| p.stroke_chars.iter()).filter(|&&c| c == anchor).count();
                 (t.map_or(0, |t| t.cells.len()), frame)
             });
+            // 框线 off: the frame goes, the text stays; undone so the undo count below holds.
+            let unframed = cx.update(|cx| {
+                view.update(cx, |v, cx| v.edit_doc(|d| d.toggle_table_borders(), cx));
+                let v = view.read(cx);
+                let anchor = v.inline_table().map_or(usize::MAX, |t| t.anchor);
+                let n = v.layout_doc().pages.iter().flat_map(|p| p.stroke_chars.iter()).filter(|&&c| c == anchor).count();
+                view.update(cx, |v, cx| v.edit_doc(|d| {
+                    d.undo();
+                    true
+                }, cx));
+                n
+            });
             let p = std::env::temp_dir().join("chixie-autotest-inline-table.docx");
             let docx = cx.update(|cx| {
                 let d = view.read(cx).doc().clone();
@@ -873,7 +885,7 @@ fn run_autotest(handle: AnyWindowHandle, app: Entity<PenKakuApp>, cx: &mut App) 
             dispatch(cx, (0..3).map(|_| Box::new(doc_view::Undo) as Box<dyn Action>).collect());
             cx.background_executor().timer(pause(300)).await;
             let restored = cx.update(|cx| view.read(cx).doc().text() == "前文");
-            println!("AUTOTEST_INLINE_TABLE cells={cells} frame={frame} docx={docx} restored={restored}");
+            println!("AUTOTEST_INLINE_TABLE cells={cells} frame={frame} unframed={unframed} docx={docx} restored={restored}");
 
             cx.update(|cx| {
                 view.update(cx, |v, cx| {

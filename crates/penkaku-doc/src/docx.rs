@@ -371,7 +371,7 @@ fn document_xml(doc: &Document) -> String {
             paragraphs_xml(&mut x, doc, &pics, start..to, doc.para_of(start));
         }
         match block {
-            Block::Table { cols } => table_xml(&mut x, doc, &pics, k, end, cols),
+            Block::Table { cols, borders } => table_xml(&mut x, doc, &pics, k, end, cols, penkaku_core::layout::table_borders(chars, k, end, *borders, picture)),
             Block::Picture { .. } => {}
             Block::Diagram { source } => {
                 for line in std::iter::once(FENCE_OPEN).chain(source.lines()).chain(std::iter::once(FENCE_CLOSE)) {
@@ -391,12 +391,14 @@ fn document_xml(doc: &Document) -> String {
     x
 }
 
-/// An inline table (`OBJECT` at `anchor` … `TABLE_END` at `end`) as a Word table.
-fn table_xml(x: &mut String, doc: &Document, pics: &Pictures, anchor: usize, end: usize, cols: &[f32]) {
+/// An inline table (`OBJECT` at `anchor` … `TABLE_END` at `end`) as a Word table, with borders
+/// only when the pen draws them (`framed`).
+fn table_xml(x: &mut String, doc: &Document, pics: &Pictures, anchor: usize, end: usize, cols: &[f32], framed: bool) {
     let cells = penkaku_core::layout::table_cells(doc.chars(), anchor, end);
     *x += r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>"#;
+    let line = if framed { "single" } else { "nil" };
     for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
-        *x += &format!(r#"<w:{side} w:val="single" w:sz="4" w:space="0" w:color="auto"/>"#);
+        *x += &format!(r#"<w:{side} w:val="{line}" w:sz="4" w:space="0" w:color="auto"/>"#);
     }
     *x += "</w:tblBorders></w:tblPr><w:tblGrid>";
     for w in cols {
@@ -598,13 +600,13 @@ fn parse_document(xml: &str, inline: bool) -> Result<Parsed, Error> {
                         }
                         paras.push(Para::default());
                         tbl_anchor = Some(chars.len());
-                        chars.push((OBJECT, Attrs { block: Some(Block::Table { cols: Vec::new() }), ..Attrs::default() }));
+                        chars.push((OBJECT, Attrs { block: Some(Block::Table { cols: Vec::new(), borders: None }), ..Attrs::default() }));
                         tc_seen = 0;
                     }
                 }
                 b"w:gridCol" if tbl_depth == 1 => {
                     if let (Some(a), Some(w)) = (tbl_anchor, attr(&e, "w:w")?.and_then(|v| v.parse::<f32>().ok()))
-                        && let Some(Block::Table { cols }) = chars[a].1.block.as_mut()
+                        && let Some(Block::Table { cols, .. }) = chars[a].1.block.as_mut()
                     {
                         cols.push(w / TWIPS_PER_MM);
                     }
@@ -1128,10 +1130,26 @@ mod tests {
         let blocks = |d: &Document| (0..d.len()).filter_map(|i| d.attrs(i).block.clone()).collect::<Vec<_>>();
         assert_eq!(blocks(&w).len(), 2);
         match &blocks(&w)[0] {
-            Block::Table { cols } => assert!(cols.iter().all(|c| (c - 30.0).abs() < 0.05)),
+            Block::Table { cols, .. } => assert!(cols.iter().all(|c| (c - 30.0).abs() < 0.05)),
             b => panic!("{b:?}"),
         }
         assert_eq!(blocks(&w)[1], Block::Diagram { source: "graph TD\nA[开始] --> B{好?}".into() });
+    }
+
+    #[test]
+    fn table_borders_choice_round_trips_and_shows_in_word() {
+        let mut e = crate::EditDoc::from_text("a\nb");
+        e.move_to(1, false);
+        e.insert_table(1, 2, 60.0);
+        let border = |xml: &str| xml.contains(r#"<w:top w:val="single""#);
+        assert!(border(&document_xml(e.document())), "a text table is framed by default");
+        assert!(e.toggle_table_borders());
+        let d = e.document().clone();
+        assert!(document_xml(&d).contains(r#"<w:top w:val="nil""#));
+        let l = read(&write(&d, 4).unwrap()).unwrap();
+        assert!(l.doc.same_content(&d));
+        let anchor = d.text().chars().position(|c| c == OBJECT).unwrap();
+        assert!(matches!(l.doc.attrs(anchor).block, Some(Block::Table { borders: Some(false), .. })));
     }
 
     #[test]
@@ -1146,7 +1164,7 @@ mod tests {
         assert_eq!(l.doc.text(), format!("T\n{OBJECT}1\n2{CELL_BREAK}{TABLE_END}\nE"));
         assert!(l.doc.is_consistent());
         match &l.doc.attrs(2).block {
-            Some(Block::Table { cols }) => assert_eq!(cols.iter().map(|c| c.round()).collect::<Vec<_>>(), vec![25.0, 51.0]),
+            Some(Block::Table { cols, .. }) => assert_eq!(cols.iter().map(|c| c.round()).collect::<Vec<_>>(), vec![25.0, 51.0]),
             b => panic!("{b:?}"),
         }
     }

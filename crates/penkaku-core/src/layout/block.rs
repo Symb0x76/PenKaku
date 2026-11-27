@@ -14,10 +14,12 @@ type Pt = (f32, f32);
 /// swallowed, or `None` when it is malformed (a table without its end) and is skipped as text.
 pub(super) fn lay(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, b: &Block) -> Option<(usize, usize)> {
     match b {
-        Block::Table { cols } => {
-            let end = super::table_end(f.chars, i, |k| matches!(f.blocks.get(k), Some(Some(Block::Picture { .. }))))?;
+        Block::Table { cols, borders } => {
+            let picture = |k: usize| matches!(f.blocks.get(k), Some(Some(Block::Picture { .. })));
+            let end = super::table_end(f.chars, i, picture)?;
+            let framed = super::table_borders(f.chars, i, end, *borders, picture);
             start_fresh(pen, i);
-            lay_table(pen, f, font, i, end, cols);
+            lay_table(pen, f, font, i, end, cols, framed);
             Some((end + 1, f.chars[i..end].iter().filter(|&&c| c == '\n').count()))
         }
         Block::Diagram { source } => {
@@ -312,7 +314,8 @@ fn frame(pen: &mut Pen, part: &Part, xs: &[f32], i: usize, id: u64, k: &mut u64)
     }
 }
 
-fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, end: usize, cols: &[f32]) {
+/// `framed`: draw the borders (框线); without them only the cells' text is written, in place.
+fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, end: usize, cols: &[f32], framed: bool) {
     let p = pen.p;
     let (ox, oy) = p.origin;
     let pitch = pitch(pen);
@@ -403,7 +406,9 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
             }
             let x0 = ox + pen.line_x + xoff;
             if part.as_ref().is_none_or(|pt| pt.page != pen.page_ix || pt.x0 != x0) {
-                if let Some(pt) = part.take() {
+                if let Some(pt) = part.take()
+                    && framed
+                {
                     frame(pen, &pt, &xs, i, id, &mut frame_k);
                 }
                 part = Some(Part { page: pen.page_ix, x0, ys: vec![top] });
@@ -440,7 +445,9 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
             fresh = true;
         }
     }
-    if let Some(pt) = part.take() {
+    if let Some(pt) = part.take()
+        && framed
+    {
         frame(pen, &pt, &xs, i, id, &mut frame_k);
     }
     // The end marker: a caret stop after the table, on the line the '\n' after it closes.

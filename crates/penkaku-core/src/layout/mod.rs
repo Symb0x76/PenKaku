@@ -229,13 +229,25 @@ pub fn table_cells(chars: &[char], anchor: usize, end: usize) -> Vec<std::ops::R
     cells
 }
 
+/// Whether the pen draws the borders (框线) of the inline table at `anchor`..`end`: `set` when the
+/// user chose; otherwise yes for a table of plain text (handwriting draws such tables by hand),
+/// no for one holding a picture (`is_picture(k)`) or with a single cell (a layout frame).
+pub fn table_borders(chars: &[char], anchor: usize, end: usize, set: Option<bool>, is_picture: impl Fn(usize) -> bool) -> bool {
+    set.unwrap_or_else(|| table_cells(chars, anchor, end).len() > 1 && !(anchor + 1..end).any(|k| chars[k] == OBJECT && is_picture(k)))
+}
+
 /// An object drawn by the pen inside the text flow, carried by an [`OBJECT`] char.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Block {
     /// Inline table: column widths (mm). The cells are the [`CELL_BREAK`]-separated text up to
-    /// the next [`TABLE_END`], filled row by row; rows = cells / columns, rounded up.
-    Table { cols: Vec<f32> },
+    /// the next [`TABLE_END`], filled row by row; rows = cells / columns, rounded up. `borders`:
+    /// 框线 on or off as the user set it; `None` follows [`table_borders`]' default.
+    Table {
+        cols: Vec<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        borders: Option<bool>,
+    },
     /// Flowchart from Mermaid source (see [`crate::diagram::mermaid`]).
     Diagram { source: String },
     /// A picture from a Word document: the pen leaves a `w_mm` × `h_mm` space (smaller when the

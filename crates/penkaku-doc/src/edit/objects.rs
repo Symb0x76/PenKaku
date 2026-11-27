@@ -20,6 +20,10 @@ pub struct TableSpan {
     pub cols: Vec<f32>,
     /// Each cell's text, row by row.
     pub cells: Vec<Range<usize>>,
+    /// 框线 as the user set it (`None`: the default for its content).
+    pub borders: Option<bool>,
+    /// Whether the pen draws its borders: `borders`, or the default.
+    pub framed: bool,
 }
 
 impl TableSpan {
@@ -52,12 +56,21 @@ impl EditDoc {
         let picture = |k: usize| matches!(self.doc.attrs(k).block, Some(Block::Picture { .. }));
         // The nearest object before the caret that is not a picture in a cell.
         let anchor = (0..i).rev().find(|&k| c[k] == OBJECT && !picture(k))?;
-        let Some(Block::Table { cols }) = &self.doc.attrs(anchor).block else { return None };
+        let Some(Block::Table { cols, borders }) = &self.doc.attrs(anchor).block else { return None };
         let end = penkaku_core::layout::table_end(c, anchor, picture)?;
         if i > end {
             return None;
         }
-        Some(TableSpan { anchor, end, cols: cols.clone(), cells: table_cells(c, anchor, end) })
+        let framed = penkaku_core::layout::table_borders(c, anchor, end, *borders, picture);
+        Some(TableSpan { anchor, end, cols: cols.clone(), cells: table_cells(c, anchor, end), borders: *borders, framed })
+    }
+
+    /// 框线: turn the borders of the table at the caret on or off (an undo step; kept with the
+    /// document). `false` when the caret is not in a table.
+    pub fn toggle_table_borders(&mut self) -> bool {
+        let Some(t) = self.table_at(self.caret) else { return false };
+        self.set_block(t.anchor, Block::Table { cols: t.cols, borders: Some(!t.framed) });
+        true
     }
 
     /// The flowchart at char `i` (the caret just before or after it), with its index.
@@ -92,7 +105,7 @@ impl EditDoc {
     pub fn insert_table(&mut self, rows: usize, cols: usize, width: f32) {
         let (rows, cols) = (rows.max(1), cols.max(1));
         let body: String = std::iter::once(OBJECT).chain(std::iter::repeat_n(CELL_BREAK, rows * cols - 1)).chain(std::iter::once(TABLE_END)).collect();
-        let a = self.insert_object(&body, Block::Table { cols: vec![width / cols as f32; cols] });
+        let a = self.insert_object(&body, Block::Table { cols: vec![width / cols as f32; cols], borders: None });
         self.caret = a + 1;
     }
 
@@ -226,7 +239,7 @@ impl EditDoc {
         // Each earlier row gains one break before the caret's cell; the new cell follows it.
         let k = t.cell_of(self.caret);
         let caret = t.cells[k].end + k / n + 1;
-        self.table_edit(edits, Some((t.anchor, Block::Table { cols })), caret);
+        self.table_edit(edits, Some((t.anchor, Block::Table { cols, borders: t.borders })), caret);
         true
     }
 
@@ -250,7 +263,7 @@ impl EditDoc {
             .collect();
         let mut cols = t.cols.clone();
         cols.remove(c.min(cols.len() - 1));
-        self.table_edit(edits, Some((t.anchor, Block::Table { cols })), t.anchor + 1);
+        self.table_edit(edits, Some((t.anchor, Block::Table { cols, borders: t.borders })), t.anchor + 1);
         true
     }
 
@@ -396,5 +409,29 @@ mod tests {
         d.move_to(1, false);
         assert!(d.backspace(false), "a flowchart deletes like one char");
         assert_eq!(d.text(), "\n");
+    }
+
+    #[test]
+    fn table_borders_toggle_survives_column_edits_and_undoes() {
+        let mut d = table_doc();
+        let t = d.table_at(d.caret()).unwrap();
+        assert_eq!((t.borders, t.framed), (None, true), "a text table is framed by default");
+        assert!(d.toggle_table_borders());
+        let t = d.table_at(d.caret()).unwrap();
+        assert_eq!((t.borders, t.framed), (Some(false), false));
+        assert!(d.add_col() && d.delete_col());
+        assert_eq!(d.table_at(d.caret()).unwrap().borders, Some(false), "column edits keep the choice");
+        d.undo();
+        d.undo();
+        d.undo();
+        assert_eq!(d.table_at(d.caret()).unwrap().borders, None);
+        // A lone cell is unframed by default; the toggle frames it.
+        let mut d = EditDoc::from_text("");
+        d.insert_table(1, 1, 40.0);
+        assert!(!d.table_at(d.caret()).unwrap().framed);
+        assert!(d.toggle_table_borders());
+        assert!(d.table_at(d.caret()).unwrap().framed);
+        d.move_to(d.len(), false);
+        assert!(!d.toggle_table_borders(), "not in a table");
     }
 }

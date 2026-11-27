@@ -41,7 +41,7 @@ fn y_span(s: &Stroke) -> (f32, f32) {
 /// "X" ¶ [X | XX] [X | ·] ¶ "X": a 2-column table after one line of text.
 fn small_table() -> (String, Vec<(usize, Block)>) {
     let t = format!("X\n{OBJECT}X{CELL_BREAK}XX{CELL_BREAK}X{CELL_BREAK}{TABLE_END}\nX");
-    (t, vec![(2, Block::Table { cols: vec![30.0, 30.0] })])
+    (t, vec![(2, Block::Table { cols: vec![30.0, 30.0], borders: None })])
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn inline_table_draws_its_frame_and_puts_cells_in_place() {
 fn inline_table_cells_wrap_and_grow_their_row() {
     // 8 × 5 mm of text in a 20 mm column (≈ 15.8 mm writable): 3 lines → a 30 mm row.
     let t = format!("{OBJECT}XXXXXXXX{CELL_BREAK}X{TABLE_END}");
-    let doc = with_blocks(&t, &[(0, Block::Table { cols: vec![20.0, 20.0] })], &[], &tall_page(200.0));
+    let doc = with_blocks(&t, &[(0, Block::Table { cols: vec![20.0, 20.0], borders: None })], &[], &tall_page(200.0));
     let bottom = tagged(&doc, 0).iter().map(|s| y_span(s).1).fold(f32::MIN, f32::max);
     assert_eq!(bottom, 30.0);
     assert_eq!(doc.lines.iter().filter(|l| (1..=8).contains(&l.start)).count(), 3);
@@ -94,7 +94,7 @@ fn inline_table_cells_wrap_and_grow_their_row() {
 fn inline_table_rows_move_to_the_next_page() {
     // Four 10 mm rows on a 25 mm page: two fit, the rest go over.
     let t = format!("{OBJECT}X{CELL_BREAK}X{CELL_BREAK}X{CELL_BREAK}X{TABLE_END}");
-    let doc = with_blocks(&t, &[(0, Block::Table { cols: vec![30.0] })], &[], &tall_page(25.0));
+    let doc = with_blocks(&t, &[(0, Block::Table { cols: vec![30.0], borders: None })], &[], &tall_page(25.0));
     assert_eq!(doc.pages.len(), 2);
     for p in &doc.pages {
         assert_eq!(p.strokes.len(), p.stroke_chars.len());
@@ -112,10 +112,10 @@ fn all_on_paper(doc: &Document, h: f32) -> bool {
     })
 }
 
-/// "X" ¶ one cell of 40 X's (8 lines in a 30 mm column) ¶ "X" ¶ "X".
+/// "X" ¶ one cell of 40 X's (8 lines in a 30 mm column) ¶ "X" ¶ "X"; framed by choice (a lone cell is not by default).
 fn long_cell() -> (String, Vec<(usize, Block)>) {
     let long = "X".repeat(40);
-    (format!("X\n{OBJECT}{long}{TABLE_END}\nX\nX"), vec![(2, Block::Table { cols: vec![30.0] })])
+    (format!("X\n{OBJECT}{long}{TABLE_END}\nX\nX"), vec![(2, Block::Table { cols: vec![30.0], borders: Some(true) })])
 }
 
 #[test]
@@ -191,9 +191,9 @@ fn picture_shrinks_to_the_line_and_keeps_its_shape() {
 
 #[test]
 fn pictures_in_table_cells_stay_side_by_side() {
-    // A 2-column table, a 50 × 30 picture in each cell.
+    // A 2-column table, a 50 × 30 picture in each cell, framed by choice (not by default).
     let t = format!("{OBJECT}{OBJECT}{CELL_BREAK}{OBJECT}{TABLE_END}");
-    let b = vec![(0, Block::Table { cols: vec![60.0, 60.0] }), (1, picture(50.0, 30.0, 1)), (3, picture(50.0, 30.0, 2))];
+    let b = vec![(0, Block::Table { cols: vec![60.0, 60.0], borders: Some(true) }), (1, picture(50.0, 30.0, 1)), (3, picture(50.0, 30.0, 2))];
     let doc = with_blocks(&t, &b, &[], &tall_page(200.0));
     let p: Vec<(u32, usize)> = doc.pictures.iter().map(|s| (s.number, s.char_ix)).collect();
     assert_eq!(p, vec![(1, 1), (2, 3)]);
@@ -233,9 +233,40 @@ fn centred_table_moves_right() {
     assert_eq!(left, 20.0);
 }
 
+/// Frame strokes of the table anchored at char 0 (the text has no other strokes tagged to it).
+fn frame_strokes(t: &str, b: &[(usize, Block)]) -> usize {
+    tagged(&with_blocks(t, b, &[], &tall_page(200.0)), 0).len()
+}
+
+#[test]
+fn table_borders_default_on_for_text_off_for_pictures_and_lone_cells() {
+    let table = |cols: Vec<f32>| Block::Table { cols, borders: None };
+    // Plain text in a one-row, two-column table: drawn by hand, framed (2 row + 3 column edges).
+    let text = format!("{OBJECT}X{CELL_BREAK}X{TABLE_END}");
+    assert_eq!(frame_strokes(&text, &[(0, table(vec![30.0, 30.0]))]), 5);
+    // A picture in a cell: no frame, the picture's space stays.
+    let pic = format!("{OBJECT}{OBJECT}{CELL_BREAK}X{TABLE_END}");
+    let doc = with_blocks(&pic, &[(0, table(vec![60.0, 60.0])), (1, picture(50.0, 30.0, 1))], &[], &tall_page(200.0));
+    assert!(tagged(&doc, 0).is_empty());
+    assert_eq!(doc.pictures.len(), 1);
+    // A single cell (a layout frame): no frame, its text is still written.
+    let lone = format!("{OBJECT}XX{TABLE_END}");
+    let doc = with_blocks(&lone, &[(0, table(vec![30.0]))], &[], &tall_page(200.0));
+    assert!(tagged(&doc, 0).is_empty());
+    assert!(!tagged(&doc, 1).is_empty() && !tagged(&doc, 2).is_empty());
+}
+
+#[test]
+fn table_borders_follow_the_users_choice() {
+    let text = format!("{OBJECT}X{CELL_BREAK}X{TABLE_END}");
+    assert_eq!(frame_strokes(&text, &[(0, Block::Table { cols: vec![30.0, 30.0], borders: Some(false) })]), 0);
+    let lone = format!("{OBJECT}XX{TABLE_END}");
+    assert_eq!(frame_strokes(&lone, &[(0, Block::Table { cols: vec![30.0], borders: Some(true) })]), 4);
+}
+
 #[test]
 fn broken_markers_draw_nothing_and_never_panic() {
-    let doc = with_blocks(&format!("X{TABLE_END}X{OBJECT}X"), &[(3, Block::Table { cols: vec![10.0] })], &[], &tall_page(200.0));
+    let doc = with_blocks(&format!("X{TABLE_END}X{OBJECT}X"), &[(3, Block::Table { cols: vec![10.0], borders: None })], &[], &tall_page(200.0));
     assert!(doc.missing.is_empty());
     assert_eq!(doc.boxes.len(), 5);
     assert_eq!(doc.stroke_count(), 3);
