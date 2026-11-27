@@ -551,9 +551,20 @@ pub(super) fn draw_char(pen: &mut Pen, font: &(impl Glyphs + ?Sized), jit: &mut 
 }
 
 /// The font's glyph for `ch`, or for its full/half-width counterpart when the font lacks it
-/// (`,` ↔ `，`, `A` ↔ `Ａ`, space ↔ ideographic space). The text itself never changes.
+/// (`,` ↔ `，`, `A` ↔ `Ａ`, space ↔ ideographic space), or for the plain character a maths
+/// look-alike is written as (`∣` → `|`, `∶` → `:`). The text itself never changes.
 pub fn glyph_for(font: &Font, ch: char) -> Option<&Glyph> {
-    font.get(ch).or_else(|| width_counterpart(ch).and_then(|c| font.get(c)))
+    let same = |ch: char| font.get(ch).or_else(|| width_counterpart(ch).and_then(|c| font.get(c)));
+    same(ch).or_else(|| look_alike(ch).and_then(same))
+}
+
+/// The plain character a maths look-alike is written as.
+fn look_alike(ch: char) -> Option<char> {
+    match ch {
+        '∣' => Some('|'),
+        '∶' => Some(':'),
+        _ => None,
+    }
 }
 
 fn width_counterpart(ch: char) -> Option<char> {

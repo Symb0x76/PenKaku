@@ -82,6 +82,7 @@ impl PenKakuApp {
                     let font = store.load(id).inspect_err(|e| log::warn!("loading font {k}: {e}")).ok()?;
                     let fixes = f.fix_for(&k);
                     let mut font = if fixes.any() { fix::apply(&font, &fixes) } else { font };
+                    font.compose_math();
                     let arrows = font.compose_arrows();
                     Some((k, Arc::new(font), store.name_of(id).unwrap_or_default(), arrows))
                 })

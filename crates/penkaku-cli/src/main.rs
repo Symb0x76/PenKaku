@@ -482,7 +482,7 @@ fn main() -> penkaku_core::Result<()> {
             }
         }
         Cmd::Pdf { text, font_json, out, font_size, rows, no_ink, no_background } => {
-            let font = penkaku_core::font::Font::from_json(&std::fs::read(&font_json)?)?.with_composed_arrows();
+            let font = penkaku_core::font::Font::from_json(&std::fs::read(&font_json)?)?.with_composed_symbols();
             let mut settings = penkaku_core::config::Settings::default();
             settings.page.font_size = font_size;
             let ruling = layout::Ruling::Rows { rows: (rows, rows), columns: 1, column_gap: 0.0, widths: vec![], band: None, upper: false, dashed: false, divider: false };
@@ -496,7 +496,7 @@ fn main() -> penkaku_core::Result<()> {
         } => {
             let font = match (blob_file, key_file) {
                 _ if font_json.is_some() => {
-                    penkaku_core::font::Font::from_json(&std::fs::read(font_json.as_deref().unwrap())?)?.with_composed_arrows()
+                    penkaku_core::font::Font::from_json(&std::fs::read(font_json.as_deref().unwrap())?)?.with_composed_symbols()
                 }
                 (Some(bf), Some(kf)) => {
                     let blob = std::fs::read_to_string(bf)?;

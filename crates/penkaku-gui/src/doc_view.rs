@@ -371,7 +371,7 @@ impl DocView {
                 let id = store.id_of(&n);
                 let font = id.and_then(|id| store.load(id).inspect_err(|e| log::warn!("loading font {n}: {e}")).ok());
                 let fixes = id.map(|id| settings.fix_for(&FontKey::from_local_id(id))).unwrap_or(settings.fix);
-                let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }.with_composed_arrows()));
+                let font = font.map(|f| Arc::new(if fixes.any() { fix::apply(&f, &fixes) } else { f }.with_composed_symbols()));
                 (n, font)
             })
             .collect();

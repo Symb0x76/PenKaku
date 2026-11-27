@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::{Error, Result};
 
+mod compose;
 mod crypto;
 pub use crypto::{fernet_decrypt, shape};
 
@@ -60,8 +61,10 @@ impl Font {
         out
     }
 
-    /// [`Self::compose_arrows`], for callers that do not need to know which arrows were made.
-    pub fn with_composed_arrows(mut self) -> Self {
+    /// [`Self::compose_math`] and [`Self::compose_arrows`], for callers that do not need to know
+    /// which symbols were made.
+    pub fn with_composed_symbols(mut self) -> Self {
+        self.compose_math();
         self.compose_arrows();
         self
     }
