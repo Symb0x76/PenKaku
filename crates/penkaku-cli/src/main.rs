@@ -1,4 +1,5 @@
 mod fake_grbl;
+mod marks;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -133,6 +134,10 @@ enum Cmd {
         /// Lay out and check only: no G-code file, nothing streamed
         #[arg(long, conflicts_with_all = ["out", "port", "ip"])]
         dry_run: bool,
+        /// Paragraph / character formats by paragraph number or matched text (.json or .toml;
+        /// see crates/penkaku-cli/src/marks.rs). Alignment needs a page, so it only shows in `pdf`
+        #[arg(long)]
+        marks: Option<PathBuf>,
     },
     /// Lay text out on a ruled A4 page and write it as PDF (导出 PDF; offline, glyph JSON font)
     Pdf {
@@ -156,6 +161,10 @@ enum Cmd {
         /// Print a JSON report on stdout: pages, missing_chars, overflow_lines, out_path
         #[arg(long)]
         json: bool,
+        /// Paragraph / character formats by paragraph number or matched text (.json or .toml;
+        /// see crates/penkaku-cli/src/marks.rs)
+        #[arg(long)]
+        marks: Option<PathBuf>,
     },
     /// Fit mm-per-glyph-unit from G-code captured from ChiXie3 (see docs/protocol.md)
     Calibrate {
@@ -238,6 +247,16 @@ fn capture_diff(a: &[Vec<(f32, f32)>], b: &[Vec<(f32, f32)>]) -> CaptureDiff {
         }
     }
     d
+}
+
+/// Lay `text` out, with `--marks` formats when given.
+fn lay(text: &str, font: &penkaku_core::font::Font, p: &layout::PageParams, marks: Option<&std::path::Path>) -> penkaku_core::Result<layout::Document> {
+    let Some(path) = marks else { return Ok(layout::layout(text, font, p)) };
+    let rules = marks::load(path).map_err(penkaku_core::Error::Config)?;
+    let chars: Vec<char> = text.chars().collect();
+    let ids: Vec<u64> = (0..chars.len() as u64).collect();
+    let (paras, styles) = marks::apply(&rules, &chars, p.mm_per_unit * layout::EM_UNITS);
+    Ok(layout::layout_flow(&layout::Flow { chars: &chars, ids: &ids, paras: &paras, styles: &styles, ..Default::default() }, font, p))
 }
 
 /// `write --json` / `pdf --json`: what a script or agent needs to decide whether to change the
@@ -525,12 +544,12 @@ fn main() -> penkaku_core::Result<()> {
                 println!("{}\t{:.3}\t{:.3}\t{adv}\t{:.4}", p.ch, p.offset.0, p.offset.1, p.rms);
             }
         }
-        Cmd::Pdf { text, font_json, out, font_size, rows, no_ink, no_background, json } => {
+        Cmd::Pdf { text, font_json, out, font_size, rows, no_ink, no_background, json, marks } => {
             let font = penkaku_core::font::Font::from_json(&std::fs::read(&font_json)?)?.with_composed_symbols();
             let mut settings = penkaku_core::config::Settings::default();
             settings.page.font_size = font_size;
             let ruling = layout::Ruling::Rows { rows: (rows, rows), columns: 1, column_gap: 0.0, widths: vec![], band: None, upper: false, dashed: false, divider: false };
-            let doc = layout::layout(&text, &font, &settings.page_params_with(ruling));
+            let doc = lay(&text, &font, &settings.page_params_with(ruling), marks.as_deref())?;
             let o = gcode::pdf::PdfOptions { ink: !no_ink, background: !no_background, paper: settings.page.paper, margins: settings.page.margins, ..Default::default() };
             std::fs::write(&out, gcode::pdf::pdf(&doc, &o))?;
             eprintln!("{} page(s), {} strokes → {}", doc.pages.len(), doc.stroke_count(), out.display());
@@ -539,7 +558,7 @@ fn main() -> penkaku_core::Result<()> {
             }
         }
         Cmd::Write {
-            text, font_id, blob_file, key_file, font_json, out, scale, font_size, style, seed, no_jitter, deform, origin_x, origin_y, zero, port, ip, json, dry_run,
+            text, font_id, blob_file, key_file, font_json, out, scale, font_size, style, seed, no_jitter, deform, origin_x, origin_y, zero, port, ip, json, dry_run, marks,
         } => {
             if json && !dry_run && out.is_none() && port.is_none() && ip.is_none() {
                 return Err(penkaku_core::Error::Config("--json needs --out, --dry-run or a device: the G-code would share stdout".into()));
@@ -569,7 +588,7 @@ fn main() -> penkaku_core::Result<()> {
                 deformation: resolved.deformation,
                 ..Default::default()
             };
-            let doc = layout::layout(&text, &font, &params);
+            let doc = lay(&text, &font, &params, marks.as_deref())?;
             if !doc.missing.is_empty() {
                 eprintln!("missing glyphs (skipped): {}", doc.missing.iter().collect::<String>());
             }

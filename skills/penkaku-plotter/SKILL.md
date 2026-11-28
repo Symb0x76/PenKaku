@@ -52,6 +52,20 @@ for smoke tests, not real output.
    `write --port/--ip` streams directly. List ports with `penkaku-cli ports`, find Wi-Fi boards
    with `penkaku-cli discover`. Streaming moves real hardware: confirm with the user first.
 
+## Local formats (`--marks`, `write` and `pdf`)
+
+Centre a title, right-align a signature or indent paragraphs without character offsets:
+
+```json
+[{"line": 1, "f": {"align": "center", "size": 1.3}},
+ {"match": "此致", "nth": 1, "f": {"indent": 0}},
+ {"line": -1, "f": {"align": "right"}}]
+```
+
+`line` = paragraph number from 1 (`-1` = last) or a `[first, last]` range; `match` = text (every
+occurrence, or only the `nth`). Formats: `align`, `indent` (characters), `size`, `underline`,
+`strike`, `tilt`. TOML files use `[[mark]]` tables. Alignment needs a page, so it shows in `pdf`.
+
 ## Style (`write` only; `pdf` uses the default style)
 
 - `--style style.toml`: handwriting jitter and deformation. `penkaku-cli style-template` prints a

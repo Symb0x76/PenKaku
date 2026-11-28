@@ -5239,7 +5239,9 @@ dependencies = [
  "penkaku-device",
  "penkaku-import",
  "penkaku-output",
+ "serde",
  "serde_json",
+ "toml 1.2.0+spec-1.1.0",
 ]
 
 [[package]]
