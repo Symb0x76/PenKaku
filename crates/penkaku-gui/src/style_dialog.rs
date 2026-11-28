@@ -5,7 +5,7 @@
 //! baseline, float and deformation on top of the Chinese settings.
 
 use penkaku_core::deformation::Deformation;
-use penkaku_core::handwriting::{ScriptStyle, Span, StyleFile};
+use penkaku_core::handwriting::{LineStartMode, ScriptStyle, Span, StyleFile};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput};
@@ -284,6 +284,13 @@ impl StyleDialog {
                     .label("智能偏移（同向偏移）")
                     .checked(style.handwriting.intelligent_vertical_offset)
                     .on_click(edit(|s, v| s.handwriting.intelligent_vertical_offset = v)),
+            )
+            .child(
+                Checkbox::new("line-drift")
+                    .small()
+                    .label("行首自然漂移（逐行缓慢右移，分段、空行和题号处回弹；网格和表格不用）")
+                    .checked(style.handwriting.line_start_mode != LineStartMode::Independent)
+                    .on_click(edit(|s, v| s.handwriting.line_start_mode = if v { LineStartMode::NATURAL } else { LineStartMode::Independent })),
             )
             .child(
                 h_flex().gap_2().child(div().flex_1()).child(Button::new("recommended").small().label("使用推荐参数").on_click(|_: &ClickEvent, window, cx| {

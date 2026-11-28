@@ -195,6 +195,22 @@ fn jitter_is_seeded_and_bounded() {
 }
 
 #[test]
+fn natural_drift_eases_back_on_paragraphs_blank_lines_and_question_numbers() {
+    use crate::handwriting::{LineStartMode, Span};
+    let font = Font::from_json(FIXTURE).unwrap();
+    let mut p = jitter_params(3);
+    p.style.line_start_offset = Span::new(0.0, 2.0);
+    p.style.line_start_mode = LineStartMode::NaturalDrift { creep_mm_per_line: 1.0, wobble_mm: 0.0, max_drift_mm: 5.0 };
+    let text = ".\n.\n.\n\n.\n1.";
+    let doc = layout(text, &font, &p);
+    let x0 = doc.boxes[0].x0;
+    let starts: Vec<f32> = doc.lines.iter().filter(|l| l.start < l.end).map(|l| doc.boxes[l.start].x0 - x0).collect();
+    // Drift 0 → creep 1 → ×0.3 per paragraph; the blank line and "1." start over.
+    let want = [0.0, 0.3, 0.39, 0.0, 0.0];
+    assert!(starts.len() == want.len() && starts.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4), "{starts:?}");
+}
+
+#[test]
 fn deformation_alone_is_seeded_and_changes_strokes() {
     let font = Font::from_json(FIXTURE).unwrap();
     let p = PageParams {

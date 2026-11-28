@@ -94,6 +94,8 @@ pub struct HandwritingStyle {
     /// X shift of the first glyph of every line, mm (ChiXie3 `first_text_not_align_range`, which
     /// captures show applies per line).
     pub line_start_offset: Span,
+    /// How line starts relate to each other (not in ChiXie3).
+    pub line_start_mode: LineStartMode,
     /// Indent of a paragraph's first line, mm. `None` = not applied (ChiXie3 default mode).
     pub first_line_indent: Option<Span>,
     /// 中英文分开设置: Latin letters and digits can differ from Chinese (not in ChiXie3).
@@ -103,6 +105,46 @@ pub struct HandwritingStyle {
     pub cursive: Cursive,
     /// 随机轻重: each char's pen pressure varies by up to ± this many 轻重 steps (with `enabled`).
     pub press_jitter: f32,
+}
+
+/// 行首漂移: how each line's start offset relates to the line above.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineStartMode {
+    /// Every line draws its own offset from `line_start_offset` (ChiXie3).
+    #[default]
+    Independent,
+    /// A real hand: line starts creep right down the page with a little wobble, and ease back
+    /// after a paragraph break; a blank line or a question number (`1.`, `(2)`, `第3题`) starts
+    /// over. Offsets are `line_start_offset.min` + the drift. Ignored on grids and table forms.
+    NaturalDrift { creep_mm_per_line: f32, wobble_mm: f32, max_drift_mm: f32 },
+}
+
+impl LineStartMode {
+    /// The natural drift's suggested values.
+    pub const NATURAL: Self = Self::NaturalDrift { creep_mm_per_line: 0.5, wobble_mm: 0.4, max_drift_mm: 4.0 };
+}
+
+/// Share of the drift kept across a paragraph break.
+const DRIFT_KEEP_PARAGRAPH: f32 = 0.3;
+
+/// A paragraph that opens with a question number: `1.` `2、` `3)` `(4)` `（5）` `①` `第6题`.
+pub fn starts_question(text: &[char]) -> bool {
+    let t: Vec<char> = text.iter().copied().skip_while(|c| matches!(c, ' ' | '\u{3000}' | '\t')).take(8).collect();
+    let digit = |c: char| c.is_ascii_digit() || ('０'..='９').contains(&c);
+    let n = t.iter().take_while(|&&c| digit(c)).count();
+    if n > 0 {
+        return t.get(n).is_some_and(|c| matches!(c, '.' | '．' | '、' | ')' | '）'));
+    }
+    match t.first() {
+        Some('(' | '（') => {
+            let n = t[1..].iter().take_while(|&&c| digit(c)).count();
+            n > 0 && t.get(1 + n).is_some_and(|c| matches!(c, ')' | '）'))
+        }
+        Some(&c) if ('\u{2460}'..='\u{2473}').contains(&c) => true,
+        Some('第') => t[1..].iter().position(|&c| c == '题').is_some_and(|k| k > 0),
+        _ => false,
+    }
 }
 
 /// 字符轻重 steps: 更轻Ⅱ −2, 更轻Ⅰ −1, 标准 0, 更重Ⅰ +1, 更重Ⅱ +2. Random 轻重 may reach ±3.
@@ -236,6 +278,7 @@ impl Default for HandwritingStyle {
             intelligent_vertical_offset: false,
             random_correct_offset: false,
             line_start_offset: Span::new(0.0, 2.0),
+            line_start_mode: LineStartMode::Independent,
             first_line_indent: None,
             english: ScriptStyle::default(),
             number: ScriptStyle::default(),
@@ -291,6 +334,10 @@ pub struct Jitter<'a> {
     style: &'a HandwritingStyle,
     /// The current row's drift for `intelligent_vertical_offset`, −1…1 (set by `line_start`).
     row_sweep: f32,
+    /// 行首漂移 carried from line to line, mm (with [`LineStartMode::NaturalDrift`]).
+    drift: f32,
+    /// The ruling allows the drift (not a grid or a table form).
+    drift_on: bool,
 }
 
 /// Per-row 同向偏移 drift.
@@ -298,7 +345,13 @@ const SALT_ROW_DRIFT: u64 = 0x4452_4946_0000_0007;
 
 impl<'a> Jitter<'a> {
     pub fn new(style: &'a HandwritingStyle) -> Self {
-        Self { style, row_sweep: 0.0 }
+        Self { style, row_sweep: 0.0, drift: 0.0, drift_on: true }
+    }
+
+    /// Turn the line-start drift off (grids and table forms keep characters in their boxes).
+    pub fn without_drift(mut self) -> Self {
+        self.drift_on = false;
+        self
     }
 
     fn rng(&self, salt: u64, id: u64) -> Rng {
@@ -309,7 +362,26 @@ impl<'a> Jitter<'a> {
     /// 同向偏移 drift.
     pub fn line_start(&mut self, id: u64) -> f32 {
         self.row_sweep = self.rng(SALT_ROW_DRIFT, id).unit() * 2.0 - 1.0;
-        self.style.line_start_offset.sample(&mut self.rng(SALT_LINE, id))
+        let mut rng = self.rng(SALT_LINE, id);
+        match self.style.line_start_mode {
+            LineStartMode::NaturalDrift { creep_mm_per_line, wobble_mm, max_drift_mm } if self.drift_on => {
+                let max = max_drift_mm.max(0.0);
+                let x = (self.drift + (rng.unit() * 2.0 - 1.0) * wobble_mm).clamp(0.0, max);
+                self.drift = (self.drift + creep_mm_per_line).clamp(0.0, max);
+                self.style.line_start_offset.min + x
+            }
+            _ => self.style.line_start_offset.sample(&mut rng),
+        }
+    }
+
+    /// A paragraph ended: ease the drift back. `blank` (an empty line) starts over.
+    pub fn paragraph_break(&mut self, blank: bool) {
+        self.drift *= if blank { 0.0 } else { DRIFT_KEEP_PARAGRAPH };
+    }
+
+    /// A question number starts the next line: the drift starts over.
+    pub fn reset_drift(&mut self) {
+        self.drift = 0.0;
     }
 
     /// Paragraph first-line indent, if configured.
@@ -503,6 +575,43 @@ mod tests {
         let first = j.vertical(8, 30.0, 150.0);
         j.line_start(7);
         assert_eq!(first, j.vertical(8, 30.0, 150.0));
+    }
+
+    #[test]
+    fn natural_drift_creeps_clamps_and_eases_back() {
+        let mode = LineStartMode::NaturalDrift { creep_mm_per_line: 1.0, wobble_mm: 0.0, max_drift_mm: 2.5 };
+        let style = HandwritingStyle { enabled: true, line_start_offset: Span::new(0.5, 3.0), line_start_mode: mode, ..Default::default() };
+        let mut j = Jitter::new(&style);
+        let xs: Vec<f32> = (0..5).map(|id| j.line_start(id)).collect();
+        assert_eq!(xs, [0.5, 1.5, 2.5, 3.0, 3.0]);
+        j.paragraph_break(false);
+        assert!((j.line_start(9) - (0.5 + 0.75)).abs() < 1e-5);
+        j.paragraph_break(true);
+        assert_eq!(j.line_start(10), 0.5);
+        j.reset_drift();
+        assert_eq!(j.line_start(11), 0.5);
+        // Wobble stays inside min..min + max; without drift the span is sampled as before.
+        let wob = HandwritingStyle { line_start_mode: LineStartMode::NATURAL, ..style.clone() };
+        let mut j = Jitter::new(&wob);
+        assert!((0..200).all(|id| (0.5..=4.5).contains(&j.line_start(id))));
+        let mut off = Jitter::new(&wob).without_drift();
+        let indep = HandwritingStyle { line_start_mode: LineStartMode::Independent, ..style.clone() };
+        let mut plain = Jitter::new(&indep);
+        assert!((0..50).all(|id| off.line_start(id) == plain.line_start(id)));
+        // TOML: absent = Independent; the drift's fields round-trip.
+        let s = StyleFile { handwriting: wob, ..Default::default() };
+        assert_eq!(toml::from_str::<StyleFile>(&s.to_toml()).unwrap(), s);
+    }
+
+    #[test]
+    fn question_numbers() {
+        let q = |s: &str| starts_question(&s.chars().collect::<Vec<_>>());
+        for yes in ["1. 解", "12、", "３．", "2)", "(3)", "（10）", "①", "第4题", "  第十二题"] {
+            assert!(q(yes), "{yes}");
+        }
+        for no in ["1", "2024年", "(a)", "第一章", "题", "解：", ""] {
+            assert!(!q(no), "{no}");
+        }
     }
 
     #[test]

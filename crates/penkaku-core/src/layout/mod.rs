@@ -819,6 +819,9 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
     let jitter_on = p.style.enabled;
     let deform_on = p.reshapes();
     let mut jit = Jitter::new(&p.style);
+    if table || matches!(p.ruling, Ruling::Grid { .. }) {
+        jit = jit.without_drift();
+    }
 
     let grid = match p.ruling {
         Ruling::Grid { cols, cell, gap, .. } if p.page.is_some() => Some((cols.max(1), cell.0, gap.0)),
@@ -910,6 +913,9 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
         }
         if fresh_line && ch != '\n' {
             if jitter_on {
+                if fresh_paragraph && crate::handwriting::starts_question(&chars[i..]) {
+                    jit.reset_drift();
+                }
                 pen.cx = jit.line_start(id);
             }
             let indent = if fresh_paragraph { para(para_ix).first_indent.or_else(|| if jitter_on { jit.indent(id) } else { None }) } else { None };
@@ -1001,6 +1007,7 @@ fn layout_pass(f: &Flow, font: &(impl Glyphs + ?Sized), p: &PageParams, fits: &[
                 pen.push_box(x0);
                 pen.newline(i, i + 1);
                 para_ix += 1;
+                jit.paragraph_break(i == 0 || chars[i - 1] == '\n');
                 if !table {
                     pen.align = para(para_ix).align;
                 }
