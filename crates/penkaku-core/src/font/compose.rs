@@ -14,9 +14,16 @@ type Strokes = Vec<Vec<Point>>;
 /// The symbols [`Font::compose_math`] can make, besides the circled numbers and bracket halves.
 const SYMBOLS: [char; 19] = ['−', '±', '∓', '×', '÷', '≤', '≥', '≠', '≡', '≈', '/', '∥', '°', '·', '⋅', '√', '∕', 'Θ', 'θ'];
 
-/// Paired brackets: a font with only one half gets the other as its mirror image (`{` → `}`), or
-/// turned half round for corner brackets (`「` → `」`).
-const PAIRS: [(char, char, bool); 13] = [
+/// Paired brackets and relations: a font with only one half gets the other as its mirror image
+/// (`{` → `}`, its own `≤` → `≥`), or turned half round for corner brackets (`「` → `」`). A
+/// relation the font has neither half of is composed from `<` / `>` instead.
+const PAIRS: [(char, char, bool); 19] = [
+    ('≤', '≥', false),
+    ('≦', '≧', false),
+    ('⩽', '⩾', false),
+    ('≪', '≫', false),
+    ('⊂', '⊃', false),
+    ('⊆', '⊇', false),
     ('(', ')', false),
     ('[', ']', false),
     ('{', '}', false),
@@ -362,6 +369,16 @@ mod tests {
         assert!(made.contains(&'≥'));
         // Corner bracket turned half round, its stroke reversed: down first, then along the foot.
         assert_eq!(f.get('」').unwrap().strokes, vec![vec![(2.0, 1.0), (2.0, 4.0), (0.0, 4.0)]]);
+    }
+
+    #[test]
+    fn missing_relation_half_mirrors_the_fonts_own() {
+        let mut f = font();
+        // The font's own `≤` (a slanted bar), no `≥`: `≥` is its mirror, not `>` over `-`.
+        let le = vec![vec![(2.0, 3.0), (0.0, 4.0), (2.0, 5.0)], vec![(0.0, 6.0), (2.0, 5.5)]];
+        f.glyphs.insert('≤', Glyph { advance: 2.0, strokes: le });
+        assert!(f.compose_math().contains(&'≥'));
+        assert_eq!(f.get('≥').unwrap().strokes, vec![vec![(0.0, 3.0), (2.0, 4.0), (0.0, 5.0)], vec![(2.0, 6.0), (0.0, 5.5)]]);
     }
 
     #[test]
