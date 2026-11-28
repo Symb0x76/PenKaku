@@ -1,7 +1,8 @@
 //! Maths symbols a font lacks, made from its own strokes so a formula writes in one hand instead
 //! of a missing box or another font's glyph: `≤` is its `<` over its `-`, `×` its `+` turned, `÷`
 //! its `-` between two of its `.`, and so on. Only `√` and the ring of `①` are drawn from scratch
-//! (sized by the font's digits); 抖动 and 变形 later make them look written like the rest.
+//! (sized by the font's digits); 抖动 and 变形 later make them look written like the rest. A font
+//! with only one half of a bracket pair (`{` but no `}`) gets the other half as its mirror image.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -10,26 +11,64 @@ use crate::layout::glyph_for;
 
 type Strokes = Vec<Vec<Point>>;
 
-/// The symbols [`Font::compose_math`] can make, besides the circled numbers.
-const SYMBOLS: [char; 17] = ['−', '±', '∓', '×', '÷', '≤', '≥', '≠', '≡', '≈', '/', '∥', '°', '·', '⋅', '√', '∕'];
+/// The symbols [`Font::compose_math`] can make, besides the circled numbers and bracket halves.
+const SYMBOLS: [char; 19] = ['−', '±', '∓', '×', '÷', '≤', '≥', '≠', '≡', '≈', '/', '∥', '°', '·', '⋅', '√', '∕', 'Θ', 'θ'];
+
+/// Paired brackets: a font with only one half gets the other as its mirror image (`{` → `}`), or
+/// turned half round for corner brackets (`「` → `」`).
+const PAIRS: [(char, char, bool); 13] = [
+    ('(', ')', false),
+    ('[', ']', false),
+    ('{', '}', false),
+    ('<', '>', false),
+    ('（', '）', false),
+    ('［', '］', false),
+    ('｛', '｝', false),
+    ('【', '】', false),
+    ('《', '》', false),
+    ('〈', '〉', false),
+    ('〔', '〕', false),
+    ('「', '」', true),
+    ('『', '』', true),
+];
 
 impl Font {
-    /// Maths symbols the font lacks, made from its own strokes (see the module docs): `− ± ∓ × ÷
-    /// ≤ ≥ ≠ ≡ ≈ / ∥ ° · √` and the circled numbers `⓪ ①..㊿`. Symbols the font has (directly or as
-    /// their full/half-width counterpart), or whose parts it lacks, are left alone. Returns the
-    /// symbols it made.
+    /// Symbols the font lacks, made from its own strokes (see the module docs): the missing half
+    /// of a bracket pair, then `− ± ∓ × ÷ ≤ ≥ ≠ ≡ ≈ / ∥ ° · √ Θ θ` and the circled numbers
+    /// `⓪ ①..㊿`. Symbols the font has (directly or as their full/half-width counterpart), or
+    /// whose parts it lacks, are left alone. Returns the symbols it made.
     pub fn compose_math(&mut self) -> Vec<char> {
+        // Brackets first, so a mirrored `>` can go on into `≥`.
+        let mut chars = self.compose_with(PAIRS.into_iter().flat_map(|(a, b, _)| [a, b]), other_half);
+        chars.extend(self.compose_with(SYMBOLS.into_iter().chain((0..=50).filter_map(circled_char)), make));
+        chars
+    }
+
+    /// Each of `targets` the font lacks, made by `make`; returns those made.
+    fn compose_with(&mut self, targets: impl Iterator<Item = char>, make: fn(&Font, char) -> Option<Strokes>) -> Vec<char> {
         let has = |c: char| glyph_for(self, c).is_some_and(|g| !g.strokes.is_empty());
-        let made: Vec<(char, Glyph)> = SYMBOLS
-            .into_iter()
-            .chain((0..=50).filter_map(circled_char))
-            .filter(|&c| !has(c))
-            .filter_map(|c| Some((c, finish(make(self, c)?)?)))
-            .collect();
+        let made: Vec<(char, Glyph)> = targets.filter(|&c| !has(c)).filter_map(|c| Some((c, finish(make(self, c)?)?))).collect();
         let chars = made.iter().map(|(c, _)| *c).collect();
         self.glyphs.extend(made);
         chars
     }
+}
+
+/// The missing half `c` of a bracket pair from the half `f` has: mirrored left to right, or for
+/// corner brackets turned half round with each stroke reversed so it is still written from the
+/// top. It keeps its height on the line.
+fn other_half(f: &Font, c: char) -> Option<Strokes> {
+    let &(a, b, turn) = PAIRS.iter().find(|p| p.0 == c || p.1 == c)?;
+    let src = glyph_for(f, if c == a { b } else { a }).map(|g| g.strokes.clone()).filter(|s| bounds(s).is_some())?;
+    let (mx, my) = mid(&src);
+    Some(if turn {
+        map(&src, |(x, y)| (2.0 * mx - x, 2.0 * my - y)).into_iter().map(|mut st| {
+            st.reverse();
+            st
+        }).collect()
+    } else {
+        map(&src, |(x, y)| (2.0 * mx - x, y))
+    })
 }
 
 /// The strokes of `c` built from `f`'s glyphs, or `None` when `f` lacks a part.
@@ -116,6 +155,15 @@ fn make(f: &Font, c: char) -> Option<Strokes> {
             Some(moved(&small, 0.0, top - b.1))
         }
         '·' | '⋅' => Some(at(&part('.')?, 0.0, axis()?)),
+        'Θ' | 'θ' => {
+            // `O` (or `0` for θ) with a short bar across its middle.
+            let ring = part(if c == 'Θ' { 'O' } else { '0' })?;
+            let (w, _) = size(&ring);
+            let (x, y) = mid(&ring);
+            let mut s = ring;
+            s.extend(at(&fit_width(&part('-')?, 0.55 * w), x, y));
+            Some(s)
+        }
         '√' => {
             // One stroke: a short rise, down to the foot, up to the digits' top, then a short bar.
             let (top, foot) = digits()?;
@@ -287,15 +335,47 @@ mod tests {
     fn makes_what_the_font_lacks_from_its_own_parts() {
         let mut f = font();
         let made = f.compose_math();
-        // No `~`, so no `≈`; everything else and all 51 circled numbers.
-        assert!(!made.contains(&'≈') && f.get('≈').is_none());
-        assert_eq!(made.len(), SYMBOLS.len() - 1 + 51);
+        // No `~`, so no `≈`; no `O`, so no `Θ`; no bracket halves at all except `<` `>`, which it
+        // has both of. Everything else and all 51 circled numbers.
+        assert!(!made.contains(&'≈') && f.get('≈').is_none() && f.get('Θ').is_none());
+        assert_eq!(made.len(), SYMBOLS.len() - 2 + 51);
         // Run again: nothing is missing any more.
         assert!(f.compose_math().is_empty());
         // Every glyph starts at x = 0 and advances by its width.
         for c in made {
             let (x0, _, x1, _) = b(&f, c);
             assert!(near(x0, 0.0) && near(f.get(c).unwrap().advance, x1), "{c}");
+        }
+    }
+
+    #[test]
+    fn missing_bracket_half_is_the_mirror_of_the_other() {
+        let mut f = font();
+        f.glyphs.remove(&'>');
+        f.glyphs.insert('{', Glyph { advance: 1.0, strokes: vec![vec![(1.0, 1.0), (0.4, 2.0), (0.0, 4.0), (0.4, 6.0), (1.0, 7.0)]] });
+        f.glyphs.insert('「', Glyph { advance: 2.0, strokes: vec![vec![(2.0, 1.0), (0.0, 1.0), (0.0, 4.0)]] });
+        let made = f.compose_math();
+        assert!(made.contains(&'}') && made.contains(&'>') && made.contains(&'」'));
+        // Flipped left to right, same height, still drawn from the top.
+        assert_eq!(f.get('}').unwrap().strokes, vec![vec![(0.0, 1.0), (0.6, 2.0), (1.0, 4.0), (0.6, 6.0), (0.0, 7.0)]]);
+        // The mirrored `>` goes on into `≥` in the same call.
+        assert!(made.contains(&'≥'));
+        // Corner bracket turned half round, its stroke reversed: down first, then along the foot.
+        assert_eq!(f.get('」').unwrap().strokes, vec![vec![(2.0, 1.0), (2.0, 4.0), (0.0, 4.0)]]);
+    }
+
+    #[test]
+    fn theta_is_its_ring_with_a_bar_across() {
+        let mut f = font();
+        f.glyphs.insert('O', Glyph { advance: 2.0, strokes: vec![vec![(1.0, 2.0), (0.0, 4.5), (1.0, 7.0), (2.0, 4.5), (1.0, 2.0)]] });
+        f.compose_math();
+        for (c, ring) in [('Θ', 'O'), ('θ', '0')] {
+            let s = &f.get(c).unwrap().strokes;
+            assert_eq!(s.len(), 2, "{c}");
+            assert_eq!(s[0], f.get(ring).unwrap().strokes[0], "{c} keeps its ring");
+            let bar = bounds(std::slice::from_ref(&s[1])).unwrap();
+            let rb = bounds(&s[..1]).unwrap();
+            assert!(near((bar.1 + bar.3) / 2.0, (rb.1 + rb.3) / 2.0) && near(bar.2 - bar.0, 0.55 * (rb.2 - rb.0)), "{c}");
         }
     }
 
