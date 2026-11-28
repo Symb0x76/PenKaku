@@ -17,22 +17,35 @@ pub struct FontFix {
     pub dedupe: bool,
     /// 异常宽度优化: clamp abnormally wide advances.
     pub widths: bool,
+    /// 反转笔顺: for a font stored back to front (last stroke first, each drawn from its end),
+    /// every glyph's strokes in reverse order and direction. Unlike the others it touches every
+    /// glyph, so it is set per font.
+    pub reverse_strokes: bool,
 }
 
 impl FontFix {
     pub fn any(&self) -> bool {
-        self.unify_size || self.dedupe || self.widths
+        self.unify_size || self.dedupe || self.widths || self.reverse_strokes
     }
 
     /// Every fix that either side turns on.
     pub fn union(self, o: Self) -> Self {
-        Self { unify_size: self.unify_size || o.unify_size, dedupe: self.dedupe || o.dedupe, widths: self.widths || o.widths }
+        Self {
+            unify_size: self.unify_size || o.unify_size,
+            dedupe: self.dedupe || o.dedupe,
+            widths: self.widths || o.widths,
+            reverse_strokes: self.reverse_strokes || o.reverse_strokes,
+        }
     }
 }
 
 /// `font` with the chosen fixes applied.
 pub fn apply(font: &Font, fix: &FontFix) -> Font {
     let mut f = font.clone();
+    // First, so the other fixes see the strokes in writing order.
+    if fix.reverse_strokes {
+        reverse_strokes(&mut f);
+    }
     if fix.dedupe {
         dedupe_strokes(&mut f, 0.05);
     }
@@ -113,6 +126,14 @@ pub fn dedupe_strokes(f: &mut Font, tol: f32) {
     }
 }
 
+/// Every glyph's strokes in reverse order, each from its end to its start.
+pub fn reverse_strokes(f: &mut Font) {
+    for g in f.glyphs.values_mut() {
+        g.strokes.reverse();
+        g.strokes.iter_mut().for_each(|s| s.reverse());
+    }
+}
+
 /// Whether `p` is within `tol` of the polyline `line`.
 fn on_polyline(p: Point, line: &[Point], tol: f32) -> bool {
     if line.len() == 1 {
@@ -177,6 +198,16 @@ mod tests {
         let f = apply(&font(), &FontFix { dedupe: true, ..Default::default() });
         let g = f.get('重').unwrap();
         assert_eq!(g.strokes, vec![vec![(0.0, 0.0), (6.0, 0.0)], vec![(0.0, 3.0), (6.0, 3.0)]]);
+    }
+
+    #[test]
+    fn reversed_font_is_written_in_stroke_order() {
+        // 十 stored back to front: the 竖 bottom-up first, then the 横 right to left.
+        let stored = Font { glyphs: std::collections::HashMap::from([('十', Glyph { advance: 7.0, strokes: vec![vec![(3.0, 6.0), (3.0, 0.0)], vec![(6.0, 3.0), (3.0, 3.0), (0.0, 3.0)]] })]) };
+        let fix = FontFix { reverse_strokes: true, ..Default::default() };
+        let f = apply(&stored, &fix);
+        assert_eq!(f.get('十').unwrap().strokes, vec![vec![(0.0, 3.0), (3.0, 3.0), (6.0, 3.0)], vec![(3.0, 0.0), (3.0, 6.0)]]);
+        assert_eq!(apply(&f, &fix), stored, "reversing twice gives the font back");
     }
 
     #[test]

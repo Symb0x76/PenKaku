@@ -45,6 +45,8 @@ pub enum FontsEvent {
     ClearRole(Role),
     /// 加入混用 / 移出混用.
     ToggleMix(i64),
+    /// 反转笔顺 on or off for one font.
+    ToggleReverse(i64),
     /// New weight of a font in the mix.
     MixWeight(i64, f32),
     /// 换一组.
@@ -519,6 +521,7 @@ impl FontsView {
         let f = cx.global::<AppState>().settings.fonts.clone();
         let key = FontKey::from_local_id(id);
         let in_mix = f.mix.iter().any(|m| m.key == key);
+        let reversed = f.fix_fonts.get(&key).is_some_and(|x| x.reverse_strokes);
         Button::new(("card-menu", id as usize))
             .ghost()
             .xsmall()
@@ -541,6 +544,8 @@ impl FontsView {
                 }
                 m.separator()
                     .item(PopupMenuItem::new(if in_mix { "移出混用" } else { "加入混用" }).on_click(emit(FontsEvent::ToggleMix)))
+                    // For fonts stored back to front (e.g. 「三」 starting with its bottom stroke).
+                    .item(PopupMenuItem::new("反转笔顺").checked(reversed).on_click(emit(FontsEvent::ToggleReverse)))
                     .item(PopupMenuItem::new("在文件夹中显示").on_click(emit(FontsEvent::Reveal)))
                     .item(PopupMenuItem::new("导出…").on_click(emit(FontsEvent::Export)))
                     .separator()

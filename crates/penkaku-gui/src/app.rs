@@ -254,6 +254,7 @@ impl PenKakuApp {
                 FontsEvent::SetRole(id, role) => this.set_role(*id, *role, window, cx),
                 FontsEvent::ClearRole(role) => this.clear_role(*role, window, cx),
                 FontsEvent::ToggleMix(id) => this.toggle_mix(*id, window, cx),
+                FontsEvent::ToggleReverse(id) => this.toggle_font_reverse(*id, window, cx),
                 FontsEvent::MixWeight(id, w) => this.set_mix_weight(*id, *w, window, cx),
                 FontsEvent::RerollMix => this.reroll_mix(window, cx),
                 FontsEvent::Reveal(id) => this.reveal_font(*id, window, cx),

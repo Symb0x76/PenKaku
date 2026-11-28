@@ -187,6 +187,20 @@ impl PenKakuApp {
         self.reload_fonts(window, cx);
     }
 
+    /// 反转笔顺 on or off for one font (dropping its entry when no fix is left).
+    pub(crate) fn toggle_font_reverse(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let key = FontKey::from_local_id(id);
+        self.edit_settings(cx, |st| {
+            let fixes = &mut st.settings.fonts.fix_fonts;
+            let e = fixes.entry(key.clone()).or_default();
+            e.reverse_strokes ^= true;
+            if !e.any() {
+                fixes.remove(&key);
+            }
+        });
+        self.reload_fonts(window, cx);
+    }
+
     /// Watch the library folders; a change rescans them and reloads the fonts in use.
     pub(crate) fn watch_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let lib = cx.global::<AppState>().fonts.library();

@@ -57,7 +57,8 @@ pub struct FontSettings {
     pub mix_salt: u64,
     /// 字体优化 applied to every font when fonts are loaded.
     pub fix: crate::font::fix::FontFix,
-    /// 字符微调's 字符重复轨迹优化 / 异常宽度字符处理: clean-ups for one font only, on top of `fix`.
+    /// 字符微调's 字符重复轨迹优化 / 异常宽度字符处理 and the font card's 反转笔顺: clean-ups for
+    /// one font only, on top of `fix`.
     pub fix_fonts: std::collections::BTreeMap<crate::font::library::FontKey, crate::font::fix::FontFix>,
 }
 
@@ -380,7 +381,7 @@ mod tests {
         s.fonts.fix_fonts.insert(FontKey::cloud(7), FontFix { dedupe: true, ..Default::default() });
         let back: Settings = toml::from_str(&toml::to_string_pretty(&s).unwrap()).unwrap();
         assert_eq!(back.fonts, s.fonts);
-        assert_eq!(back.fonts.fix_for(&FontKey::cloud(7)), FontFix { unify_size: true, dedupe: true, widths: false });
+        assert_eq!(back.fonts.fix_for(&FontKey::cloud(7)), FontFix { unify_size: true, dedupe: true, ..Default::default() });
         assert_eq!(back.fonts.fix_for(&FontKey::cloud(8)), FontFix { unify_size: true, ..Default::default() });
     }
 
