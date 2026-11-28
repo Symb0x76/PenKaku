@@ -18,6 +18,7 @@ pub mod fix;
 pub mod fontset;
 pub mod library;
 pub mod svg;
+pub mod tags;
 
 /// One point in glyph units (y downward).
 pub type Point = (f32, f32);

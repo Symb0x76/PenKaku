@@ -166,6 +166,24 @@ enum Cmd {
         #[arg(long)]
         marks: Option<PathBuf>,
     },
+    /// 字体几何标签: shape measures of glyph JSON fonts (aspect, slant, fill, ink, joined)
+    FontTags {
+        #[arg(required = true)]
+        fonts: Vec<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write the same text in several glyph JSON fonts, one band each on an A4 PDF, to compare
+    CompareFonts {
+        text: String,
+        /// Two or more glyph JSON fonts, top to bottom (repeat the flag)
+        #[arg(long = "font-json", required = true)]
+        fonts: Vec<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 100.0)]
+        font_size: f32,
+    },
     /// Fit mm-per-glyph-unit from G-code captured from ChiXie3 (see docs/protocol.md)
     Calibrate {
         /// Captured G-code (one line per command, as ChiXie3 streamed it)
@@ -259,6 +277,31 @@ fn lay(text: &str, font: &penkaku_core::font::Font, p: &layout::PageParams, mark
     Ok(layout::layout_flow(&layout::Flow { chars: &chars, ids: &ids, paras: &paras, styles: &styles, ..Default::default() }, font, p))
 }
 
+/// `compare-fonts`: `text` in each font, one horizontal band per font down the writable area,
+/// dashed rules between bands. Also says, per font, whether the text was cut to fit its band.
+fn compare_sheet(text: &str, fonts: &[penkaku_core::font::Font], settings: &penkaku_core::config::Settings) -> (layout::Document, Vec<bool>) {
+    let (w, h) = settings.page.writable();
+    let band = h / fonts.len().max(1) as f32;
+    let mut sheet = layout::Document::default();
+    let mut page = layout::Page::default();
+    let mut cut = Vec::new();
+    for (k, font) in fonts.iter().enumerate() {
+        let top = -(k as f32) * band;
+        let p = layout::PageParams { origin: (0.0, top), page: Some(layout::PageBox { width: w, height: band }), ..settings.page_params_with(layout::Ruling::Free) };
+        let doc = layout::layout(text, font, &p);
+        cut.push(doc.pages.len() > 1);
+        if let Some(first) = doc.pages.into_iter().next() {
+            page.stroke_chars.extend(std::iter::repeat_n(0, first.strokes.len()));
+            page.strokes.extend(first.strokes);
+        }
+        if k > 0 {
+            page.guides.push(layout::Guide { a: (0.0, top), b: (w, top), dashed: true });
+        }
+    }
+    sheet.pages.push(page);
+    (sheet, cut)
+}
+
 /// `write --json` / `pdf --json`: what a script or agent needs to decide whether to change the
 /// font, the size or the text. Lines are 0-based; pages 1-based.
 fn report(doc: &layout::Document, text: &str, out: Option<&std::path::Path>) -> serde_json::Value {
@@ -282,6 +325,20 @@ fn report(doc: &layout::Document, text: &str, out: Option<&std::path::Path>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compare_sheet_stacks_one_band_per_font() {
+        let font = penkaku_core::font::Font::from_json(include_bytes!("../../penkaku-core/tests/fixtures/font_fixture.json")).unwrap();
+        let settings = penkaku_core::config::Settings::default();
+        let (one, _) = compare_sheet("你好", std::slice::from_ref(&font), &settings);
+        let (doc, cut) = compare_sheet("你好", &[font.clone(), font.clone(), font], &settings);
+        let (n, page) = (one.pages[0].strokes.len(), &doc.pages[0]);
+        assert_eq!((doc.pages.len(), page.strokes.len(), page.stroke_chars.len(), page.guides.len(), cut), (1, 3 * n, 3 * n, 2, vec![false; 3]));
+        // Each copy sits one band lower than the one before.
+        let band = settings.page.writable().1 / 3.0;
+        let dy = page.strokes[0][0].1 - page.strokes[n][0].1;
+        assert!((dy - band).abs() < 1e-3, "{dy} vs {band}");
+    }
 
     #[test]
     fn json_report_lists_missing_chars_and_overflow() {
@@ -511,6 +568,43 @@ fn main() -> penkaku_core::Result<()> {
             if let Some(msg) = penkaku_import::failed_pages_message(&pages) {
                 eprintln!("{msg}");
             }
+        }
+        Cmd::FontTags { fonts, json } => {
+            let mut rows = Vec::new();
+            for path in &fonts {
+                let tags = penkaku_core::font::Font::from_json(&std::fs::read(path)?)?.geometry_tags();
+                rows.push(serde_json::json!({ "font": path.display().to_string(), "tags": tags }));
+                if !json {
+                    match tags {
+                        Some(t) => println!(
+                            "{}\taspect {:.2}\tslant {:+.1}°\tfill {:.2}\tink {:.1} em\tjoined {:.0}%\t({} glyphs)",
+                            path.display(),
+                            t.aspect,
+                            t.slant_deg,
+                            t.fill,
+                            t.ink_em,
+                            t.joined * 100.0,
+                            t.sampled
+                        ),
+                        None => println!("{}\tno ink", path.display()),
+                    }
+                }
+            }
+            if json {
+                println!("{}", serde_json::Value::Array(rows));
+            }
+        }
+        Cmd::CompareFonts { text, fonts, out, font_size } => {
+            let loaded = fonts.iter().map(|p| Ok(penkaku_core::font::Font::from_json(&std::fs::read(p)?)?.with_composed_symbols())).collect::<penkaku_core::Result<Vec<_>>>()?;
+            let mut settings = penkaku_core::config::Settings::default();
+            settings.page.font_size = font_size;
+            let (doc, cut) = compare_sheet(&text, &loaded, &settings);
+            let o = gcode::pdf::PdfOptions { paper: settings.page.paper, margins: settings.page.margins, ..Default::default() };
+            std::fs::write(&out, gcode::pdf::pdf(&doc, &o))?;
+            for (k, (path, cut)) in fonts.iter().zip(cut).enumerate() {
+                eprintln!("band {}: {}{}", k + 1, path.display(), if cut { " (text cut to fit its band)" } else { "" });
+            }
+            eprintln!("→ {}", out.display());
         }
         Cmd::CaptureDiff { a, b, tol, pen_down_z } => {
             let sa = calibration::parse_strokes(&std::fs::read_to_string(&a)?, pen_down_z);
