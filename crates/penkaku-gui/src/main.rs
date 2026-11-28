@@ -26,6 +26,7 @@ mod import_ui;
 mod insert_ui;
 mod cloud_preview;
 mod font_preview;
+mod font_compare;
 mod font_lib;
 mod fonts;
 mod icons;

@@ -39,17 +39,31 @@ impl FontPreview {
             }
             s.into_iter().collect()
         };
-        let (mut strokes, mut x) = (Vec::new(), 0.0);
+        Self::of_text(font, &text).0
+    }
+
+    /// `text` in `font` on one line (a missing char leaves half an em), and how many chars of
+    /// it the font lacks. Whitespace advances like a missing char and is not counted.
+    pub fn of_text(font: &Font, text: &str) -> (Option<Self>, usize) {
+        let (mut strokes, mut x, mut missing) = (Vec::new(), 0.0, 0);
         for c in text.chars() {
             match font.get(c) {
                 Some(g) => {
                     strokes.extend(g.strokes.iter().map(|s| s.iter().map(|&(px, py)| (px + x, py)).collect()));
                     x += g.advance;
                 }
-                None => x += EM_UNITS * 0.5,
+                None => {
+                    missing += usize::from(!c.is_whitespace());
+                    x += EM_UNITS * 0.5;
+                }
             }
         }
-        (!strokes.is_empty()).then_some(Self { strokes, width: x })
+        ((!strokes.is_empty()).then_some(Self { strokes, width: x }), missing)
+    }
+
+    /// Width in glyph units.
+    pub fn width(&self) -> f32 {
+        self.width
     }
 }
 

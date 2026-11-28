@@ -6,9 +6,11 @@
 //! Cloud "使用" fetches and decrypts the font in the session worker; the app saves it to the local
 //! store and makes it active when `FontLoaded` arrives. Local "使用" is handled by the app.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use penkaku_core::api::FontInfo;
+use penkaku_core::font::tags::{GeometryTags, TagFilter};
 use penkaku_core::session::{Command, FontListKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -70,6 +72,11 @@ pub struct FontsView {
     online_requested: bool,
     search: Entity<InputState>,
     loading_font: Option<i64>,
+    /// 字体几何标签 of local fonts (`None`: no ink), computed in the background on first view.
+    geometry: HashMap<i64, Option<GeometryTags>>,
+    geometry_pending: HashSet<i64>,
+    /// 本地字体 筛选 by geometry.
+    filter: TagFilter,
     _subs: Vec<Subscription>,
 }
 
@@ -106,8 +113,87 @@ impl FontsView {
             online_requested: false,
             search,
             loading_font: None,
+            geometry: HashMap::new(),
+            geometry_pending: HashSet::new(),
+            filter: TagFilter::default(),
             _subs: vec![sub, obs],
         }
+    }
+
+    /// Measure local fonts not measured yet, off the UI thread.
+    fn ensure_geometry(&mut self, cx: &mut Context<Self>) {
+        let todo: Vec<i64> = cx.global::<AppState>().fonts.list().iter().map(|l| l.id).filter(|id| !self.geometry.contains_key(id) && !self.geometry_pending.contains(id)).collect();
+        if todo.is_empty() {
+            return;
+        }
+        self.geometry_pending.extend(&todo);
+        let store = cx.global::<AppState>().fonts.clone();
+        let task = cx.background_executor().spawn(async move { todo.into_iter().map(|id| (id, store.load(id).ok().and_then(|f| f.geometry_tags()))).collect::<Vec<_>>() });
+        cx.spawn(async move |this, cx| {
+            let done = task.await;
+            let _ = this.update(cx, |t, cx| {
+                for (id, tags) in done {
+                    t.geometry_pending.remove(&id);
+                    t.geometry.insert(id, tags);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The library's median font: what 紧凑 / 修长 are measured against.
+    fn geometry_median(&self) -> Option<GeometryTags> {
+        GeometryTags::median(&self.geometry.values().flatten().copied().collect::<Vec<_>>())
+    }
+
+    /// Local fonts that pass the 筛选 (all of them without one; unmeasured fonts wait).
+    fn local_fonts(&self, cx: &App) -> Vec<crate::font_lib::LocalFont> {
+        let all = cx.global::<AppState>().fonts.list();
+        let Some(mid) = self.geometry_median().filter(|_| !self.filter.is_empty()) else { return all };
+        all.into_iter().filter(|l| self.geometry.get(&l.id).copied().flatten().is_some_and(|t| t.matches(self.filter, &mid))).collect()
+    }
+
+    /// 筛选 menu: one side of each axis, or either.
+    fn filter_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        type Axis = fn(&mut TagFilter) -> &mut Option<bool>;
+        let axes: [(Axis, &'static str, &'static str); 3] = [(|f| &mut f.slanted, "端正", "倾斜"), (|f| &mut f.compact, "舒展", "紧凑"), (|f| &mut f.tall, "方正", "修长")];
+        let f = self.filter;
+        let n = [f.slanted, f.compact, f.tall].iter().flatten().count();
+        let v = cx.entity().downgrade();
+        let label = if n == 0 { "筛选".to_string() } else { format!("筛选（{n}）") };
+        Button::new("geo-filter").ghost().xsmall().icon(IconName::ListFilter).label(label).tooltip("按笔画几何筛选：端正/倾斜、舒展/紧凑、方正/修长").dropdown_menu(move |m, _w, _cx| {
+            let set = |axis: Axis, side: Option<bool>| {
+                let v = v.clone();
+                move |_: &ClickEvent, _w: &mut Window, cx: &mut App| {
+                    let _ = v.update(cx, |t, cx| {
+                        let mut nf = t.filter;
+                        *axis(&mut nf) = side;
+                        t.filter = nf;
+                        t.local_page = 0;
+                        cx.notify();
+                    });
+                }
+            };
+            let mut m = m;
+            for (axis, no, yes) in axes {
+                let mut cur = f;
+                let cur = *axis(&mut cur);
+                m = m
+                    .item(PopupMenuItem::new(no).checked(cur == Some(false)).on_click(set(axis, if cur == Some(false) { None } else { Some(false) })))
+                    .item(PopupMenuItem::new(yes).checked(cur == Some(true)).on_click(set(axis, if cur == Some(true) { None } else { Some(true) })))
+                    .separator();
+            }
+            let v = v.clone();
+            m.item(PopupMenuItem::new("清除筛选").disabled(n == 0).on_click(move |_, _w, cx| {
+                let _ = v.update(cx, |t, cx| {
+                    t.filter = TagFilter::default();
+                    t.local_page = 0;
+                    cx.notify();
+                });
+            }))
+        })
+        .into_any_element()
     }
 
     pub fn set_list(&mut self, kind: FontListKind, page: i64, fonts: Vec<FontInfo>, cx: &mut Context<Self>) {
@@ -199,8 +285,8 @@ impl FontsView {
 
     /// The cards of the current tab and page.
     fn cards(&self, cx: &App) -> Vec<Card> {
-        let st = cx.global::<AppState>();
-        let local = st.fonts.list();
+        let local = cx.global::<AppState>().fonts.list();
+        let mid = self.geometry_median();
         let cloud = |f: &FontInfo| Card {
             id: f.id,
             name: f.font_name.clone().into(),
@@ -212,7 +298,8 @@ impl FontsView {
             local: false,
         };
         match self.tab {
-            0 => local
+            0 => self
+                .local_fonts(cx)
                 .iter()
                 .skip(self.local_page * PER_PAGE)
                 .take(PER_PAGE)
@@ -232,6 +319,9 @@ impl FontsView {
                             };
                             if l.copies > 0 {
                                 t.push(format!("另有 {} 份", l.copies));
+                            }
+                            if let (Some(g), Some(mid)) = (self.geometry.get(&l.id).copied().flatten(), mid) {
+                                t.push(g.labels(&mid).join(""));
                             }
                             t.extend(info.map(FontInfo::tag_list).unwrap_or_default());
                             t
@@ -378,7 +468,7 @@ impl FontsView {
     fn pager(&self, cx: &mut Context<Self>) -> AnyElement {
         let (label, prev, next) = match self.tab {
             0 => {
-                let n = pages(cx.global::<AppState>().fonts.list().len());
+                let n = pages(self.local_fonts(cx).len());
                 (format!("第 {} / {n} 页", self.local_page + 1), self.local_page > 0, self.local_page + 1 < n)
             }
             1 => {
@@ -502,6 +592,8 @@ impl FontsView {
                         el.child(Button::new("reroll").ghost().xsmall().icon(IconName::Shuffle).label("换一组").on_click(cx.listener(|_t, _e: &ClickEvent, _w, cx| cx.emit(FontsEvent::RerollMix))))
                     })
                     .child(div().flex_1())
+                    .child(self.filter_menu(cx))
+                    .child(self.compare_button(cx))
                     .child(Button::new("import").ghost().xsmall().icon(IconName::FolderInput).label("导入…").on_click(cx.listener(|_t, _e: &ClickEvent, _w, cx| cx.emit(FontsEvent::Import))))
                     .child(
                         Button::new("open-dir")
@@ -516,6 +608,25 @@ impl FontsView {
     }
 }
 
+impl FontsView {
+    /// 对比字体…: the 筛选's fonts, the active one and the rest of this page ticked first.
+    fn compare_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let fonts: Vec<(i64, String)> = self.local_fonts(cx).into_iter().map(|l| (l.id, l.name)).collect();
+        let active = cx.global::<AppState>().active_font.as_ref().map(|f| f.id);
+        let page: Vec<i64> = fonts.iter().skip(self.local_page * PER_PAGE).take(PER_PAGE).map(|f| f.0).collect();
+        let want: Vec<i64> = active.into_iter().chain(page).collect();
+        Button::new("compare-fonts")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Columns2)
+            .label("对比字体…")
+            .tooltip("同一段文字并排看几个字体")
+            .disabled(fonts.len() < 2)
+            .on_click(move |_: &ClickEvent, w, cx| crate::font_compare::open(fonts.clone(), want.clone(), w, cx))
+            .into_any_element()
+    }
+}
+
 /// Pages needed for `n` cards (at least one, so an empty list still shows page 1 of 1).
 fn pages(n: usize) -> usize {
     n.div_ceil(PER_PAGE).max(1)
@@ -524,7 +635,10 @@ fn pages(n: usize) -> usize {
 impl Render for FontsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let logged_in = cx.global::<AppState>().user.is_some();
-        let local_count = cx.global::<AppState>().fonts.list().len();
+        if self.tab == 0 {
+            self.ensure_geometry(cx);
+        }
+        let local_count = self.local_fonts(cx).len();
         let dir = cx.global::<AppState>().fonts.dir().display().to_string();
         let muted = cx.theme().muted_foreground;
         let cloud = self.tab > 0;
