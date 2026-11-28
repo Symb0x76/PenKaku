@@ -139,6 +139,120 @@ pub fn fullwidth_punct(hay: &[char], within: Range<usize>) -> Vec<(Range<usize>,
     (within.start..end).filter_map(|i| HALF_WIDTH.iter().find(|(f, _)| *f == hay[i]).map(|&(_, h)| (i..i + 1, h))).collect()
 }
 
+/// Pictographic emoji (and the joiners / variation selector that glue them), which a pen can't
+/// write. Dingbats such as ✓ ✗ ★ stay: they are marks people write by hand.
+fn is_emoji(c: char) -> bool {
+    matches!(c as u32, 0x1F000..=0x1FAFF | 0xFE0F | 0x200D)
+}
+
+/// Markdown marks inside `within`, each with what replaces it: headings `#`, quotes `>`, rules
+/// `---` (the whole line goes), `**` `__` `~~` and backticks, footnote refs `[^1]`, emoji, and
+/// links `[text](url)` / `![alt](url)` (the text stays). List bullets `*` `+` become `-`. A
+/// single `*` or `_` stays: it may be a product or a subscript.
+pub fn markdown_marks(hay: &[char], within: Range<usize>) -> Vec<(Range<usize>, String)> {
+    let end = within.end.min(hay.len());
+    let mut out: Vec<(Range<usize>, String)> = Vec::new();
+    let mut push = |r: Range<usize>, s: &str| {
+        if r.end <= end {
+            out.push((r, s.to_string()));
+        }
+    };
+    let line_end = |i: usize| hay[i..].iter().position(|&c| c == '\n').map_or(hay.len(), |k| i + k);
+    let mut i = within.start;
+    while i < end {
+        if i == 0 || hay[i - 1] == '\n' {
+            let e = line_end(i);
+            let line: Vec<char> = hay[i..e].iter().copied().filter(|c| !c.is_whitespace()).collect();
+            if line.len() >= 3 && matches!(line[0], '-' | '*' | '_') && line.iter().all(|&c| c == line[0]) {
+                push(i..(e + 1).min(hay.len()), "");
+                i = e + 1;
+                continue;
+            }
+            let mut j = i;
+            while j < e && matches!(hay[j], ' ' | '\t' | '\u{3000}') {
+                j += 1;
+            }
+            // `> > quote`, then `## heading` or a `* item` bullet.
+            let start = j;
+            while j < e && hay[j] == '>' {
+                j += 1;
+                while j < e && hay[j] == ' ' {
+                    j += 1;
+                }
+            }
+            let hashes = hay[j..e].iter().take_while(|&&c| c == '#').count();
+            if (1..=6).contains(&hashes) && hay.get(j + hashes) == Some(&' ') {
+                j += hashes + 1;
+            }
+            if j > start {
+                push(start..j, "");
+            } else if matches!(hay.get(j), Some('*' | '+')) && hay.get(j + 1) == Some(&' ') {
+                push(j..j + 1, "-");
+                i = j + 1;
+                continue;
+            }
+            i = j.max(i);
+            if i >= end {
+                break;
+            }
+        }
+        let c = hay[i];
+        let next = hay.get(i + 1).copied();
+        if (c == '[' || (c == '!' && next == Some('['))) && let Some(n) = markdown_link(hay, i, line_end(i)) {
+            let open = if c == '!' { 2 } else { 1 };
+            if hay.get(i + 1) == Some(&'^') {
+                push(i..n.close + 1, "");
+            } else {
+                push(i..i + open, "");
+                push(n.text_end..n.close + 1, "");
+            }
+            i = n.close + 1;
+            continue;
+        }
+        if matches!((c, next), ('*', Some('*')) | ('_', Some('_')) | ('~', Some('~'))) {
+            push(i..i + 2, "");
+            i += 2;
+            continue;
+        }
+        if c == '`' || is_emoji(c) {
+            push(i..i + 1, "");
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Where a `[text](url)` or `[^note]` starting at `at` ends (on one line, before `eol`).
+struct Link {
+    /// The `]`.
+    text_end: usize,
+    /// The last char: `)`, or `]` for a footnote.
+    close: usize,
+}
+
+fn markdown_link(hay: &[char], at: usize, eol: usize) -> Option<Link> {
+    let open = if hay[at] == '!' { at + 1 } else { at };
+    let text_end = open + 1 + hay[open + 1..eol].iter().position(|&c| c == ']')?;
+    if hay.get(open + 1) == Some(&'^') && hay[at] == '[' {
+        return (text_end > open + 2).then_some(Link { text_end, close: text_end });
+    }
+    if hay.get(text_end + 1) != Some(&'(') {
+        return None;
+    }
+    let close = text_end + 2 + hay[text_end + 2..eol].iter().position(|&c| c == ')')?;
+    Some(Link { text_end, close })
+}
+
+/// Every `。` / `．` that ends a paragraph inside `within` (only spaces may follow it before the
+/// line break): 解题 / 手写 mode drops them.
+pub fn final_periods(hay: &[char], within: Range<usize>) -> Vec<Range<usize>> {
+    let end = within.end.min(hay.len());
+    (within.start..end)
+        .filter(|&i| matches!(hay[i], '。' | '．') && hay[i + 1..].iter().find(|&&c| !is_gap(c)).is_none_or(|&c| c == '\n'))
+        .map(|i| i..i + 1)
+        .collect()
+}
+
 /// Every run of spaces inside `within` (on one line) whose neighbours `hit(left, right)` accepts,
 /// left to right.
 fn gap_runs(hay: &[char], within: Range<usize>, hit: impl Fn(char, char) -> bool) -> Vec<Range<usize>> {
@@ -239,6 +353,26 @@ impl EditDoc {
         let hits = fullwidth_punct(self.chars(), within.clone());
         let n = hits.len();
         self.apply_clean(within, hits.into_iter().map(|(r, c)| (r, c.to_string())).collect());
+        n
+    }
+
+    /// 清理 Markdown 标记 in the selection or the whole text (one undo step); returns how many
+    /// marks went.
+    pub fn clean_markdown(&mut self) -> usize {
+        let within = self.clean_range();
+        let edits = markdown_marks(self.chars(), within.clone());
+        let n = edits.len();
+        self.apply_clean(within, edits);
+        n
+    }
+
+    /// 去句末句号 (解题 / 手写 mode): the `。` that ends each paragraph in the selection or the
+    /// whole text (one undo step); returns how many went.
+    pub fn drop_final_periods(&mut self) -> usize {
+        let within = self.clean_range();
+        let hits = final_periods(self.chars(), within.clone());
+        let n = hits.len();
+        self.apply_clean(within, hits.into_iter().map(|r| (r, String::new())).collect());
         n
     }
 
@@ -397,6 +531,34 @@ mod tests {
         let mut d = EditDoc::from_text("SP:21H -> 20H；A：1FH");
         d.clean_for_handwriting(false);
         assert_eq!(d.text(), "SP:21H->20H;A:1FH");
+    }
+
+    #[test]
+    fn markdown_marks_go_the_text_stays() {
+        let src = "# 标题\n> 引用 **重点** 和 `代码`\n---\n* 第一项 [链接](http://x.cn) ![图](a.png)\n+ 第二项[^1] 2*3 a_b ✓ 好🎉\n## \n#不是标题";
+        let mut d = EditDoc::from_text(src);
+        assert!(d.clean_markdown() > 0);
+        assert_eq!(d.text(), "标题\n引用 重点 和 代码\n- 第一项 链接 图\n- 第二项 2*3 a_b ✓ 好\n\n#不是标题");
+        assert!(d.undo());
+        assert_eq!(d.text(), src);
+        // Only the selection: the second line keeps its marks.
+        let mut d = EditDoc::from_text("**甲**\n**乙**");
+        d.select_range(0..5);
+        assert_eq!(d.clean_markdown(), 2);
+        assert_eq!(d.text(), "甲\n**乙**");
+        // A rule of stars or underscores, spaced or not, goes with its line.
+        let mut d = EditDoc::from_text("上\n* * *\n___\n下");
+        d.clean_markdown();
+        assert_eq!(d.text(), "上\n下");
+    }
+
+    #[test]
+    fn final_periods_go_inner_ones_stay() {
+        let mut d = EditDoc::from_text("解：因为 a=b。所以 b=a。\n得证．  \n他说：“好。”\n。");
+        assert_eq!(d.drop_final_periods(), 3);
+        assert_eq!(d.text(), "解：因为 a=b。所以 b=a\n得证  \n他说：“好。”\n");
+        assert!(d.undo());
+        assert_eq!(d.drop_final_periods(), 3);
     }
 
     #[test]

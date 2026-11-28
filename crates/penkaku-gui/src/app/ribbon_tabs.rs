@@ -314,7 +314,11 @@ impl PenKakuApp {
                         };
                         let replaced = |n: usize| if n == 0 { "没有需要替换的符号".to_string() } else { format!("已替换 {n} 处") };
                         let (d_all, d_arrow) = (doc.clone(), doc.clone());
+                        let removed = |n: usize| if n == 0 { "没有需要清理的内容".to_string() } else { format!("已清理 {n} 处") };
                         m.item(PopupMenuItem::new("全选").on_click(editor_action(doc.clone(), Box::new(doc_view::SelectAll))))
+                            .separator()
+                            .item(item("清理 Markdown 标记（# ** > --- 链接、emoji）", |d| d.clean_markdown(), removed))
+                            .item(item("去句末句号（解题 / 手写模式，删段末的 。）", |d| d.drop_final_periods(), removed))
                             .separator()
                             .item(PopupMenuItem::new("一键按手写整理（下面全部）").on_click(move |_, w, cx| clean_with_arrows(d_all.clone(), true, w, cx)))
                             .separator()
