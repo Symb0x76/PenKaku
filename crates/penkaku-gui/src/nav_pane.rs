@@ -1,5 +1,6 @@
 //! 导航 pane on the left of the page (Word's navigation pane): 搜索 lists every match of the
-//! search text and 缺字 every character no font has, each with its context and page / line.
+//! search text, 缺字 every character no font has and 排版 every 排版体检 finding (wide gaps,
+//! overflow, overlaps), each with its context and page / line.
 //! Clicking a row selects it on the page and scrolls there.
 
 use std::ops::Range;
@@ -10,7 +11,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -25,7 +26,10 @@ const CONTEXT: usize = 10;
 pub enum NavTab {
     Search,
     Missing,
+    Layout,
 }
+
+const TABS: [(NavTab, &str); 3] = [(NavTab::Search, "搜索"), (NavTab::Missing, "缺字"), (NavTab::Layout, "排版")];
 
 pub enum NavPaneEvent {
     Close,
@@ -132,7 +136,7 @@ impl NavPane {
     fn row_el(&self, ix: usize, row: Row, current: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let (muted, hit_bg, hover, sel_bg, danger) = (theme.muted_foreground, theme.warning.opacity(0.35), theme.secondary_hover, theme.selection, theme.danger);
-        let missing = self.tab == NavTab::Missing;
+        let missing = self.tab != NavTab::Search;
         let r = row.range.clone();
         v_flex()
             .id(("nav-row", ix))
@@ -191,6 +195,26 @@ impl Render for NavPane {
                 };
                 (summary, Self::rows(layout.missing_at.iter().map(|&i| i..i + 1), &chars, &layout))
             }
+            NavTab::Layout => {
+                use penkaku_core::layout::inspect::Issue;
+                let issues = view.layout_issues(cx);
+                let count = |k: Issue| issues.iter().filter(|a| a.kind == k).count();
+                let summary = if issues.is_empty() {
+                    "没有排版异常".to_string()
+                } else {
+                    format!("空隙过大 {} · 出界 {} · 重叠 {}", count(Issue::Gap), count(Issue::Overflow), count(Issue::Collision))
+                };
+                let mut rows = Self::rows(issues.iter().map(|a| a.at..a.at + 1), &chars, &layout);
+                for (row, a) in rows.iter_mut().zip(&issues) {
+                    let what = match a.kind {
+                        Issue::Gap => "空隙过大",
+                        Issue::Overflow => "出界",
+                        Issue::Collision => "重叠",
+                    };
+                    row.place = format!("{what} {:.1} mm · {}", a.mm, row.place);
+                }
+                (summary, rows)
+            }
         };
         let shown = rows.len();
         let o = self.opts;
@@ -225,10 +249,10 @@ impl Render for NavPane {
                     TabBar::new("nav-tabs")
                         .small()
                         .segmented()
-                        .selected_index(if self.tab == NavTab::Search { 0 } else { 1 })
-                        .children(["搜索", "缺字"].map(|l| Tab::new().label(l)))
+                        .selected_index(TABS.iter().position(|t| t.0 == self.tab).unwrap_or(0))
+                        .children(TABS.map(|(_, l)| Tab::new().label(l)))
                         .on_click(cx.listener(|t, ix: &usize, _w, cx| {
-                            t.tab = if *ix == 0 { NavTab::Search } else { NavTab::Missing };
+                            t.tab = TABS.get(*ix).map_or(NavTab::Search, |t| t.0);
                             cx.notify();
                         })),
                 ),
@@ -268,6 +292,25 @@ impl Render for NavPane {
                         }))
                     }),
             )
+            .when(self.tab == NavTab::Layout, |el| {
+                // Batch fixes through 字符微调 (one undo step each), on the selected lines or all.
+                let fix = |id: &'static str, label: &'static str, tip: &'static str, tighten: bool| {
+                    let doc = self.doc.clone();
+                    Button::new(id).small().label(label).tooltip(tip).on_click(move |_: &ClickEvent, w, cx| {
+                        let n = doc.update(cx, |d, cx| d.fix_layout(tighten, cx));
+                        let msg = if n == 0 { "没有需要调整的字".to_string() } else { format!("已微调 {n} 个字（可撤销）") };
+                        w.push_notification(gpui_kit::component::notification::Notification::info(msg), cx);
+                    })
+                };
+                el.child(
+                    h_flex()
+                        .px_3()
+                        .pb_1()
+                        .gap_2()
+                        .child(fix("nav-tighten", "收紧大空隙", "把过宽的字间空隙收到本行常见宽度（有选中时只处理选中的行）", true))
+                        .child(fix("nav-baseline", "基线拉平", "把上下浮动过大的字往本行中线拉回一半（有选中时只处理选中的行）", false)),
+                )
+            })
             .child(
                 v_flex()
                     .id("nav-list")

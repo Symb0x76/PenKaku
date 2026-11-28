@@ -824,6 +824,41 @@ fn english_only_deformation_leaves_chinese_alone() {
 }
 
 #[test]
+fn inspect_finds_gaps_and_collisions_and_the_batch_fixes_undo_them() {
+    use inspect::{Issue, align_baseline, inspect, lines_of, tighten};
+    // 'A': ink fills its 2 mm advance and is 2 mm tall; no spacing, so neighbours touch.
+    let font = font_with('A', Glyph { advance: 2.0, strokes: vec![vec![(0.0, 0.0), (2.0, 2.0)]] });
+    let p = PageParams::default();
+    let em = 2.0; // wide gap: > 1 mm
+    let chars: Vec<char> = "AAAA\nA".chars().collect();
+    let ids: Vec<u64> = (0..chars.len() as u64).collect();
+    let lay = |tuning: &[Option<Tuning>]| layout_flow(&Flow { chars: &chars, ids: &ids, paras: &[], joins: &[], tuning, styles: &[], deform_cache: None, blocks: &[] }, &font, &p);
+    let t = |dx_mm: f32, dy_mm: f32| Some(Tuning { dx_mm, dy_mm, ..Default::default() });
+    let kinds = |d: &Document| inspect(d, &chars, em).into_iter().map(|a| (a.kind, a.at)).collect::<Vec<_>>();
+    assert!(kinds(&lay(&[])).is_empty());
+    // Char 2 pushed 3 mm right: a wide gap before it, and it runs into char 3.
+    assert_eq!(kinds(&lay(&[None, None, t(3.0, 0.0)])), [(Issue::Gap, 2), (Issue::Collision, 3)]);
+    // The next line's char raised 9 mm runs into the line above.
+    assert_eq!(kinds(&lay(&[None, None, None, None, None, t(0.0, -9.0)])), [(Issue::Collision, 5)]);
+
+    // 收紧: chars 2 and 3 both 3 mm right; the moves bring them back and clear the gap.
+    let wide = [None, None, t(3.0, 0.0), t(3.0, 0.0)];
+    let doc = lay(&wide);
+    let moves = tighten(&doc, &chars, lines_of(&doc, 0..0), em);
+    assert!(moves.len() == 2 && moves.iter().all(|&(k, dx)| (k == 2 || k == 3) && (dx + 3.0).abs() < 1e-4), "{moves:?}");
+    let fixed: Vec<Option<Tuning>> = (0..4).map(|k| t(wide[k].map_or(0.0, |w| w.dx_mm) + moves.iter().find(|m| m.0 == k).map_or(0.0, |m| m.1), 0.0)).collect();
+    assert!(kinds(&lay(&fixed)).is_empty());
+    // Only the selected line: the second line has nothing to tighten.
+    assert!(tighten(&doc, &chars, lines_of(&doc, 5..6), em).is_empty());
+
+    // 基线拉平: char 1 is 1 mm low; full strength lifts it 1 mm, half strength 0.5 mm.
+    let doc = lay(&[None, t(0.0, 1.0)]);
+    let up = align_baseline(&doc, &chars, 0..1, 1.0, em);
+    assert!(up.len() == 1 && up[0].0 == 1 && (up[0].1 + 1.0).abs() < 1e-4, "{up:?}");
+    assert!((align_baseline(&doc, &chars, 0..1, 0.5, em)[0].1 + 0.5).abs() < 1e-4);
+}
+
+#[test]
 fn overflow_lines_come_from_the_ink() {
     // A 4 mm glyph on a 3 mm line overflows (it is never wrapped off an empty line); on a
     // 10 mm line two fit, the third wraps.

@@ -499,15 +499,34 @@ impl EditDoc {
         });
     }
 
+    /// 收紧大空隙 / 基线拉平: add (dx, dy) mm to each listed char's 字符微调, as one undo step.
+    pub fn nudge(&mut self, moves: &[(usize, f32, f32)]) {
+        let mut m: Vec<(usize, f32, f32)> = moves.iter().copied().filter(|x| x.0 < self.len()).collect();
+        m.sort_by_key(|x| x.0);
+        m.dedup_by_key(|x| x.0);
+        let hits: Vec<usize> = m.iter().map(|x| x.0).collect();
+        self.attrs_at(&hits, |i, a| {
+            let (_, dx, dy) = m[m.partition_point(|x| x.0 < i)];
+            let mut t = a.tuning.unwrap_or_default();
+            (t.dx_mm, t.dy_mm) = (t.dx_mm + dx, t.dy_mm + dy);
+            a.tuning = (!t.is_identity()).then_some(t);
+        });
+    }
+
     fn attrs_where(&mut self, pick: impl Fn(usize) -> bool, f: impl Fn(&mut Attrs)) {
         let hits: Vec<usize> = (0..self.len()).filter(|&i| pick(i)).collect();
+        self.attrs_at(&hits, |_, a| f(a));
+    }
+
+    /// `f` on the chars at `hits` (sorted), as one undo step.
+    fn attrs_at(&mut self, hits: &[usize], f: impl Fn(usize, &mut Attrs)) {
         let (Some(&first), Some(&last)) = (hits.first(), hits.last()) else { return };
         self.checkpoint(LastEdit::None);
         let attrs = (first..=last)
             .map(|i| {
                 let mut a = self.doc.attrs(i).clone();
                 if hits.binary_search(&i).is_ok() {
-                    f(&mut a);
+                    f(i, &mut a);
                 }
                 a
             })
@@ -666,6 +685,21 @@ mod tests {
         assert_eq!(d.tunings()[0].map(|t| t.dx_mm), Some(0.2));
         let back = crate::docx::read(&crate::docx::write(d.document(), 1).unwrap()).unwrap();
         assert_eq!(EditDoc::from_document(back.doc).tunings(), d.tunings());
+    }
+
+    #[test]
+    fn nudge_adds_to_tuning_in_one_undo_step() {
+        let mut d = EditDoc::from_text("甲乙丙丁");
+        d.select_range(0..1);
+        d.tune(|t| t.dx_mm = 1.0);
+        d.nudge(&[(3, 0.0, 0.5), (0, -1.0, 0.0), (2, -0.5, 0.0), (9, 1.0, 1.0)]);
+        let t = d.tunings();
+        // Char 0 back to identity: cleared. Out-of-range index ignored.
+        assert_eq!(t[0], None);
+        assert_eq!((t[1], t[2].map(|t| t.dx_mm), t[3].map(|t| t.dy_mm)), (None, Some(-0.5), Some(0.5)));
+        assert!(d.undo());
+        assert_eq!(d.tunings()[0].map(|t| t.dx_mm), Some(1.0));
+        assert_eq!(d.tunings()[2..], [None, None]);
     }
 
     #[test]

@@ -53,6 +53,8 @@ pub(crate) use mini_bar::SIZES;
 
 /// One 字符微调 step (page menu).
 type TuneFn = fn(&mut layout::Tuning);
+/// 基线拉平 pulls each char this share of the way back to the line's middle.
+const BASELINE_STRENGTH: f32 = 0.5;
 pub use format::*;
 
 actions!(
@@ -624,6 +626,32 @@ impl DocView {
     }
     pub fn doc_chars(&self) -> &[char] {
         self.doc.chars()
+    }
+    /// The body text's em (mm): what 排版体检 measures gaps against.
+    fn em_mm(cx: &App) -> f32 {
+        penkaku_core::calibration::mm_per_unit_for_font_size(cx.global::<AppState>().settings.page.font_size) * layout::EM_UNITS
+    }
+    /// 排版体检: wide gaps, overflow and collisions on the laid-out page.
+    pub fn layout_issues(&self, cx: &App) -> Vec<layout::inspect::Anomaly> {
+        layout::inspect::inspect(&self.layout, self.doc.chars(), Self::em_mm(cx))
+    }
+    /// 收紧大空隙 (`tighten`) or 基线拉平 on the selected lines (or every line) through 字符微调,
+    /// one undo step; returns how many chars moved.
+    pub fn fix_layout(&mut self, tighten: bool, cx: &mut Context<Self>) -> usize {
+        use layout::inspect;
+        let em = Self::em_mm(cx);
+        let (doc, chars) = (&self.layout, self.doc.chars());
+        let lines = inspect::lines_of(doc, self.doc.selection());
+        let moves: Vec<(usize, f32, f32)> = if tighten {
+            inspect::tighten(doc, chars, lines, em).into_iter().map(|(k, dx)| (k, dx, 0.0)).collect()
+        } else {
+            inspect::align_baseline(doc, chars, lines, BASELINE_STRENGTH, em).into_iter().map(|(k, dy)| (k, 0.0, dy)).collect()
+        };
+        if !moves.is_empty() {
+            self.doc.nudge(&moves);
+            self.edited(cx);
+        }
+        moves.len()
     }
     pub fn caret_index(&self) -> usize {
         self.doc.caret()
