@@ -196,7 +196,7 @@ fn graft(pen: &mut Pen, sub: Document, first: usize, dx: f32, dy: f32, line_dy: 
         pen.doc.boxes.push(CharBox { page, line: base_line + b.line, x0: b.x0 + dx, x1: b.x1 + dx });
     }
     for l in sub.lines {
-        pen.doc.lines.push(LineInfo { page, top: l.top + line_dy, bottom: l.bottom + line_dy, start: l.start + first, end: l.end + first });
+        pen.doc.lines.push(LineInfo { page, top: l.top + line_dy, bottom: l.bottom + line_dy, start: l.start + first, end: l.end + first, right: f32::INFINITY });
     }
     for c in sub.missing {
         if !pen.doc.missing.contains(&c) {
@@ -239,7 +239,7 @@ fn graft_lines(pen: &mut Pen, sub: &Document, first: usize, range: std::ops::Ran
         }
     }
     for l in sub.lines.iter().take(range.end).skip(range.start) {
-        pen.doc.lines.push(LineInfo { page, top: l.top - lift + line_dy, bottom: l.bottom - lift + line_dy, start: l.start + first, end: l.end + first });
+        pen.doc.lines.push(LineInfo { page, top: l.top - lift + line_dy, bottom: l.bottom - lift + line_dy, start: l.start + first, end: l.end + first, right: f32::INFINITY });
     }
     if range.start == 0 {
         for &c in &sub.missing {
@@ -416,7 +416,7 @@ fn lay_table(pen: &mut Pen, f: &Flow, font: &(impl Glyphs + ?Sized), i: usize, e
             if r == 0 && a == 0 {
                 // The anchor: a caret stop at the table's top-left corner, on a line of its own.
                 marker(pen, x0, pen.doc.lines.len());
-                pen.doc.lines.push(LineInfo { page: pen.page_ix, top: oy - top, bottom: oy - top, start: i, end: i });
+                pen.doc.lines.push(LineInfo { page: pen.page_ix, top: oy - top, bottom: oy - top, start: i, end: i, right: f32::INFINITY });
             }
             for c in row.clone() {
                 let rr = cells[c].clone();

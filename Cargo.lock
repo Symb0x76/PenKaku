@@ -5239,6 +5239,7 @@ dependencies = [
  "penkaku-device",
  "penkaku-import",
  "penkaku-output",
+ "serde_json",
 ]
 
 [[package]]

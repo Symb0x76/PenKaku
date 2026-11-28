@@ -822,3 +822,18 @@ fn english_only_deformation_leaves_chinese_alone() {
     assert_eq!(of(&plain, 2), of(&de, 2));
     assert_ne!(of(&plain, 1), of(&de, 1));
 }
+
+#[test]
+fn overflow_lines_come_from_the_ink() {
+    // A 4 mm glyph on a 3 mm line overflows (it is never wrapped off an empty line); on a
+    // 10 mm line two fit, the third wraps.
+    let wide = Glyph { advance: 4.0, strokes: vec![vec![(0.0, 0.0), (4.0, 0.0)]] };
+    let doc = layout("...", &font_with('.', wide.clone()), &page(3.0));
+    assert_eq!(inspect::overflow_lines(&doc, 3), vec![0, 1, 2]);
+    let doc = layout("...", &font_with('.', wide), &page(10.0));
+    assert_eq!(doc.lines.len(), 2);
+    assert!(inspect::overflow_lines(&doc, 3).is_empty());
+    // No page: unbounded lines never overflow.
+    let doc = layout("....", &dot_font(), &PageParams::default());
+    assert!(doc.lines.iter().all(|l| l.right.is_infinite()) && inspect::overflow_lines(&doc, 4).is_empty());
+}

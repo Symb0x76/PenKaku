@@ -126,6 +126,13 @@ enum Cmd {
         port: Option<String>,
         #[arg(long)]
         ip: Option<String>,
+        /// Print a JSON report on stdout: pages, missing_chars, overflow_lines, out_path. Needs
+        /// --out, --dry-run or a device (the G-code can't share stdout)
+        #[arg(long)]
+        json: bool,
+        /// Lay out and check only: no G-code file, nothing streamed
+        #[arg(long, conflicts_with_all = ["out", "port", "ip"])]
+        dry_run: bool,
     },
     /// Lay text out on a ruled A4 page and write it as PDF (导出 PDF; offline, glyph JSON font)
     Pdf {
@@ -146,6 +153,9 @@ enum Cmd {
         /// Leave the ruling out (打印文字 only)
         #[arg(long)]
         no_background: bool,
+        /// Print a JSON report on stdout: pages, missing_chars, overflow_lines, out_path
+        #[arg(long)]
+        json: bool,
     },
     /// Fit mm-per-glyph-unit from G-code captured from ChiXie3 (see docs/protocol.md)
     Calibrate {
@@ -230,9 +240,43 @@ fn capture_diff(a: &[Vec<(f32, f32)>], b: &[Vec<(f32, f32)>]) -> CaptureDiff {
     d
 }
 
+/// `write --json` / `pdf --json`: what a script or agent needs to decide whether to change the
+/// font, the size or the text. Lines are 0-based; pages 1-based.
+fn report(doc: &layout::Document, text: &str, out: Option<&std::path::Path>) -> serde_json::Value {
+    let chars: Vec<char> = text.chars().collect();
+    let overflow: Vec<serde_json::Value> = layout::inspect::overflow_lines(doc, chars.len())
+        .into_iter()
+        .map(|i| {
+            let l = doc.lines[i];
+            let line: String = chars[l.start.min(chars.len())..l.end.min(chars.len())].iter().collect();
+            serde_json::json!({ "line": i, "page": l.page + 1, "text": line })
+        })
+        .collect();
+    serde_json::json!({
+        "pages": doc.pages.len(),
+        "missing_chars": doc.missing.iter().map(char::to_string).collect::<Vec<_>>(),
+        "overflow_lines": overflow,
+        "out_path": out.map(|p| p.display().to_string()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_report_lists_missing_chars_and_overflow() {
+        let font = penkaku_core::font::Font::from_json(include_bytes!("../../penkaku-core/tests/fixtures/font_fixture.json")).unwrap();
+        let p = layout::PageParams { page: Some(layout::PageBox { width: 3.0, height: 100.0 }), ..Default::default() };
+        let doc = layout::layout("你\u{2603}", &font, &p);
+        let r = report(&doc, "你\u{2603}", Some(std::path::Path::new("a.pdf")));
+        assert_eq!(r["pages"], 1);
+        assert_eq!(r["missing_chars"], serde_json::json!(["\u{2603}"]));
+        assert_eq!(r["overflow_lines"][0]["text"], "你\u{2603}");
+        assert_eq!(r["out_path"], "a.pdf");
+        let r = report(&layout::layout("你", &font, &layout::PageParams::default()), "你", None);
+        assert_eq!((r["overflow_lines"].as_array().unwrap().len(), &r["out_path"]), (0, &serde_json::Value::Null));
+    }
 
     #[test]
     fn capture_diff_ignores_offsets_but_not_shape() {
@@ -481,7 +525,7 @@ fn main() -> penkaku_core::Result<()> {
                 println!("{}\t{:.3}\t{:.3}\t{adv}\t{:.4}", p.ch, p.offset.0, p.offset.1, p.rms);
             }
         }
-        Cmd::Pdf { text, font_json, out, font_size, rows, no_ink, no_background } => {
+        Cmd::Pdf { text, font_json, out, font_size, rows, no_ink, no_background, json } => {
             let font = penkaku_core::font::Font::from_json(&std::fs::read(&font_json)?)?.with_composed_symbols();
             let mut settings = penkaku_core::config::Settings::default();
             settings.page.font_size = font_size;
@@ -490,10 +534,16 @@ fn main() -> penkaku_core::Result<()> {
             let o = gcode::pdf::PdfOptions { ink: !no_ink, background: !no_background, paper: settings.page.paper, margins: settings.page.margins, ..Default::default() };
             std::fs::write(&out, gcode::pdf::pdf(&doc, &o))?;
             eprintln!("{} page(s), {} strokes → {}", doc.pages.len(), doc.stroke_count(), out.display());
+            if json {
+                println!("{}", report(&doc, &text, Some(&out)));
+            }
         }
         Cmd::Write {
-            text, font_id, blob_file, key_file, font_json, out, scale, font_size, style, seed, no_jitter, deform, origin_x, origin_y, zero, port, ip,
+            text, font_id, blob_file, key_file, font_json, out, scale, font_size, style, seed, no_jitter, deform, origin_x, origin_y, zero, port, ip, json, dry_run,
         } => {
+            if json && !dry_run && out.is_none() && port.is_none() && ip.is_none() {
+                return Err(penkaku_core::Error::Config("--json needs --out, --dry-run or a device: the G-code would share stdout".into()));
+            }
             let font = match (blob_file, key_file) {
                 _ if font_json.is_some() => {
                     penkaku_core::font::Font::from_json(&std::fs::read(font_json.as_deref().unwrap())?)?.with_composed_symbols()
@@ -523,6 +573,14 @@ fn main() -> penkaku_core::Result<()> {
             if !doc.missing.is_empty() {
                 eprintln!("missing glyphs (skipped): {}", doc.missing.iter().collect::<String>());
             }
+            if dry_run {
+                if json {
+                    println!("{}", report(&doc, &text, None));
+                } else {
+                    eprintln!("{} page(s), {} strokes", doc.pages.len(), doc.stroke_count());
+                }
+                return Ok(());
+            }
             let mut gcode = gcode::emit_document(&doc, &penkaku_core::profile::DeviceProfile::default());
             if zero {
                 // Zero work coords at the pen's current position so absolute moves are local.
@@ -537,6 +595,9 @@ fn main() -> penkaku_core::Result<()> {
                 let mut link = open(port, ip, transport::DEFAULT_BAUD)?;
                 grbl::stream(link.as_mut(), gcode.lines(), &grbl::Control::default(), print_progress)?;
                 eprintln!("\ndone");
+            }
+            if json {
+                println!("{}", report(&doc, &text, out.as_deref()));
             }
         }
     }

@@ -359,6 +359,7 @@ impl Pen<'_> {
             bottom: oy - (self.row_top + self.row_h),
             start: self.line_start,
             end,
+            right: self.p.origin.0 + self.line_x + self.line_w,
         });
     }
 

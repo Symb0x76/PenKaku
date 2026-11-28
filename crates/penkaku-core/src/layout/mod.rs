@@ -18,6 +18,7 @@ use crate::handwriting::{HandwritingStyle, Jitter, SALT_DEFORM, is_cjk, rng_for}
 mod block;
 #[cfg(test)]
 mod block_tests;
+pub mod inspect;
 pub mod kinsoku;
 mod pen;
 mod segment;
@@ -435,6 +436,8 @@ pub struct LineInfo {
     /// Caret index at the line's end: the index of its '\n', or of the first char of the next
     /// (wrapped) line, or the text length on the last line.
     pub end: usize,
+    /// Right edge of the line's writing space (machine mm); infinite when unbounded.
+    pub right: f32,
 }
 
 /// A caret position on the page (machine mm).

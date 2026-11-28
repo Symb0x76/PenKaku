@@ -18,3 +18,4 @@ penkaku-device.workspace = true
 penkaku-import.workspace = true
 clap.workspace = true
 env_logger.workspace = true
+serde_json.workspace = true
