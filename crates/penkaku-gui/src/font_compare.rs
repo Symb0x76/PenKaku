@@ -17,8 +17,10 @@ use crate::state::AppState;
 
 /// Fonts compared at once.
 pub const MAX_PICKS: usize = 4;
-/// Default text when the caller has none.
+/// Default text when the document has none.
 const SAMPLE: &str = "永和九年，岁在癸丑，暮春之初";
+/// Longest sample taken from the document, in characters.
+const MAX_SAMPLE: usize = 24;
 /// Row height (one em) and the widest a row may be, px.
 const ROW_H: f32 = 44.0;
 const ROW_W: f32 = 520.0;
@@ -33,6 +35,16 @@ pub struct CompareView {
     _subs: Vec<Subscription>,
 }
 
+/// The document's first line with text (trimmed, at most `MAX_SAMPLE` chars; object markers
+/// and other control characters dropped), or `None` when it has none.
+pub fn first_line(chars: &[char]) -> Option<String> {
+    chars
+        .split(|&c| c == '\n')
+        .map(|l| l.iter().copied().filter(|&c| !c.is_control() && c != penkaku_core::layout::OBJECT).collect::<String>())
+        .map(|l| l.trim().chars().take(MAX_SAMPLE).collect::<String>())
+        .find(|l| !l.is_empty())
+}
+
 /// The first `MAX_PICKS` of `want` that are in `fonts`, in `want`'s order, no repeats.
 pub fn initial_picks(fonts: &[(i64, String)], want: &[i64]) -> Vec<i64> {
     let mut out: Vec<i64> = Vec::new();
@@ -45,8 +57,9 @@ pub fn initial_picks(fonts: &[(i64, String)], want: &[i64]) -> Vec<i64> {
 }
 
 impl CompareView {
-    fn new(fonts: Vec<(i64, String)>, want: &[i64], window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let text = cx.new(|cx| InputState::new(window, cx).default_value(SAMPLE).placeholder("对比用的文字"));
+    fn new(fonts: Vec<(i64, String)>, want: &[i64], sample: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let sample = sample.unwrap_or_else(|| SAMPLE.to_string());
+        let text = cx.new(|cx| InputState::new(window, cx).default_value(sample).placeholder("对比用的文字"));
         let subs = vec![cx.subscribe_in(&text, window, |_t, _s, ev: &InputEvent, _w, cx| {
             if matches!(ev, InputEvent::Change) {
                 cx.notify();
@@ -155,15 +168,26 @@ impl Render for CompareView {
     }
 }
 
-/// 字体库 › 对比字体…: `fonts` are the pickable (id, name); `want` the ones ticked at first.
-pub fn open(fonts: Vec<(i64, String)>, want: Vec<i64>, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| CompareView::new(fonts, &want, window, cx));
+/// 字体库 › 对比字体…: `fonts` are the pickable (id, name); `want` the ones ticked at first;
+/// `sample` the text to write (the document's first line), or a built-in one.
+pub fn open(fonts: Vec<(i64, String)>, want: Vec<i64>, sample: Option<String>, window: &mut Window, cx: &mut App) {
+    let view = cx.new(|cx| CompareView::new(fonts, &want, sample, window, cx));
     window.open_dialog(cx, move |d, _w, _cx| d.title("字体对比").w(px(760.)).child(view.clone()));
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_PICKS, initial_picks};
+    use super::{MAX_PICKS, MAX_SAMPLE, first_line, initial_picks};
+
+    #[test]
+    fn first_line_skips_blank_lines_and_markers() {
+        let c = |s: &str| s.chars().collect::<Vec<char>>();
+        assert_eq!(first_line(&c("\n  \n\u{FFFC}\n  春眠不觉晓  \n处处闻啼鸟")).as_deref(), Some("春眠不觉晓"));
+        assert_eq!(first_line(&c("\t标题\u{1F}一")).as_deref(), Some("标题一"));
+        assert_eq!(first_line(&c(&"字".repeat(40))).map(|s| s.chars().count()), Some(MAX_SAMPLE));
+        assert_eq!(first_line(&c(" \n\n")), None);
+        assert_eq!(first_line(&[]), None);
+    }
 
     #[test]
     fn initial_picks_keep_order_skip_unknown_and_cap() {

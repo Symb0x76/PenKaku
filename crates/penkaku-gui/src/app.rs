@@ -261,6 +261,10 @@ impl PenKakuApp {
                 FontsEvent::Export(id) => this.export_font(*id, window, cx),
                 FontsEvent::Import => this.import_fonts(window, cx),
                 FontsEvent::OpenFolder => this.open_font_folder(window, cx),
+                FontsEvent::Compare(fonts, want) => {
+                    let sample = crate::font_compare::first_line(this.doc.read(cx).doc_chars());
+                    crate::font_compare::open(fonts.clone(), want.clone(), sample, window, cx);
+                }
                 FontsEvent::Login => {
                     window.close_dialog(cx);
                     this.open_backstage(Stage::Account, window, cx);

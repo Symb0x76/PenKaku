@@ -59,6 +59,8 @@ pub enum FontsEvent {
     Import,
     /// Open the default library folder.
     OpenFolder,
+    /// 对比字体…: the pickable (id, name) and the fonts ticked at first.
+    Compare(Vec<(i64, String)>, Vec<i64>),
 }
 
 pub struct FontsView {
@@ -614,7 +616,8 @@ impl FontsView {
 }
 
 impl FontsView {
-    /// 对比字体…: the 筛选's fonts, the active one and the rest of this page ticked first.
+    /// 对比字体…: the 筛选's fonts, the active one and the rest of this page ticked first; the
+    /// app opens the dialog with the document's first line.
     fn compare_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let fonts: Vec<(i64, String)> = self.local_fonts(cx).into_iter().map(|l| (l.id, l.name)).collect();
         let active = cx.global::<AppState>().active_font.as_ref().map(|f| f.id);
@@ -627,7 +630,7 @@ impl FontsView {
             .label("对比字体…")
             .tooltip("同一段文字并排看几个字体")
             .disabled(fonts.len() < 2)
-            .on_click(move |_: &ClickEvent, w, cx| crate::font_compare::open(fonts.clone(), want.clone(), w, cx))
+            .on_click(cx.listener(move |_t, _: &ClickEvent, _w, cx| cx.emit(FontsEvent::Compare(fonts.clone(), want.clone()))))
             .into_any_element()
     }
 }
